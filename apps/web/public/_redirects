@@ -1,0 +1,2 @@
+# Cloudflare Pages SPA fallback: route everything to index.html except real assets.
+/*    /index.html   200

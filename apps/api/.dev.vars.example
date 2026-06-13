@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local `wrangler dev`. Never commit the real file.
+BETTER_AUTH_SECRET="generate-with: openssl rand -base64 32"
+GOOGLE_CLIENT_ID="your-google-oauth-client-id"
+GOOGLE_CLIENT_SECRET="your-google-oauth-client-secret"
+R2_ACCESS_KEY_ID="your-r2-s3-access-key-id"
+R2_SECRET_ACCESS_KEY="your-r2-s3-secret-access-key"
