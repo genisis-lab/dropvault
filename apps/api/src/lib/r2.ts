@@ -6,9 +6,10 @@ import type { Bindings } from "../types"
 // R2 exposes an S3-compatible endpoint. We use presigned URLs so the browser
 // uploads/downloads directly to R2 and the Worker never proxies file bytes.
 function s3(env: Bindings) {
+  const endpoint = "https://" + env.R2_ACCOUNT_ID + ".r2.cloudflarestorage.com"
   return new S3Client({
     region: "auto",
-    endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    endpoint,
     credentials: {
       accessKeyId: env.R2_ACCESS_KEY_ID,
       secretAccessKey: env.R2_SECRET_ACCESS_KEY,
