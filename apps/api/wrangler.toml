@@ -1,0 +1,28 @@
+name = "dropvault-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Files live in R2
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "dropvault-files"
+
+# Users, sessions, and file metadata live in D1
+[[d1_databases]]
+binding = "DB"
+database_name = "dropvault"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# Hourly expiry sweep
+[triggers]
+crons = ["0 * * * *"]
+
+# Non-secret vars. Secrets go via `wrangler secret put` (see README).
+[vars]
+PUBLIC_APP_URL = "https://dropvault.pages.dev"
+R2_ACCOUNT_ID = "REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
+R2_BUCKET_NAME = "dropvault-files"
+DEFAULT_EXPIRY_DAYS = "2"
+MAX_EXPIRY_DAYS = "30"

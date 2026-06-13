@@ -1,0 +1,16 @@
+{
+  "name": "dropvault",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dropvault — a friends-only mini Google Drive with auto-expiring files, built entirely on Cloudflare.",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @dropvault/web dev",
+    "dev:api": "pnpm --filter @dropvault/api dev",
+    "build": "pnpm --filter @dropvault/web build",
+    "deploy:api": "pnpm --filter @dropvault/api deploy",
+    "db:generate": "pnpm --filter @dropvault/api db:generate",
+    "db:migrate:local": "pnpm --filter @dropvault/api db:migrate:local",
+    "db:migrate:remote": "pnpm --filter @dropvault/api db:migrate:remote"
+  }
+}
