@@ -63,4 +63,86 @@ export default function Dashboard({ userName }: { userName?: string }) {
         </div>
       </motion.header>
 
-      <main
+      <main className="mx-auto max-w-5xl px-4 pb-20 pt-8">
+        <section>
+          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
+            Your <span className="text-gradient">vault</span>
+          </h1>
+          <p className="mt-1 text-white/50">Drop files, share a link, and let them vanish on schedule.</p>
+
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            <Stat icon={<FilesIcon size={16} />} label="Files" value={String(files.length)} />
+            <Stat icon={<HardDrive size={16} />} label="Stored" value={formatBytes(totalBytes)} />
+            <Stat icon={<Clock3 size={16} />} label="Default" value={`${expiryDays}d`} />
+          </div>
+        </section>
+
+        <section className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-white/40">Upload</h2>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-white/40">Expires in</span>
+              <select
+                value={expiryDays}
+                onChange={(e) => setExpiryDays(Number(e.target.value))}
+                className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 outline-none transition focus:border-drift-400"
+              >
+                {EXPIRY_OPTIONS.map((d) => (
+                  <option key={d} value={d} className="bg-ink">
+                    {d} day{d === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <UploadZone expiryDays={expiryDays} onUploaded={invalidate} />
+        </section>
+
+        <section className="mt-10">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/40">
+            Your files {files.length > 0 && <span className="text-white/25">({files.length})</span>}
+          </h2>
+          {filesQuery.isLoading ? (
+            <p className="text-white/40">Loading…</p>
+          ) : files.length === 0 ? (
+            <div className="glass grid place-items-center rounded-2xl py-16 text-center text-white/40">
+              <p>No files yet — drop something above to get started.</p>
+            </div>
+          ) : (
+            <motion.div
+              variants={gridStagger}
+              initial="hidden"
+              animate="visible"
+              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            >
+              <AnimatePresence mode="popLayout">
+                {files.map((f) => (
+                  <FileCard
+                    key={f.id}
+                    file={f}
+                    onExtend={(id, days) => extendMut.mutate({ id, days })}
+                    onDelete={(id) => deleteMut.mutate(id)}
+                    onShare={(id) => shareMut.mutate(id)}
+                    onRevoke={(id) => revokeMut.mutate(id)}
+                  />
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </section>
+      </main>
+    </div>
+  )
+}
+
+function Stat({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="glass flex items-center gap-3 rounded-2xl px-4 py-3">
+      <div className="grid h-9 w-9 place-items-center rounded-xl bg-drift-500/15 text-drift-300">{icon}</div>
+      <div className="min-w-0">
+        <p className="truncate text-lg font-bold leading-tight">{value}</p>
+        <p className="text-xs text-white/40">{label}</p>
+      </div>
+    </div>
+  )
+}
