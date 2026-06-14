@@ -29,10 +29,6 @@ Cloudflare dashboard → **R2** → **Create bucket** → name it **`dropvault-f
 Dashboard → **Workers & Pages** → **D1 SQL Database** → **Create** → name it **`dropvault`**.
 Copy the **Database ID** and paste it into `database_id` in `apps/api/wrangler.toml`.
 
-### R2 S3 API token (for presigned uploads/downloads)
-Dashboard → **R2** → **Manage R2 API Tokens** (account level, not inside a bucket) → **Create API token** (Object Read & Write, scoped to `dropvault-files`).
-Save the **Access Key ID** and **Secret Access Key** — these become the `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` Worker secrets in step 5.
-
 ---
 
 ## 2. Confirm `apps/api/wrangler.toml`
@@ -46,8 +42,8 @@ database_id = "b72b57d4-bbb9-4810-a006-251d9aed1955"   # your D1 ID
 [vars]
 API_URL = "https://dropvault-api.neil27.workers.dev"   # the Worker's own URL (better-auth baseURL)
 PUBLIC_APP_URL = "https://drop-vault.pages.dev"        # the Pages URL (CORS + trustedOrigins)
-R2_ACCOUNT_ID = "3ece4993f323ece88322161931be6e72"
-R2_BUCKET_NAME = "dropvault-files"
+DEFAULT_EXPIRY_DAYS = "2"
+MAX_EXPIRY_DAYS = "30"
 ```
 
 > `API_URL` and `PUBLIC_APP_URL` must be the **exact** live URLs. If either changes (e.g. you add a custom domain), update them here and redeploy.
@@ -96,8 +92,6 @@ Dashboard → **Workers & Pages** → **dropvault-api** → **Settings** → **V
 | `BETTER_AUTH_SECRET` | any long random string (e.g. `openssl rand -base64 32`) |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
-| `R2_ACCESS_KEY_ID` | R2 S3 access key (step 1) |
-| `R2_SECRET_ACCESS_KEY` | R2 S3 secret key (step 1) |
 
 After adding secrets, redeploy once (push any commit, or **Deployments → Retry**).
 
@@ -143,7 +137,7 @@ Because `drop-vault.pages.dev` and `dropvault-api.neil27.workers.dev` are differ
 
 ## Troubleshooting
 
-- **Upload PUT returns 403 `SignatureDoesNotMatch`** → fixed in code (R2 checksums disabled); make sure the Worker redeployed.
+- **Upload returns 401/403** → confirm the frontend is calling the Worker URL and sending credentials; uploads use the Worker R2 binding, not R2 S3 presigned URLs.
 - **Login succeeds but you're logged right back out** → cross-site cookie blocked by the browser; see the note above.
 - **API calls return HTML / JSON parse errors** → the frontend is hitting the Pages origin instead of the Worker; confirm the prod build picked up the Worker URL (or set `VITE_API_URL`).
 - **`command not found: wrangler` locally** → you don't need it; Cloudflare handles deploys. Locally use `pnpm exec wrangler ...` from `apps/api`.

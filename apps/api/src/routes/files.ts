@@ -1,7 +1,6 @@
 import { Hono } from "hono"
 import { and, desc, eq, gt } from "drizzle-orm"
 import { getDb, schema } from "../db"
-import { presignPut, presignGet } from "../lib/r2"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
@@ -10,7 +9,7 @@ const files = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 files.use("*", requireAuth)
 
-// 1) Ask for a presigned PUT URL. Creates a pending row.
+// 1) Ask for an upload URL. Creates a pending row.
 files.post("/presign", async (c) => {
   const userId = c.get("userId")
   const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number }>()
@@ -34,39 +33,66 @@ files.post("/presign", async (c) => {
     expiresAt,
   }).run()
 
-  const uploadUrl = await presignPut(c.env, r2Key, body.contentType)
+  const uploadUrl = new URL(`/api/files/${id}/upload`, c.req.url).toString()
   return c.json({ id, uploadUrl, expiresAt })
 })
 
-// 2) Confirm upload finished -> mark ready.
+// 2) Upload the bytes to R2 through the Worker binding.
+files.put("/:id/upload", async (c) => {
+  const userId = c.get("userId")
+  const id = c.req.param("id")
+  const db = getDb(c.env.DB)
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
+  if (!row) return c.json({ error: "not found" }, 404)
+  if (row.status !== "pending") return c.json({ error: "upload already completed" }, 409)
+  if (isExpired(row.expiresAt)) {
+    await db.delete(schema.files).where(eq(schema.files.id, id)).run()
+    return c.json({ error: "expired" }, 410)
+  }
+
+  const body = c.req.raw.body
+  if (!body) return c.json({ error: "empty upload" }, 400)
+
+  const options = row.contentType ? { httpMetadata: { contentType: row.contentType } } : undefined
+  await c.env.FILES.put(row.r2Key, body, options)
+  return c.json({ ok: true })
+})
+
+// 3) Confirm upload finished -> mark ready.
 files.post("/:id/complete", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
+  const object = await c.env.FILES.head(row.r2Key)
+  if (!object) return c.json({ error: "upload missing" }, 409)
+  if (row.sizeBytes > 0 && object.size !== row.sizeBytes) {
+    return c.json({ error: "upload size mismatch" }, 409)
+  }
   await db.update(schema.files).set({ status: "ready" }).where(eq(schema.files.id, id)).run()
   return c.json({ ok: true })
 })
 
-// 3) List the current user's live (non-expired) files.
+// 4) List the current user's live (non-expired) files.
 files.get("/", async (c) => {
   const userId = c.get("userId")
   const db = getDb(c.env.DB)
   const rows = await db.select().from(schema.files)
-    .where(and(eq(schema.files.ownerId, userId), gt(schema.files.expiresAt, nowSeconds())))
+    .where(and(eq(schema.files.ownerId, userId), eq(schema.files.status, "ready"), gt(schema.files.expiresAt, nowSeconds())))
     .orderBy(desc(schema.files.createdAt))
     .all()
   return c.json({ files: rows })
 })
 
-// 4) Download: enforce on-access expiry, then redirect to a presigned GET URL.
+// 5) Download: enforce on-access expiry, then stream from R2.
 files.get("/:id/download", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
+  if (row.status !== "ready") return c.json({ error: "not found" }, 404)
 
   if (isExpired(row.expiresAt)) {
     // Never serve an expired file. Clean it up opportunistically.
@@ -75,11 +101,17 @@ files.get("/:id/download", async (c) => {
     return c.json({ error: "expired" }, 410)
   }
 
-  const url = await presignGet(c.env, row.r2Key, row.filename)
-  return c.redirect(url, 302)
+  const object = await c.env.FILES.get(row.r2Key)
+  if (!object) return c.json({ error: "not found" }, 404)
+
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set("Content-Length", String(object.size))
+  headers.set("Content-Disposition", `attachment; filename="${row.filename.replace(/["\\]/g, "_")}"`)
+  return new Response(object.body, { headers })
 })
 
-// 5) Extend expiry (clamped so total lifetime <= MAX_EXPIRY_DAYS).
+// 6) Extend expiry (clamped so total lifetime <= MAX_EXPIRY_DAYS).
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
@@ -94,7 +126,7 @@ files.patch("/:id", async (c) => {
   return c.json({ ok: true, expiresAt })
 })
 
-// 6) Delete now.
+// 7) Delete now.
 files.delete("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")

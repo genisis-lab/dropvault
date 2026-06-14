@@ -12,7 +12,7 @@ app.use("*", async (c, next) => {
     origin: c.env.PUBLIC_APP_URL,
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
   return handler(c, next)
 })
