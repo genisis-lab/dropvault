@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { ChevronRight, FolderPlus, HardDrive } from "lucide-react"
+import { ChevronRight, Download, FolderInput, FolderPlus, HardDrive, Trash2, X } from "lucide-react"
 import {
   listFiles,
   listFolders,
@@ -15,6 +15,7 @@ import {
   deleteFolder,
   shareFolder,
   revokeFolderShare,
+  downloadUrl,
 } from "../lib/api"
 import { signOut } from "../lib/auth-client"
 import Sidebar, { type Filter } from "./Sidebar"
@@ -29,8 +30,23 @@ const DAY = 86400
 
 type DialogState = { mode: "create" } | { mode: "rename"; folderId: string; current: string } | null
 
+const barInitial = { opacity: 0, y: 24, x: "-50%" }
+const barAnimate = { opacity: 1, y: 0, x: "-50%" }
+const barExit = { opacity: 0, y: 24, x: "-50%" }
+const popInitial = { opacity: 0, scale: 0.95, y: 8 }
+const popAnimate = { opacity: 1, scale: 1, y: 0 }
+
 function titleFor(f: Filter): string {
   return f === "shared" ? "Shared" : f === "expiring" ? "Expiring soon" : "My Drive"
+}
+
+function triggerDownload(id: string) {
+  const a = document.createElement("a")
+  a.href = downloadUrl(id)
+  a.style.display = "none"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 export default function Dashboard({ userName, userEmail }: { userName?: string; userEmail?: string }) {
@@ -41,6 +57,8 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [filter, setFilterState] = useState<Filter>("all")
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [moveBarOpen, setMoveBarOpen] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: listFiles })
@@ -98,9 +116,37 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null
   const atRoot = currentFolderId === null
 
+  function clearSelection() {
+    setSelected(new Set())
+    setMoveBarOpen(false)
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function getDragIds(id: string): string[] {
+    return selected.has(id) && selected.size > 0 ? Array.from(selected) : [id]
+  }
+
+  function moveIds(ids: string[], folderId: string | null) {
+    ids.forEach((id) => moveMut.mutate({ id, folderId }))
+  }
+
   function setFilter(f: Filter) {
     setCurrentFolderId(null)
     setFilterState(f)
+    clearSelection()
+  }
+
+  function openFolder(id: string) {
+    setCurrentFolderId(id)
+    clearSelection()
   }
 
   const q = search.trim().toLowerCase()
@@ -131,8 +177,14 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   function onDialogConfirm(name: string) {
     if (!dialog) return
-    if (dialog.mode === "create") createFolderMut.mutate(name)
-    else renameFolderMut.mutate({ id: dialog.folderId, name })
+    if (dialog.mode === "create") {
+      createFolderMut.mutate(name)
+      // Make sure the new folder is visible: jump back to the My Drive root.
+      setCurrentFolderId(null)
+      setFilterState("all")
+    } else {
+      renameFolderMut.mutate({ id: dialog.folderId, name })
+    }
     setDialog(null)
   }
 
@@ -142,6 +194,21 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
       ? `Delete \u201c${f.name}\u201d? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).`
       : "Delete this folder?"
     if (window.confirm(msg)) deleteFolderMut.mutate(id)
+  }
+
+  const selCount = selected.size
+
+  function bulkMove(folderId: string | null) {
+    moveIds(Array.from(selected), folderId)
+    clearSelection()
+  }
+  function bulkDownload() {
+    Array.from(selected).forEach((id, i) => setTimeout(() => triggerDownload(id), i * 400))
+  }
+  function bulkDelete() {
+    if (!window.confirm(`Delete ${selCount} file${selCount === 1 ? "" : "s"}? This cannot be undone.`)) return
+    Array.from(selected).forEach((id) => deleteMut.mutate(id))
+    clearSelection()
   }
 
   return (
@@ -172,7 +239,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
             <div className="min-w-0">
               {currentFolder && (
                 <button
-                  onClick={() => setCurrentFolderId(null)}
+                  onClick={() => openFolder(currentFolder.id) /* no-op guard */ || setCurrentFolderId(null)}
                   className="mb-1 flex items-center gap-1 text-sm text-slate-500 hover:text-drift-600"
                 >
                   <span>My Drive</span>
@@ -223,11 +290,12 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       key={fd.id}
                       folder={fd}
                       view="grid"
-                      onOpen={(id) => setCurrentFolderId(id)}
+                      onOpen={openFolder}
                       onShare={handleShareFolder}
                       onRevoke={(id) => revokeFolderMut.mutate(id)}
                       onRename={(id) => setDialog({ mode: "rename", folderId: id, current: fd.name })}
                       onDelete={deleteFolderConfirm}
+                      onDropFiles={(folderId, ids) => moveIds(ids, folderId)}
                     />
                   ))}
                 </AnimatePresence>
@@ -240,7 +308,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</h2>
             )}
             {filesQuery.isLoading ? (
-              <p className="text-slate-400">Loading…</p>
+              <p className="text-slate-400">Loading\u2026</p>
             ) : visible.length === 0 ? (
               <EmptyState filter={filter} hasFiles={files.length > 0} search={search} inFolder={!!currentFolder} />
             ) : view === "grid" ? (
@@ -257,6 +325,10 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
                       onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
+                      selected={selected.has(f.id)}
+                      onToggleSelect={toggleSelect}
+                      anySelected={selCount > 0}
+                      getDragIds={getDragIds}
                     />
                   ))}
                 </AnimatePresence>
@@ -275,6 +347,10 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
                       onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
+                      selected={selected.has(f.id)}
+                      onToggleSelect={toggleSelect}
+                      anySelected={selCount > 0}
+                      getDragIds={getDragIds}
                     />
                   ))}
                 </AnimatePresence>
@@ -283,6 +359,80 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
           </div>
         </main>
       </div>
+
+      <AnimatePresence>
+        {selCount > 0 && (
+          <motion.div
+            initial={barInitial}
+            animate={barAnimate}
+            exit={barExit}
+            className="fixed bottom-5 left-1/2 z-50 flex items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-2 drive-shadow-lg"
+          >
+            <span className="px-2 text-sm font-semibold text-slate-700">{selCount} selected</span>
+            <div className="mx-1 h-6 w-px bg-slate-200" />
+            <div className="relative">
+              <button
+                onClick={() => setMoveBarOpen((v) => !v)}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                <FolderInput size={16} /> Move
+              </button>
+              <AnimatePresence>
+                {moveBarOpen && (
+                  <>
+                    <button className="fixed inset-0 z-40 cursor-default" aria-label="Close" onClick={() => setMoveBarOpen(false)} />
+                    <motion.div
+                      initial={popInitial}
+                      animate={popAnimate}
+                      exit={popInitial}
+                      className="absolute bottom-12 left-0 z-50 max-h-64 w-52 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
+                    >
+                      <button
+                        onClick={() => bulkMove(null)}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        Remove from folder
+                      </button>
+                      <div className="my-1 h-px bg-slate-100" />
+                      {folders.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">No folders yet.</p>}
+                      {folders.map((fd) => (
+                        <button
+                          key={fd.id}
+                          onClick={() => bulkMove(fd.id)}
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+                        >
+                          <FolderInput size={15} className="shrink-0 text-amber-500" />
+                          <span className="truncate">{fd.name}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+            <button
+              onClick={bulkDownload}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            >
+              <Download size={16} /> Download
+            </button>
+            <button
+              onClick={bulkDelete}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={16} /> Delete
+            </button>
+            <div className="mx-1 h-6 w-px bg-slate-200" />
+            <button
+              onClick={clearSelection}
+              aria-label="Clear selection"
+              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <NameDialog
         open={dialog !== null}
@@ -310,7 +460,7 @@ function EmptyState({
   const msg = search.trim()
     ? "No files match your search."
     : inFolder
-      ? "This folder is empty \u2014 drop files above to add some."
+      ? "This folder is empty \u2014 drop files above, or drag files onto it."
       : filter === "shared"
         ? "No shared files yet \u2014 use a file or folder's menu to create a link."
         : filter === "expiring"
