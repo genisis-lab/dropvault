@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock,
   Download,
+  Eye,
   FileText,
   Film,
   FolderInput,
@@ -16,11 +17,12 @@ import {
   MoreVertical,
   Music,
   Pencil,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react"
 import type { DriftFile } from "../lib/api"
-import { downloadUrl, shareUrl } from "../lib/api"
+import { downloadUrl, inlineUrl, shareUrl } from "../lib/api"
 import { formatBytes, timeLeft } from "../lib/format"
 
 export const DRAG_MIME = "application/x-dropvault"
@@ -58,6 +60,8 @@ type Props = {
   onRevoke: (id: string) => void
   onMove?: (id: string, folderId: string | null) => void
   onRename?: (id: string) => void
+  onOpenShare?: (id: string) => void
+  onPreview?: (file: DriftFile) => void
   selected?: boolean
   onToggleSelect?: (id: string) => void
   anySelected?: boolean
@@ -80,6 +84,8 @@ export default function FileCard({
   onRevoke,
   onMove,
   onRename,
+  onOpenShare,
+  onPreview,
   selected = false,
   onToggleSelect,
   anySelected = false,
@@ -87,6 +93,8 @@ export default function FileCard({
 }: Props) {
   const { Icon, tint } = kindOf(file.contentType)
   const tone = TINT[tint]
+  const isImage = (file.contentType || "").startsWith("image/")
+  const canPreview = isImage || (file.contentType || "").includes("pdf")
   const [left, setLeft] = useState(() => timeLeft(file.expiresAt))
   const [menuOpen, setMenuOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
@@ -113,6 +121,10 @@ export default function FileCard({
     if (!onToggleSelect) return
     e.preventDefault()
     onToggleSelect(file.id)
+  }
+
+  function preview() {
+    if (canPreview && onPreview) onPreview(file)
   }
 
   async function copyLink() {
@@ -170,6 +182,17 @@ export default function FileCard({
           >
             {!moveOpen ? (
               <>
+                {canPreview && onPreview && (
+                  <button
+                    onClick={() => {
+                      onPreview(file)
+                      closeMenu()
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <Eye size={15} /> Preview
+                  </button>
+                )}
                 <a
                   href={downloadUrl(file.id)}
                   onClick={closeMenu}
@@ -196,6 +219,17 @@ export default function FileCard({
                   {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
                   {file.shareToken ? "Copy link" : "Get link"}
                 </button>
+                {onOpenShare && (
+                  <button
+                    onClick={() => {
+                      onOpenShare(file.id)
+                      closeMenu()
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <SlidersHorizontal size={15} /> Share settings\u2026
+                  </button>
+                )}
                 {file.shareToken && (
                   <button
                     onClick={() => {
@@ -241,7 +275,7 @@ export default function FileCard({
                   onClick={() => setMoveOpen(false)}
                   className="flex w-full items-center gap-2.5 px-3 py-2 font-medium text-slate-600 hover:bg-slate-50"
                 >
-                  <ChevronLeft size={15} /> Move to…
+                  <ChevronLeft size={15} /> Move to\u2026
                 </button>
                 <div className="my-1 h-px bg-slate-100" />
                 <div className="max-h-52 overflow-y-auto">
@@ -297,9 +331,20 @@ export default function FileCard({
         }
       >
         {onToggleSelect && <div className="flex w-5 justify-center">{checkbox}</div>}
-        <div className={"grid h-9 w-9 shrink-0 place-items-center rounded-lg " + tone.bg + " " + tone.fg}>
-          <Icon size={18} />
-        </div>
+        <button
+          type="button"
+          onClick={preview}
+          className={
+            "grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " +
+            tone.bg + " " + tone.fg + (canPreview ? " cursor-zoom-in" : "")
+          }
+        >
+          {isImage ? (
+            <img src={inlineUrl(file.id)} alt={file.filename} className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <Icon size={18} />
+          )}
+        </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-slate-800" title={file.filename}>
             {file.filename}
@@ -343,8 +388,18 @@ export default function FileCard({
         (selected ? "border-drift-400 ring-2 ring-drift-400/60" : "border-slate-200 hover:border-slate-300")
       }
     >
-      <div className={"relative flex h-24 items-center justify-center rounded-t-2xl " + tone.bg}>
-        <Icon size={34} className={tone.fg} />
+      <div
+        onClick={preview}
+        className={
+          "relative flex h-24 items-center justify-center overflow-hidden rounded-t-2xl " +
+          tone.bg + (canPreview ? " cursor-zoom-in" : "")
+        }
+      >
+        {isImage ? (
+          <img src={inlineUrl(file.id)} alt={file.filename} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <Icon size={34} className={tone.fg} />
+        )}
         {onToggleSelect && <div className="absolute left-2 top-2">{checkbox}</div>}
         <span className={"absolute right-2 top-2 " + chipClass}>
           <Clock size={11} /> {left.label}
