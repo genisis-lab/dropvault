@@ -73,6 +73,17 @@ export async function extendFile(id: string, days: number) {
   return j<{ ok: true; expiresAt: number }>(res)
 }
 
+// Rename a file.
+export async function renameFile(id: string, filename: string) {
+  const res = await fetch(`${API}/api/files/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename }),
+  })
+  return j<{ ok: true; filename: string }>(res)
+}
+
 // Move a file into a folder (folderId) or back to the root (null).
 export async function moveFile(id: string, folderId: string | null) {
   const res = await fetch(`${API}/api/files/${id}`, {
