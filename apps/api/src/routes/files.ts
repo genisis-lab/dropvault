@@ -150,19 +150,20 @@ files.delete("/:id/share", async (c) => {
   return c.json({ ok: true })
 })
 
-// 8) Update a file: extend expiry and/or move it between folders.
+// 8) Update a file: rename, extend expiry, and/or move it between folders.
+//    - "filename" (string) renames the file (trimmed, non-empty).
 //    - "extendDays" is ADDED to the current expiry (or to now, if already past due),
 //      so extending always gains time. Total lifetime is capped at MAX_EXPIRY_DAYS.
 //    - "folderId" (string) moves the file into that folder; null moves it to the root.
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
-  const body = await c.req.json<{ extendDays?: number; expiryDays?: number; folderId?: string | null }>()
+  const body = await c.req.json<{ extendDays?: number; expiryDays?: number; folderId?: string | null; filename?: string }>()
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
 
-  const update: { expiresAt?: number; folderId?: string | null } = {}
+  const update: { expiresAt?: number; folderId?: string | null; filename?: string } = {}
 
   const addDays = Math.max(body.extendDays ?? body.expiryDays ?? 0, 0)
   if (addDays > 0) {
@@ -181,10 +182,16 @@ files.patch("/:id", async (c) => {
     }
   }
 
+  if (typeof body.filename === "string") {
+    const name = body.filename.trim()
+    if (!name) return c.json({ error: "filename cannot be empty" }, 400)
+    update.filename = name.slice(0, 255)
+  }
+
   if (Object.keys(update).length === 0) return c.json({ error: "nothing to update" }, 400)
   await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
   const next = await db.select().from(schema.files).where(eq(schema.files.id, id)).get()
-  return c.json({ ok: true, expiresAt: next?.expiresAt, folderId: next?.folderId ?? null })
+  return c.json({ ok: true, expiresAt: next?.expiresAt, folderId: next?.folderId ?? null, filename: next?.filename })
 })
 
 // 9) Delete now.
