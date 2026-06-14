@@ -19,8 +19,12 @@ migrations_dir = "migrations"
 [triggers]
 crons = ["0 * * * *"]
 
-# Non-secret vars. Secrets go via `wrangler secret put` (see README).
+# Non-secret vars. Secrets go via the dashboard / `wrangler secret put` (see DEPLOYMENT.md).
 [vars]
+# The Worker's own public URL. better-auth uses this as its baseURL because the
+# auth handler (/api/auth/*) runs here on the Worker, not on the Pages site.
+API_URL = "https://dropvault-api.neil27.workers.dev"
+# The web app origin (Cloudflare Pages). Used for CORS + better-auth trustedOrigins.
 PUBLIC_APP_URL = "https://drop-vault.pages.dev"
 R2_ACCOUNT_ID = "3ece4993f323ece88322161931be6e72"
 R2_BUCKET_NAME = "dropvault-files"
