@@ -17,6 +17,7 @@ import {
   shareFolder,
   revokeFolderShare,
   downloadUrl,
+  type DriftFile,
 } from "../lib/api"
 import { signOut } from "../lib/auth-client"
 import Sidebar, { type Filter } from "./Sidebar"
@@ -25,6 +26,8 @@ import UploadZone from "./UploadZone"
 import FileCard from "./FileCard"
 import FolderCard from "./FolderCard"
 import NameDialog from "./NameDialog"
+import ShareDialog from "./ShareDialog"
+import PreviewModal from "./PreviewModal"
 import { useToast } from "./Toast"
 
 const EXPIRY_OPTIONS = [1, 2, 7, 14, 30]
@@ -78,6 +81,8 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [dialog, setDialog] = useState<DialogState>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [moveBarOpen, setMoveBarOpen] = useState(false)
+  const [shareFile, setShareFile] = useState<DriftFile | null>(null)
+  const [previewFile, setPreviewFile] = useState<DriftFile | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: listFiles })
@@ -284,7 +289,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   const heading = currentFolder ? currentFolder.name : titleFor(filter)
   const itemCount = visible.length + visibleFolders.length
-  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` · ${userName.split(" ")[0]}'s vault` : ""}`
+  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` \u00b7 ${userName.split(" ")[0]}'s vault` : ""}`
 
   function onDialogConfirm(name: string) {
     if (!dialog) return
@@ -304,7 +309,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   function deleteFolderConfirm(id: string) {
     const f = folders.find((x) => x.id === id)
     const msg = f && f.fileCount > 0
-      ? `Delete “${f.name}”? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).`
+      ? `Delete \u201c${f.name}\u201d? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).`
       : "Delete this folder?"
     if (window.confirm(msg)) deleteFolderMut.mutate(id)
   }
@@ -446,7 +451,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</h2>
             )}
             {filesQuery.isLoading ? (
-              <p className="text-slate-400">Loading…</p>
+              <p className="text-slate-400">Loading\u2026</p>
             ) : visible.length === 0 ? (
               <EmptyState filter={filter} hasFiles={files.length > 0} search={search} inFolder={!!currentFolder} />
             ) : view === "grid" ? (
@@ -464,6 +469,8 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
                       onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
+                      onOpenShare={(id) => setShareFile(files.find((x) => x.id === id) ?? null)}
+                      onPreview={(file) => setPreviewFile(file)}
                       selected={selected.has(f.id)}
                       onToggleSelect={toggleSelect}
                       anySelected={selCount > 0}
@@ -487,6 +494,8 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
                       onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
+                      onOpenShare={(id) => setShareFile(files.find((x) => x.id === id) ?? null)}
+                      onPreview={(file) => setPreviewFile(file)}
                       selected={selected.has(f.id)}
                       onToggleSelect={toggleSelect}
                       anySelected={selCount > 0}
@@ -574,6 +583,14 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
         )}
       </AnimatePresence>
 
+      <ShareDialog
+        key={shareFile?.id}
+        file={shareFile}
+        onClose={() => setShareFile(null)}
+        onChanged={invalidate}
+      />
+      <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+
       <NameDialog
         open={dialog !== null}
         title={dialogTitle}
@@ -600,14 +617,14 @@ function EmptyState({
   const msg = search.trim()
     ? "No files match your search."
     : inFolder
-      ? "This folder is empty — drop files above, or drag files onto it."
+      ? "This folder is empty \u2014 drop files above, or drag files onto it."
       : filter === "shared"
-        ? "No shared files yet — use a file or folder's menu to create a link."
+        ? "No shared files yet \u2014 use a file or folder's menu to create a link."
         : filter === "expiring"
           ? "Nothing expires in the next 24 hours."
           : hasFiles
             ? "No files here."
-            : "Your vault is empty — drop files above to get started."
+            : "Your vault is empty \u2014 drop files above to get started."
   return (
     <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center text-sm text-slate-400">
       <HardDrive size={28} className="mb-2 text-slate-300" />
