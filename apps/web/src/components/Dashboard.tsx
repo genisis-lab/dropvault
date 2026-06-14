@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { ChevronRight, Download, FolderInput, FolderPlus, HardDrive, Trash2, X } from "lucide-react"
+import { ChevronRight, Clock, Download, FolderInput, FolderPlus, HardDrive, Trash2, X } from "lucide-react"
 import {
   listFiles,
   listFolders,
   extendFile,
+  renameFile,
   deleteFile,
   createShare,
   revokeShare,
@@ -28,7 +29,20 @@ import NameDialog from "./NameDialog"
 const EXPIRY_OPTIONS = [1, 2, 7, 14, 30]
 const DAY = 86400
 
-type DialogState = { mode: "create" } | { mode: "rename"; folderId: string; current: string } | null
+type SortKey = "newest" | "name" | "size" | "expiring"
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "name", label: "Name" },
+  { value: "size", label: "Size" },
+  { value: "expiring", label: "Expiring" },
+]
+
+type DialogState =
+  | { mode: "create" }
+  | { mode: "rename"; folderId: string; current: string }
+  | { mode: "renameFile"; fileId: string; current: string }
+  | null
 
 const barInitial = { opacity: 0, y: 24, x: "-50%" }
 const barAnimate = { opacity: 1, y: 0, x: "-50%" }
@@ -55,6 +69,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [search, setSearch] = useState("")
   const [view, setView] = useState<ViewMode>("grid")
   const [filter, setFilterState] = useState<Filter>("all")
+  const [sort, setSort] = useState<SortKey>("newest")
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -71,6 +86,10 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   const extendMut = useMutation({
     mutationFn: ({ id, days }: { id: string; days: number }) => extendFile(id, days),
+    onSuccess: invalidate,
+  })
+  const renameFileMut = useMutation({
+    mutationFn: ({ id, filename }: { id: string; filename: string }) => renameFile(id, filename),
     onSuccess: invalidate,
   })
   const deleteMut = useMutation({ mutationFn: (id: string) => deleteFile(id), onSuccess: invalidate })
@@ -168,6 +187,30 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
     })
   }, [files, q, filter, currentFolderId, now])
 
+  const sorted = useMemo(() => {
+    const arr = [...visible]
+    switch (sort) {
+      case "name":
+        arr.sort((a, b) => a.filename.localeCompare(b.filename))
+        break
+      case "size":
+        arr.sort((a, b) => b.sizeBytes - a.sizeBytes)
+        break
+      case "expiring":
+        arr.sort((a, b) => a.expiresAt - b.expiresAt)
+        break
+      default:
+        arr.sort((a, b) => b.createdAt - a.createdAt)
+    }
+    return arr
+  }, [visible, sort])
+
+  const expiringSoon = useMemo(() => files.filter((f) => f.expiresAt - now < DAY), [files, now])
+
+  function extendAllExpiring() {
+    expiringSoon.forEach((f) => extendMut.mutate({ id: f.id, days: 7 }))
+  }
+
   const showFolderSection = atRoot && filter === "all"
   const visibleFolders = useMemo(
     () => (showFolderSection ? folders.filter((fd) => !q || fd.name.toLowerCase().includes(q)) : []),
@@ -187,8 +230,10 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
       // Make sure the new folder is visible: jump back to the My Drive root.
       setCurrentFolderId(null)
       setFilterState("all")
-    } else {
+    } else if (dialog.mode === "rename") {
       renameFolderMut.mutate({ id: dialog.folderId, name })
+    } else {
+      renameFileMut.mutate({ id: dialog.fileId, filename: name })
     }
     setDialog(null)
   }
@@ -215,6 +260,11 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
     Array.from(selected).forEach((id) => deleteMut.mutate(id))
     clearSelection()
   }
+
+  const dialogTitle =
+    dialog?.mode === "rename" ? "Rename folder" : dialog?.mode === "renameFile" ? "Rename file" : "New folder"
+  const dialogInitial = dialog && dialog.mode !== "create" ? dialog.current : ""
+  const dialogConfirm = dialog?.mode === "create" ? "Create" : "Rename"
 
   return (
     <div>
@@ -255,13 +305,33 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
               <h1 className="truncate text-xl font-bold text-slate-800 sm:text-2xl">{heading}</h1>
               <p className="text-sm text-slate-500">{subtitle}</p>
             </div>
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {expiringSoon.length > 0 && (
+                <button
+                  onClick={extendAllExpiring}
+                  className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 transition hover:bg-amber-100"
+                >
+                  <Clock size={16} /> Extend {expiringSoon.length} expiring
+                </button>
+              )}
               <button
                 onClick={() => setDialog({ mode: "create" })}
                 className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
               >
                 <FolderPlus size={16} /> New folder
               </button>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+                aria-label="Sort files"
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
               <span className="hidden text-slate-400 sm:inline">Expire in</span>
               <select
                 value={expiryDays}
@@ -319,13 +389,14 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
             ) : view === "grid" ? (
               <motion.div layout className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
                 <AnimatePresence mode="popLayout">
-                  {visible.map((f) => (
+                  {sorted.map((f) => (
                     <FileCard
                       key={f.id}
                       file={f}
                       view="grid"
                       folders={folderOptions}
                       onExtend={(id, days) => extendMut.mutate({ id, days })}
+                      onRename={(id) => setDialog({ mode: "renameFile", fileId: id, current: f.filename })}
                       onDelete={(id) => deleteMut.mutate(id)}
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
@@ -341,13 +412,14 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
             ) : (
               <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow">
                 <AnimatePresence mode="popLayout">
-                  {visible.map((f) => (
+                  {sorted.map((f) => (
                     <FileCard
                       key={f.id}
                       file={f}
                       view="list"
                       folders={folderOptions}
                       onExtend={(id, days) => extendMut.mutate({ id, days })}
+                      onRename={(id) => setDialog({ mode: "renameFile", fileId: id, current: f.filename })}
                       onDelete={(id) => deleteMut.mutate(id)}
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
@@ -441,9 +513,9 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
       <NameDialog
         open={dialog !== null}
-        title={dialog?.mode === "rename" ? "Rename folder" : "New folder"}
-        initial={dialog?.mode === "rename" ? dialog.current : ""}
-        confirmLabel={dialog?.mode === "rename" ? "Rename" : "Create"}
+        title={dialogTitle}
+        initial={dialogInitial}
+        confirmLabel={dialogConfirm}
         onCancel={() => setDialog(null)}
         onConfirm={onDialogConfirm}
       />
