@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { and, desc, eq, gt } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS } from "../lib/expiry"
+import { sha256Hex } from "../lib/hash"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
@@ -181,8 +182,8 @@ files.post("/:id/complete", async (c) => {
 })
 
 // 4) List the current user's live (non-expired) files. Includes folderId so the
-//    client can group them; pass ?folderId=<id> to scope to one folder, or
-//    ?folderId=root for only top-level files.
+//    client can group them. We strip the share password hash and expose only a
+//    boolean so the dashboard never receives the secret.
 files.get("/", async (c) => {
   const userId = c.get("userId")
   const db = getDb(c.env.DB)
@@ -190,7 +191,8 @@ files.get("/", async (c) => {
     .where(and(eq(schema.files.ownerId, userId), eq(schema.files.status, "ready"), gt(schema.files.expiresAt, nowSeconds())))
     .orderBy(desc(schema.files.createdAt))
     .all()
-  return c.json({ files: rows })
+  const safe = rows.map(({ sharePassword, ...r }) => ({ ...r, shareHasPassword: !!sharePassword }))
+  return c.json({ files: safe })
 })
 
 // 5) Download (owner): enforce on-access expiry, then stream from R2.
@@ -218,29 +220,83 @@ files.get("/:id/download", async (c) => {
   return new Response(object.body, { headers })
 })
 
-// 6) Create (or return existing) a public share link for a file.
+// 5b) Inline view (owner): same bytes as download but with an inline
+//     Content-Disposition so the dashboard can render image/PDF previews and
+//     thumbnails. Auth + on-access expiry are enforced just like download.
+files.get("/:id/inline", async (c) => {
+  const userId = c.get("userId")
+  const id = c.req.param("id")
+  const db = getDb(c.env.DB)
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
+  if (!row || row.status !== "ready") return c.json({ error: "not found" }, 404)
+
+  if (isExpired(row.expiresAt)) {
+    try { await c.env.FILES.delete(row.r2Key) } catch {}
+    await db.delete(schema.files).where(eq(schema.files.id, id)).run()
+    return c.json({ error: "expired" }, 410)
+  }
+
+  const object = await c.env.FILES.get(row.r2Key)
+  if (!object) return c.json({ error: "not found" }, 404)
+
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set("Content-Length", String(object.size))
+  headers.set("Content-Disposition", `inline; filename="${row.filename.replace(/["\\]/g, "_")}"`)
+  headers.set("Cache-Control", "private, max-age=60")
+  return new Response(object.body, { headers })
+})
+
+// 6) Create (or update) a public share link for a file.
+//    Body (all optional): { password, downloadLimit, expiresInDays }.
+//      - password: non-empty string sets a password (stored hashed); null/"" clears it.
+//      - downloadLimit: positive integer caps total downloads; null = unlimited.
+//      - expiresInDays: positive number sets a link-specific expiry; null = follow file.
+//    When any option key is present we treat it as a full (re)configure and reset
+//    the download counter. A bare call with no options just ensures a token exists.
 files.post("/:id/share", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
+  const body = await c.req
+    .json<{ password?: string | null; downloadLimit?: number | null; expiresInDays?: number | null }>()
+    .catch(() => ({} as { password?: string | null; downloadLimit?: number | null; expiresInDays?: number | null }))
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
 
   const token = row.shareToken ?? crypto.randomUUID().replace(/-/g, "")
-  if (!row.shareToken) {
-    await db.update(schema.files).set({ shareToken: token }).where(eq(schema.files.id, id)).run()
+  const update: Record<string, unknown> = { shareToken: token }
+
+  const hasOptions = body != null && ("password" in body || "downloadLimit" in body || "expiresInDays" in body)
+  if (hasOptions) {
+    update.sharePassword = body.password ? await sha256Hex(String(body.password)) : null
+    update.shareDownloadLimit =
+      typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null
+    update.shareExpiresAt =
+      typeof body.expiresInDays === "number" && body.expiresInDays > 0
+        ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS)
+        : null
+    update.shareDownloadCount = 0
   }
-  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}` })
+
+  await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
+
+  const hasPassword = hasOptions ? !!body.password : !!row.sharePassword
+  const downloadLimit = hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null
+  const shareExpiresAt = hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null
+  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}`, hasPassword, downloadLimit, shareExpiresAt })
 })
 
-// 7) Revoke a file's public share link.
+// 7) Revoke a file's public share link and clear its link options.
 files.delete("/:id/share", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
-  await db.update(schema.files).set({ shareToken: null }).where(eq(schema.files.id, id)).run()
+  await db.update(schema.files)
+    .set({ shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null })
+    .where(eq(schema.files.id, id)).run()
   return c.json({ ok: true })
 })
 
