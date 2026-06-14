@@ -149,6 +149,11 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
     clearSelection()
   }
 
+  function goToRoot() {
+    setCurrentFolderId(null)
+    clearSelection()
+  }
+
   const q = search.trim().toLowerCase()
   const now = Math.floor(Date.now() / 1000)
 
@@ -173,7 +178,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   const heading = currentFolder ? currentFolder.name : titleFor(filter)
   const itemCount = visible.length + visibleFolders.length
-  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` \u00b7 ${userName.split(" ")[0]}'s vault` : ""}`
+  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` · ${userName.split(" ")[0]}'s vault` : ""}`
 
   function onDialogConfirm(name: string) {
     if (!dialog) return
@@ -191,7 +196,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   function deleteFolderConfirm(id: string) {
     const f = folders.find((x) => x.id === id)
     const msg = f && f.fileCount > 0
-      ? `Delete \u201c${f.name}\u201d? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).`
+      ? `Delete “${f.name}”? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).`
       : "Delete this folder?"
     if (window.confirm(msg)) deleteFolderMut.mutate(id)
   }
@@ -239,7 +244,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
             <div className="min-w-0">
               {currentFolder && (
                 <button
-                  onClick={() => openFolder(currentFolder.id) /* no-op guard */ || setCurrentFolderId(null)}
+                  onClick={goToRoot}
                   className="mb-1 flex items-center gap-1 text-sm text-slate-500 hover:text-drift-600"
                 >
                   <span>My Drive</span>
@@ -308,7 +313,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</h2>
             )}
             {filesQuery.isLoading ? (
-              <p className="text-slate-400">Loading\u2026</p>
+              <p className="text-slate-400">Loading…</p>
             ) : visible.length === 0 ? (
               <EmptyState filter={filter} hasFiles={files.length > 0} search={search} inFolder={!!currentFolder} />
             ) : view === "grid" ? (
@@ -460,14 +465,14 @@ function EmptyState({
   const msg = search.trim()
     ? "No files match your search."
     : inFolder
-      ? "This folder is empty \u2014 drop files above, or drag files onto it."
+      ? "This folder is empty — drop files above, or drag files onto it."
       : filter === "shared"
-        ? "No shared files yet \u2014 use a file or folder's menu to create a link."
+        ? "No shared files yet — use a file or folder's menu to create a link."
         : filter === "expiring"
           ? "Nothing expires in the next 24 hours."
           : hasFiles
             ? "No files here."
-            : "Your vault is empty \u2014 drop files above to get started."
+            : "Your vault is empty — drop files above to get started."
   return (
     <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center text-sm text-slate-400">
       <HardDrive size={28} className="mb-2 text-slate-300" />
