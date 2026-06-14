@@ -71,10 +71,10 @@ export default function UploadZone({
         </motion.div>
         <div>
           <p className="font-semibold text-slate-700">
-            {folderName ? `Drop files into \u201c${folderName}\u201d` : "Drop files here, or click to browse"}
+            {folderName ? `Drop files into “${folderName}”` : "Drop files here, or click to browse"}
           </p>
           <p className="mt-0.5 text-sm text-slate-400">
-            Auto-expires in {expiryDays} day{expiryDays === 1 ? "" : "s"} \u00b7 extend or delete anytime
+            Auto-expires in {expiryDays} day{expiryDays === 1 ? "" : "s"} · extend or delete anytime
           </p>
         </div>
         <input ref={ref} type="file" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
