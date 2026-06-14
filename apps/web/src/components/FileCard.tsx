@@ -15,6 +15,7 @@ import {
   Link2,
   MoreVertical,
   Music,
+  Pencil,
   Trash2,
   X,
 } from "lucide-react"
@@ -56,6 +57,7 @@ type Props = {
   onShare: (id: string) => Promise<string>
   onRevoke: (id: string) => void
   onMove?: (id: string, folderId: string | null) => void
+  onRename?: (id: string) => void
   selected?: boolean
   onToggleSelect?: (id: string) => void
   anySelected?: boolean
@@ -77,6 +79,7 @@ export default function FileCard({
   onShare,
   onRevoke,
   onMove,
+  onRename,
   selected = false,
   onToggleSelect,
   anySelected = false,
@@ -174,6 +177,17 @@ export default function FileCard({
                 >
                   <Download size={15} /> Download
                 </a>
+                {onRename && (
+                  <button
+                    onClick={() => {
+                      onRename(file.id)
+                      closeMenu()
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <Pencil size={15} /> Rename
+                  </button>
+                )}
                 <button
                   disabled={busy}
                   onClick={copyLink}
