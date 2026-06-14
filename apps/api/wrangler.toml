@@ -26,7 +26,5 @@ crons = ["0 * * * *"]
 API_URL = "https://dropvault-api.neil27.workers.dev"
 # The web app origin (Cloudflare Pages). Used for CORS + better-auth trustedOrigins.
 PUBLIC_APP_URL = "https://drop-vault.pages.dev"
-R2_ACCOUNT_ID = "3ece4993f323ece88322161931be6e72"
-R2_BUCKET_NAME = "dropvault-files"
 DEFAULT_EXPIRY_DAYS = "2"
 MAX_EXPIRY_DAYS = "30"

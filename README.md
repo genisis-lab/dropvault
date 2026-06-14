@@ -9,7 +9,7 @@ A mini Google Drive that **auto-expires** your files. Upload anything, share wit
 ## ✨ Features
 
 - **Auth your friends will actually use** — email + password *or* one-click Google sign-in (better-auth). Anyone can self-register; no manual allow-listing.
-- **Direct-to-storage uploads** — the browser uploads straight to R2 via presigned URLs with a live progress bar. The Worker never proxies file bytes.
+- **Cloudflare-native uploads** — the browser streams to the API Worker, which writes to R2 through its bucket binding with a live progress bar.
 - **Expiration as defense-in-depth:**
   1. **On-access check** — an expired file is never served (returns `410` and is deleted on the spot).
   2. **Hourly Cron sweep** — a scheduled Worker reclaims expired objects from R2 + rows from D1.
@@ -23,16 +23,16 @@ A mini Google Drive that **auto-expires** your files. Upload anything, share wit
 
 ```
 Browser (React SPA, Cloudflare Pages)
-  │  1. POST /api/files/presign           ── Worker creates a "pending" row, returns presigned PUT URL
-  │  2. PUT <presigned-url>  ───────────────────────────────────────────────▶  R2 (direct upload)
+  │  1. POST /api/files/presign           ── Worker creates a "pending" row, returns upload URL
+  │  2. PUT /api/files/:id/upload          ── Worker streams the file into R2
   │  3. POST /api/files/:id/complete       ── Worker marks row "ready"
   │  4. GET /api/files                     ── list live files
-  │  5. GET /api/files/:id/download        ── on-access expiry check → 302 to presigned GET
+  │  5. GET /api/files/:id/download        ── on-access expiry check → stream from R2
   ▼
 Worker API (Hono, Cloudflare Workers)
   ├── better-auth  →  D1 (user/session/account/verification)
   ├── files metadata →  D1 (files)
-  ├── presign       →  R2 (S3-compatible, @aws-sdk presigner)
+  ├── upload/download →  R2 bucket binding
   └── scheduled()   →  hourly sweep of expired files
 ```
 
@@ -81,7 +81,6 @@ wrangler d1 create dropvault
 
 Then open `apps/api/wrangler.toml` and fill in:
 - `database_id` (from the step above)
-- `R2_ACCOUNT_ID` under `[vars]` (your Cloudflare account ID — also used for the S3 endpoint)
 - `PUBLIC_APP_URL` (your Pages URL, e.g. `https://dropvault.pages.dev`)
 
 ### 3. Apply the database schema
@@ -99,11 +98,7 @@ wrangler d1 migrations apply dropvault --local    # local dev
 wrangler secret put BETTER_AUTH_SECRET       # any long random string (openssl rand -base64 32)
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put R2_ACCESS_KEY_ID         # R2 API token (S3) access key
-wrangler secret put R2_SECRET_ACCESS_KEY     # R2 API token (S3) secret
 ```
-
-> Create the R2 access keys under **Cloudflare dashboard → R2 → Manage R2 API Tokens**.
 
 ### 5. Google OAuth
 
@@ -167,6 +162,6 @@ Name references live in: `package.json` files, `apps/api/wrangler.toml` (worker 
 ## 🔐 Notes & trade-offs
 
 - **On-access deletion** means even if the sweep is delayed, no one can ever download an expired file.
-- Presigned PUT URLs are valid for 10 minutes; GET (download) URLs for 5 minutes.
+- Uploads and downloads use the Worker R2 binding, so no separate R2 S3 credentials are needed.
 - Files are namespaced by user (`r2Key = <userId>/<uuid>`), and every API route enforces ownership.
-- For very large files you'd later want multipart uploads; single presigned PUT is great up to a few GB.
+- For very large files you'd later want multipart uploads or a presigned/direct-upload path; Worker-mediated uploads keep the current app simple and avoid separate S3 credentials.
