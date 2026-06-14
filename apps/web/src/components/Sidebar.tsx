@@ -94,7 +94,7 @@ export default function Sidebar({
           />
         </div>
         <p className="mt-2 text-xs text-slate-500">
-          {formatBytes(totalBytes)} used \u00b7 {fileCount} file{fileCount === 1 ? "" : "s"}
+          {formatBytes(totalBytes)} used · {fileCount} file{fileCount === 1 ? "" : "s"}
         </p>
         <p className="mt-0.5 text-[11px] text-slate-400">Files auto-expire to free up space</p>
       </div>
