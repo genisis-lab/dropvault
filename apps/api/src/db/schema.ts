@@ -52,8 +52,22 @@ export const verification = sqliteTable("verification", {
 })
 
 // ---------------------------------------------------------------------------
+// Folders: group files; optional public share token (NULL = not shared).
+// ---------------------------------------------------------------------------
+export const folders = sqliteTable("folders", {
+  id: text("id").primaryKey(), // uuid
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  shareToken: text("share_token"), // null = not shared
+  createdAt: integer("created_at").notNull(),
+})
+
+export type FolderRow = typeof folders.$inferSelect
+
+// ---------------------------------------------------------------------------
 // Dropvault files table. epoch seconds for created/expires.
 // share_token: nullable public token; NULL means the file is not shared.
+// folder_id: nullable; NULL means the file lives at the root (My Drive).
 // ---------------------------------------------------------------------------
 export const files = sqliteTable("files", {
   id: text("id").primaryKey(), // uuid, also the R2 key
@@ -64,6 +78,7 @@ export const files = sqliteTable("files", {
   contentType: text("content_type"),
   status: text("status").notNull().default("pending"), // pending | ready
   shareToken: text("share_token"), // null = not shared
+  folderId: text("folder_id"), // null = root
   createdAt: integer("created_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
 })
