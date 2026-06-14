@@ -12,7 +12,7 @@ bucket_name = "dropvault-files"
 [[d1_databases]]
 binding = "DB"
 database_name = "dropvault"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "b72b57d4-bbb9-4810-a006-251d9aed1955"
 migrations_dir = "migrations"
 
 # Hourly expiry sweep
@@ -21,8 +21,8 @@ crons = ["0 * * * *"]
 
 # Non-secret vars. Secrets go via `wrangler secret put` (see README).
 [vars]
-PUBLIC_APP_URL = "https://dropvault.pages.dev"
-R2_ACCOUNT_ID = "REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
+PUBLIC_APP_URL = "https://drop-vault.pages.dev"
+R2_ACCOUNT_ID = "3ece4993f323ece88322161931be6e72"
 R2_BUCKET_NAME = "dropvault-files"
 DEFAULT_EXPIRY_DAYS = "2"
 MAX_EXPIRY_DAYS = "30"

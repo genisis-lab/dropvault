@@ -71,6 +71,8 @@ Build settings:
 
 Save & deploy → you get `https://dropvault.pages.dev`. Put that URL into `PUBLIC_APP_URL` in `wrangler.toml` (step 2) and commit.
 
+> Keep the Pages **Root directory** blank. The repo includes a Pages Function at `functions/api/[[path]].ts` that proxies same-origin `/api/*` requests to the standalone Worker, so auth cookies and browser API calls stay on the Pages domain.
+
 ---
 
 ## 4. Deploy the API with Workers Builds (Git integration)

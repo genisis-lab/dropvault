@@ -18,6 +18,7 @@ app.use("*", async (c, next) => {
 })
 
 app.get("/health", (c) => c.json({ ok: true, service: "dropvault-api" }))
+app.get("/api/health", (c) => c.json({ ok: true, service: "dropvault-api" }))
 
 // better-auth owns everything under /api/auth/*
 app.on(["GET", "POST"], "/api/auth/*", (c) => {
