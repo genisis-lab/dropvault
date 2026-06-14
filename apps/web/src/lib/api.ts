@@ -58,11 +58,13 @@ export function downloadUrl(id: string) {
   return `${API}/api/files/${id}/download`
 }
 
-// Direct browser -> R2 upload via the presigned PUT URL, with progress.
+// Upload the bytes via the Worker (XHR so we get progress events). The URL from
+// presign is same-origin, so withCredentials lets the session cookie ride along.
 export function uploadToR2(uploadUrl: string, file: File, onProgress: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open("PUT", uploadUrl)
+    xhr.withCredentials = true
     if (file.type) xhr.setRequestHeader("Content-Type", file.type)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
