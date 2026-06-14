@@ -34,6 +34,14 @@ export async function presign(input: { filename: string; contentType?: string; s
   return j<{ id: string; uploadUrl: string; expiresAt: number }>(res)
 }
 
+// Build the upload URL on OUR origin from the id. The Pages proxy forwards it to
+// the Worker, so the session cookie is sent. We intentionally do NOT use the
+// uploadUrl returned by presign: older API builds returned an absolute Worker
+// URL, which makes the PUT cross-origin and drops the cookie (401).
+export function uploadUrlFor(id: string) {
+  return `${API}/api/files/${id}/upload`
+}
+
 export async function complete(id: string) {
   const res = await fetch(`${API}/api/files/${id}/complete`, { method: "POST", credentials: "include" })
   return j<{ ok: true }>(res)
@@ -58,8 +66,8 @@ export function downloadUrl(id: string) {
   return `${API}/api/files/${id}/download`
 }
 
-// Upload the bytes via the Worker (XHR so we get progress events). The URL from
-// presign is same-origin, so withCredentials lets the session cookie ride along.
+// Upload the bytes via the Worker (XHR so we get progress events). The URL is
+// same-origin, so withCredentials lets the session cookie ride along.
 export function uploadToR2(uploadUrl: string, file: File, onProgress: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()

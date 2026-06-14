@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { UploadCloud, CheckCircle2, AlertCircle } from "lucide-react"
-import { presign, uploadToR2, complete } from "../lib/api"
+import { presign, uploadToR2, uploadUrlFor, complete } from "../lib/api"
 import { formatBytes } from "../lib/format"
 
 type Job = { name: string; size: number; pct: number; state: "uploading" | "done" | "error" }
@@ -32,13 +32,14 @@ export default function UploadZone({
         const key = `${file.name}-${Date.now()}`
         setJobs((j) => ({ ...j, [key]: { name: file.name, size: file.size, pct: 0, state: "uploading" } }))
         try {
-          const { id, uploadUrl } = await presign({
+          const { id } = await presign({
             filename: file.name,
             contentType: file.type,
             sizeBytes: file.size,
             expiryDays,
           })
-          await uploadToR2(uploadUrl, file, (pct) =>
+          // Always upload to our own origin (via the Pages proxy) so the cookie is sent.
+          await uploadToR2(uploadUrlFor(id), file, (pct) =>
             setJobs((j) => ({ ...j, [key]: { ...j[key], pct } })),
           )
           await complete(id)
