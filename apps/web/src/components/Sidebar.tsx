@@ -11,6 +11,9 @@ const NAV: { id: Filter; label: string; icon: LucideIcon }[] = [
   { id: "expiring", label: "Expiring soon", icon: Clock },
 ]
 
+const newTap = { scale: 0.97 }
+const barInitial = { width: 0 }
+
 export default function Sidebar({
   onNew,
   totalBytes,
@@ -27,6 +30,7 @@ export default function Sidebar({
   setFilter: (f: Filter) => void
 }) {
   const pct = Math.min((totalBytes / (1024 * 1024 * 1024)) * 100, 100)
+  const barAnimate = { width: `${pct}%` }
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-slate-200 bg-white/80 px-3 py-4 backdrop-blur-xl md:flex">
@@ -35,7 +39,7 @@ export default function Sidebar({
       </div>
 
       <motion.button
-        whileTap= scale: 0.97 
+        whileTap={newTap}
         onClick={onNew}
         className="mt-7 flex items-center gap-3 self-start rounded-2xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-3 pl-4 pr-5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:shadow-glow-500/40"
       >
@@ -72,8 +76,8 @@ export default function Sidebar({
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
           <motion.div
             className="h-full rounded-full bg-gradient-to-r from-drift-500 to-blush-500"
-            initial= width: 0 
-            animate={{ width: `${pct}%` }}
+            initial={barInitial}
+            animate={barAnimate}
           />
         </div>
         <p className="mt-2 text-xs text-slate-500">
