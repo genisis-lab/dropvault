@@ -11,9 +11,17 @@ export default function App() {
 
   return (
     <>
+      {/* Layered backdrop: CSS aurora + grid behind the lazy 3D blobs. */}
+      <div className="aurora" aria-hidden="true">
+        <div className="aurora-blob b1" />
+        <div className="aurora-blob b2" />
+        <div className="aurora-blob b3" />
+      </div>
+      <div className="grid-overlay" aria-hidden="true" />
       <Suspense fallback={null}>
         <AmbientBackground />
       </Suspense>
+
       {isPending ? (
         <div className="grid min-h-screen place-items-center text-white/40">Loading…</div>
       ) : session?.user ? (

@@ -53,6 +53,7 @@ export const verification = sqliteTable("verification", {
 
 // ---------------------------------------------------------------------------
 // Dropvault files table. epoch seconds for created/expires.
+// share_token: nullable public token; NULL means the file is not shared.
 // ---------------------------------------------------------------------------
 export const files = sqliteTable("files", {
   id: text("id").primaryKey(), // uuid, also the R2 key
@@ -62,6 +63,7 @@ export const files = sqliteTable("files", {
   sizeBytes: integer("size_bytes").notNull().default(0),
   contentType: text("content_type"),
   status: text("status").notNull().default("pending"), // pending | ready
+  shareToken: text("share_token"), // null = not shared
   createdAt: integer("created_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
 })

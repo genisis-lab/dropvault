@@ -10,6 +10,7 @@ export type DriftFile = {
   sizeBytes: number
   contentType: string | null
   status: string
+  shareToken: string | null
   createdAt: number
   expiresAt: number
 }
@@ -35,9 +36,7 @@ export async function presign(input: { filename: string; contentType?: string; s
 }
 
 // Build the upload URL on OUR origin from the id. The Pages proxy forwards it to
-// the Worker, so the session cookie is sent. We intentionally do NOT use the
-// uploadUrl returned by presign: older API builds returned an absolute Worker
-// URL, which makes the PUT cross-origin and drops the cookie (401).
+// the Worker, so the session cookie is sent.
 export function uploadUrlFor(id: string) {
   return `${API}/api/files/${id}/upload`
 }
@@ -64,6 +63,24 @@ export async function deleteFile(id: string) {
 
 export function downloadUrl(id: string) {
   return `${API}/api/files/${id}/download`
+}
+
+// Create (or fetch existing) a public share link for a file.
+export async function createShare(id: string) {
+  const res = await fetch(`${API}/api/files/${id}/share`, { method: "POST", credentials: "include" })
+  return j<{ token: string; url: string }>(res)
+}
+
+// Revoke a file's public share link.
+export async function revokeShare(id: string) {
+  const res = await fetch(`${API}/api/files/${id}/share`, { method: "DELETE", credentials: "include" })
+  return j<{ ok: true }>(res)
+}
+
+// Public share URL for a token (same-origin; the Pages proxy forwards to the Worker).
+export function shareUrl(token: string) {
+  const base = API || (typeof window !== "undefined" ? window.location.origin : "")
+  return `${base}/api/share/${token}`
 }
 
 // Upload the bytes via the Worker (XHR so we get progress events). The URL is
