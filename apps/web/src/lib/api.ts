@@ -188,3 +188,88 @@ export function uploadToR2(uploadUrl: string, file: File, onProgress: (pct: numb
     xhr.send(file)
   })
 }
+
+// --- Multipart upload (large files) ----------------------------------------
+// Files larger than this are uploaded in parts so no single request approaches
+// the Worker's ~100MB body limit.
+export const MULTIPART_THRESHOLD = 90 * 1024 * 1024 // 90 MiB
+// R2 requires every part except the last to be the same size (>=5MiB). 32MiB is
+// a good balance of request count vs. Worker memory per part.
+const PART_SIZE = 32 * 1024 * 1024
+
+type UploadedPart = { partNumber: number; etag: string }
+
+async function startMultipart(id: string) {
+  const res = await fetch(`${API}/api/files/${id}/multipart/start`, { method: "POST", credentials: "include" })
+  return j<{ uploadId: string; key: string }>(res)
+}
+
+function putPart(
+  id: string,
+  uploadId: string,
+  partNumber: number,
+  chunk: Blob,
+  onLoaded: (loaded: number) => void,
+): Promise<UploadedPart> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const url = `${API}/api/files/${id}/multipart/part?uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`
+    xhr.open("PUT", url)
+    xhr.withCredentials = true
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onLoaded(e.loaded) }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText) as UploadedPart) } catch { reject(new Error("bad part response")) }
+      } else {
+        reject(new Error(`part ${partNumber} failed: ${xhr.status}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error("network error during part upload"))
+    xhr.send(chunk)
+  })
+}
+
+async function completeMultipart(id: string, uploadId: string, parts: UploadedPart[]) {
+  const res = await fetch(`${API}/api/files/${id}/multipart/complete`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId, parts }),
+  })
+  return j<{ ok: true }>(res)
+}
+
+async function abortMultipart(id: string, uploadId: string) {
+  await fetch(`${API}/api/files/${id}/multipart/abort?uploadId=${encodeURIComponent(uploadId)}`, {
+    method: "POST",
+    credentials: "include",
+  }).catch(() => {})
+}
+
+// Orchestrates a chunked multipart upload with aggregate progress. On success
+// the file is already marked ready server-side (no separate complete() call).
+export async function uploadLargeFile(id: string, file: File, onProgress: (pct: number) => void): Promise<void> {
+  const { uploadId } = await startMultipart(id)
+  const total = file.size
+  const partCount = Math.max(1, Math.ceil(total / PART_SIZE))
+  const parts: UploadedPart[] = []
+  let completedBytes = 0
+  try {
+    for (let i = 0; i < partCount; i++) {
+      const start = i * PART_SIZE
+      const end = Math.min(start + PART_SIZE, total)
+      const chunk = file.slice(start, end)
+      const part = await putPart(id, uploadId, i + 1, chunk, (loaded) => {
+        onProgress(Math.min(99, Math.round(((completedBytes + loaded) / total) * 100)))
+      })
+      parts.push(part)
+      completedBytes = end
+      onProgress(Math.min(99, Math.round((completedBytes / total) * 100)))
+    }
+    await completeMultipart(id, uploadId, parts)
+    onProgress(100)
+  } catch (e) {
+    await abortMultipart(id, uploadId)
+    throw e
+  }
+}
