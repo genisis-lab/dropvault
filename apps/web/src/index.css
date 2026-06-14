@@ -2,74 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+:root {
+  color-scheme: light;
+}
 
-html, body, #root { height: 100%; }
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
-  background: #0b0d17;
-  color: #e6e8f0;
-  font-family: Inter, system-ui, sans-serif;
+  background: #f6f8fc;
+  color: #1f2430;
+  font-family: Inter, "Google Sans", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
 }
 
-/* Glassy surface */
-.glass {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+/* Soft Drive-like elevation */
+.drive-shadow {
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+.drive-shadow-lg {
+  box-shadow: 0 12px 32px -10px rgba(16, 24, 40, 0.22), 0 2px 6px rgba(16, 24, 40, 0.06);
 }
 
-/* Card with hover glow */
-.card-glow {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
-}
-.card-glow:hover {
-  border-color: rgba(129, 140, 248, 0.45);
-  box-shadow: 0 14px 50px -14px rgba(99, 102, 241, 0.5);
-}
-
-/* Gradient text */
+/* Gradient brand text */
 .text-gradient {
-  background: linear-gradient(90deg, #a5b4fc, #c4b5fd, #f0abfc);
+  background: linear-gradient(90deg, #4f46e5, #7c3aed, #db2777);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
-/* Aurora background */
-.aurora { position: fixed; inset: 0; z-index: -20; overflow: hidden; pointer-events: none; }
-.aurora-blob { position: absolute; border-radius: 9999px; filter: blur(90px); opacity: 0.45; }
-.aurora-blob.b1 { width: 60vw; height: 60vw; left: -15vw; top: -22vw; background: radial-gradient(circle at 30% 30%, #4f46e5, transparent 70%); animation: float1 22s ease-in-out infinite; }
-.aurora-blob.b2 { width: 52vw; height: 52vw; right: -12vw; top: -8vw; background: radial-gradient(circle at 70% 30%, #7c3aed, transparent 70%); animation: float2 26s ease-in-out infinite; }
-.aurora-blob.b3 { width: 46vw; height: 46vw; left: 18vw; bottom: -24vw; background: radial-gradient(circle at 50% 50%, #db2777, transparent 70%); opacity: 0.28; animation: float3 30s ease-in-out infinite; }
-
-@keyframes float1 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(6vw, 4vw); } }
-@keyframes float2 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-5vw, 5vw); } }
-@keyframes float3 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(3vw, -4vw); } }
-
-/* Subtle grid overlay, fading out toward the bottom */
-.grid-overlay {
-  position: fixed; inset: 0; z-index: -19; pointer-events: none;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 48px 48px;
-  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, black, transparent 75%);
-  mask-image: radial-gradient(ellipse at 50% 0%, black, transparent 75%);
+/* Subtle colored wash on the canvas */
+.canvas-glow {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(55vw 38vh at 82% -8%, rgba(124, 58, 237, 0.1), transparent 70%),
+    radial-gradient(48vw 36vh at -5% 2%, rgba(79, 70, 229, 0.1), transparent 70%);
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); background-clip: padding-box; }
+/* Light scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d8e2;
+  border-radius: 9999px;
+  border: 3px solid #f6f8fc;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c2c7d4;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .aurora-blob { animation: none; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }
