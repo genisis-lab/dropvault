@@ -1,60 +1,191 @@
-import { motion } from "framer-motion"
-import { Download, Trash2, Clock, Link2, Copy, Check, X, FileText, Image as ImageIcon, Film, Music, Archive } from "lucide-react"
 import { useEffect, useState } from "react"
+import { AnimatePresence, motion } from "framer-motion"
+import {
+  Archive,
+  Check,
+  Clock,
+  Download,
+  FileText,
+  Film,
+  Image as ImageIcon,
+  Link2,
+  MoreVertical,
+  Music,
+  Trash2,
+  X,
+} from "lucide-react"
 import type { DriftFile } from "../lib/api"
 import { downloadUrl, shareUrl } from "../lib/api"
 import { formatBytes, timeLeft } from "../lib/format"
 
-const cardInitial = { opacity: 0, y: 16, scale: 0.96 }
-const cardAnimate = { opacity: 1, y: 0, scale: 1 }
-const cardExit = { opacity: 0, scale: 0.9, transition: { duration: 0.15 } }
-const cardHover = { y: -4, transition: { type: "spring" as const, stiffness: 300 } }
-const panelInitial = { opacity: 0, height: 0 }
-const panelAnimate = { opacity: 1, height: "auto" as const }
+type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber"
 
-function iconFor(type: string | null) {
-  if (!type) return FileText
-  if (type.startsWith("image/")) return ImageIcon
-  if (type.startsWith("video/")) return Film
-  if (type.startsWith("audio/")) return Music
-  if (type.includes("zip") || type.includes("compressed")) return Archive
-  return FileText
+const TINT: Record<Tint, { bg: string; fg: string }> = {
+  indigo: { bg: "bg-indigo-50", fg: "text-indigo-500" },
+  emerald: { bg: "bg-emerald-50", fg: "text-emerald-500" },
+  rose: { bg: "bg-rose-50", fg: "text-rose-500" },
+  violet: { bg: "bg-violet-50", fg: "text-violet-500" },
+  red: { bg: "bg-red-50", fg: "text-red-500" },
+  amber: { bg: "bg-amber-50", fg: "text-amber-500" },
 }
 
-export default function FileCard({
-  file,
-  onExtend,
-  onDelete,
-  onShare,
-  onRevoke,
-}: {
+function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } {
+  if (!type) return { Icon: FileText, tint: "indigo" }
+  if (type.startsWith("image/")) return { Icon: ImageIcon, tint: "emerald" }
+  if (type.startsWith("video/")) return { Icon: Film, tint: "rose" }
+  if (type.startsWith("audio/")) return { Icon: Music, tint: "violet" }
+  if (type.includes("pdf")) return { Icon: FileText, tint: "red" }
+  if (type.includes("zip") || type.includes("compressed") || type.includes("tar")) return { Icon: Archive, tint: "amber" }
+  return { Icon: FileText, tint: "indigo" }
+}
+
+type Props = {
   file: DriftFile
+  view: "grid" | "list"
   onExtend: (id: string, days: number) => void
   onDelete: (id: string) => void
-  onShare: (id: string) => void
+  onShare: (id: string) => Promise<string>
   onRevoke: (id: string) => void
-}) {
-  const Icon = iconFor(file.contentType)
-  const [left, setLeft] = useState(() => timeLeft(file.expiresAt))
-  const [copied, setCopied] = useState(false)
+}
 
-  // Live countdown.
+const cardInitial = { opacity: 0, y: 12, scale: 0.97 }
+const cardAnimate = { opacity: 1, y: 0, scale: 1 }
+const cardExit = { opacity: 0, scale: 0.92 }
+const menuInitial = { opacity: 0, scale: 0.95, y: -4 }
+const menuAnimate = { opacity: 1, scale: 1, y: 0 }
+
+export default function FileCard({ file, view, onExtend, onDelete, onShare, onRevoke }: Props) {
+  const { Icon, tint } = kindOf(file.contentType)
+  const tone = TINT[tint]
+  const [left, setLeft] = useState(() => timeLeft(file.expiresAt))
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
+
   useEffect(() => {
-    const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30_000)
+    const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30000)
     return () => clearInterval(t)
   }, [file.expiresAt])
 
-  const link = file.shareToken ? shareUrl(file.shareToken) : null
-
-  async function copy() {
-    if (!link) return
+  async function copyLink() {
+    setBusy(true)
     try {
-      await navigator.clipboard.writeText(link)
+      const url = file.shareToken ? shareUrl(file.shareToken) : await onShare(file.id)
+      await navigator.clipboard.writeText(url)
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      setTimeout(() => setCopied(false), 1600)
     } catch {
-      /* clipboard blocked; the field is selectable as a fallback */
+      /* ignore */
+    } finally {
+      setBusy(false)
+      setMenuOpen(false)
     }
+  }
+
+  const chipClass =
+    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
+    (left.urgent ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500")
+
+  const menu = (
+    <AnimatePresence>
+      {menuOpen && (
+        <>
+          <button className="fixed inset-0 z-30 cursor-default" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
+          <motion.div
+            initial={menuInitial}
+            animate={menuAnimate}
+            exit={menuInitial}
+            className="absolute right-0 top-9 z-40 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
+          >
+            <a
+              href={downloadUrl(file.id)}
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+            >
+              <Download size={15} /> Download
+            </a>
+            <button
+              disabled={busy}
+              onClick={copyLink}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
+              {file.shareToken ? "Copy link" : "Get link"}
+            </button>
+            {file.shareToken && (
+              <button
+                onClick={() => {
+                  onRevoke(file.id)
+                  setMenuOpen(false)
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+              >
+                <X size={15} /> Revoke link
+              </button>
+            )}
+            <button
+              onClick={() => {
+                onExtend(file.id, 7)
+                setMenuOpen(false)
+              }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+            >
+              <Clock size={15} /> Extend 7 days
+            </button>
+            <button
+              onClick={() => {
+                onDelete(file.id)
+                setMenuOpen(false)
+              }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={15} /> Delete
+            </button>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  )
+
+  if (view === "list") {
+    return (
+      <motion.div
+        layout
+        initial={cardInitial}
+        animate={cardAnimate}
+        exit={cardExit}
+        className="relative flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+      >
+        <div className={"grid h-9 w-9 shrink-0 place-items-center rounded-lg " + tone.bg + " " + tone.fg}>
+          <Icon size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-slate-800" title={file.filename}>
+            {file.filename}
+          </p>
+          <p className="text-xs text-slate-400 sm:hidden">{formatBytes(file.sizeBytes)}</p>
+        </div>
+        {file.shareToken && (
+          <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
+            <Link2 size={11} /> Shared
+          </span>
+        )}
+        <span className={chipClass}>
+          <Clock size={11} /> {left.label}
+        </span>
+        <span className="hidden w-20 text-right text-xs text-slate-400 sm:block">{formatBytes(file.sizeBytes)}</span>
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="File actions"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <MoreVertical size={16} />
+          </button>
+          {menu}
+        </div>
+      </motion.div>
+    )
   }
 
   return (
@@ -63,83 +194,38 @@ export default function FileCard({
       initial={cardInitial}
       animate={cardAnimate}
       exit={cardExit}
-      whileHover={cardHover}
-      className="card-glow group relative flex flex-col gap-3 rounded-2xl p-4"
+      className="group relative flex flex-col rounded-2xl border border-slate-200 bg-white drive-shadow transition hover:border-slate-300 hover:shadow-md"
     >
-      <div className="flex items-start justify-between">
-        <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-drift-500/25 to-glow-500/20 text-drift-200">
-          <Icon size={20} />
-        </div>
-        <span
-          className={
-            "flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium " +
-            (left.urgent ? "bg-red-500/15 text-red-300" : "bg-white/5 text-white/60")
-          }
-        >
-          <Clock size={12} /> {left.label}
+      <div className={"relative flex h-24 items-center justify-center rounded-t-2xl " + tone.bg}>
+        <Icon size={34} className={tone.fg} />
+        <span className={"absolute right-2 top-2 " + chipClass}>
+          <Clock size={11} /> {left.label}
         </span>
+        {file.shareToken && (
+          <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-white/85 px-2 py-0.5 text-[11px] font-medium text-drift-600 backdrop-blur">
+            <Link2 size={11} /> Shared
+          </span>
+        )}
       </div>
-
-      <div className="min-w-0">
-        <p className="truncate font-semibold" title={file.filename}>{file.filename}</p>
-        <p className="text-xs text-white/40">
-          {formatBytes(file.sizeBytes)}
-          {file.shareToken ? <span className="text-drift-300"> · shared</span> : null}
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <div className={"grid h-7 w-7 shrink-0 place-items-center rounded-md " + tone.bg + " " + tone.fg}>
+          <Icon size={15} />
+        </div>
+        <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800" title={file.filename}>
+          {file.filename}
         </p>
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="File actions"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <MoreVertical size={16} />
+          </button>
+          {menu}
+        </div>
       </div>
-
-      <div className="mt-1 flex items-center gap-2">
-        <a
-          href={downloadUrl(file.id)}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/5 py-2 text-sm font-medium transition hover:bg-white/10"
-        >
-          <Download size={15} /> Download
-        </a>
-        <button
-          onClick={() => (link ? copy() : onShare(file.id))}
-          title={link ? "Copy share link" : "Create share link"}
-          className={
-            "rounded-lg p-2 transition " +
-            (link ? "bg-drift-500/20 text-drift-200 hover:bg-drift-500/30" : "bg-white/5 text-white/70 hover:bg-white/10")
-          }
-        >
-          <Link2 size={15} />
-        </button>
-        <button
-          onClick={() => onExtend(file.id, 7)}
-          title="Extend by 7 days (max 30)"
-          className="rounded-lg bg-white/5 p-2 text-white/70 transition hover:bg-drift-500/20 hover:text-drift-300"
-        >
-          <Clock size={15} />
-        </button>
-        <button
-          onClick={() => onDelete(file.id)}
-          title="Delete now"
-          className="rounded-lg bg-white/5 p-2 text-white/70 transition hover:bg-red-500/20 hover:text-red-300"
-        >
-          <Trash2 size={15} />
-        </button>
-      </div>
-
-      {link && (
-        <motion.div initial={panelInitial} animate={panelAnimate} className="overflow-hidden">
-          <div className="flex items-center gap-2 rounded-lg border border-drift-400/30 bg-drift-500/10 px-2 py-1.5">
-            <Link2 size={13} className="shrink-0 text-drift-300" />
-            <input
-              readOnly
-              value={link}
-              onFocus={(e) => e.currentTarget.select()}
-              className="min-w-0 flex-1 bg-transparent text-xs text-white/70 outline-none"
-            />
-            <button onClick={copy} title="Copy" className="shrink-0 rounded-md p-1 text-white/60 transition hover:bg-white/10 hover:text-white">
-              {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-            </button>
-            <button onClick={() => onRevoke(file.id)} title="Revoke link" className="shrink-0 rounded-md p-1 text-white/60 transition hover:bg-red-500/20 hover:text-red-300">
-              <X size={14} />
-            </button>
-          </div>
-        </motion.div>
-      )}
+      <div className="-mt-1 px-3 pb-2.5 text-xs text-slate-400">{formatBytes(file.sizeBytes)}</div>
     </motion.div>
   )
 }
