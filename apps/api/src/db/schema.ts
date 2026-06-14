@@ -68,6 +68,8 @@ export type FolderRow = typeof folders.$inferSelect
 // Dropvault files table. epoch seconds for created/expires.
 // share_token: nullable public token; NULL means the file is not shared.
 // folder_id: nullable; NULL means the file lives at the root (My Drive).
+// share_password / share_download_limit / share_download_count / share_expires_at:
+//   optional per-link protections (see migration 0003). NULL = not set.
 // ---------------------------------------------------------------------------
 export const files = sqliteTable("files", {
   id: text("id").primaryKey(), // uuid, also the R2 key
@@ -79,6 +81,10 @@ export const files = sqliteTable("files", {
   status: text("status").notNull().default("pending"), // pending | ready
   shareToken: text("share_token"), // null = not shared
   folderId: text("folder_id"), // null = root
+  sharePassword: text("share_password"), // sha-256 hash; null = no password
+  shareDownloadLimit: integer("share_download_limit"), // null = unlimited
+  shareDownloadCount: integer("share_download_count").notNull().default(0),
+  shareExpiresAt: integer("share_expires_at"), // link-specific expiry (epoch s); null = follow file expiry
   createdAt: integer("created_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
 })
