@@ -13,6 +13,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: API_TOKEN_EXPR
+      CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID_EXPR
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,14 +39,9 @@ jobs:
       - name: Apply D1 migrations
         working-directory: apps/api
         run: pnpm exec wrangler d1 migrations apply dropvault --remote
-        env:
-          CLOUDFLARE_API_TOKEN: $ secrets.CLOUDFLARE_API_TOKEN 
-          CLOUDFLARE_ACCOUNT_ID: $ secrets.CLOUDFLARE_ACCOUNT_ID 
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: $ secrets.CLOUDFLARE_API_TOKEN 
-          accountId: $ secrets.CLOUDFLARE_ACCOUNT_ID 
           workingDirectory: apps/api
           command: deploy
