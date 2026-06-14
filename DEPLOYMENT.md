@@ -1,15 +1,15 @@
 # 🚀 Dropvault — Deployment Guide
 
-This is the complete, do-it-once setup to get Dropvault live on Cloudflare with automatic deploys from GitHub.
+The complete, do-it-once setup to get Dropvault live on Cloudflare with **automatic deploys from GitHub**. Everything here is done in the **Cloudflare dashboard** + **GitHub web UI** — no local CLI, no API tokens, no secrets pasted into GitHub.
 
-There are **two deploy targets**:
+There are **two deploy targets**, and Cloudflare builds and deploys *both* directly from this repo on every push:
 
 | Part | Lives on | How it deploys |
 |------|----------|----------------|
-| Web app (`apps/web`) | Cloudflare **Pages** | Auto-deploys via the Pages ↔ GitHub integration |
-| API (`apps/api`) | Cloudflare **Workers** | Auto-deploys via the GitHub Actions workflow in this repo |
+| Web app (`apps/web`) | Cloudflare **Pages** | Pages ↔ GitHub integration |
+| API (`apps/api`) | Cloudflare **Workers** | **Workers Builds** ↔ GitHub integration |
 
-Once set up, you never run `wrangler` locally — every `git push` redeploys.
+Because Cloudflare pulls and deploys the code itself, you don't need a Cloudflare API token or any GitHub Actions secrets. Once connected, every `git push` redeploys. 🎉
 
 ---
 
@@ -17,7 +17,6 @@ Once set up, you never run `wrangler` locally — every `git push` redeploys.
 
 - A Cloudflare account (free tier is fine).
 - This repo on GitHub (you're here).
-- Everything below can be done from the **Cloudflare dashboard** + **GitHub web UI** — no local CLI required.
 
 ---
 
@@ -27,18 +26,18 @@ Once set up, you never run `wrangler` locally — every `git push` redeploys.
 Cloudflare dashboard → **R2** → **Create bucket** → name it **`dropvault-files`**.
 
 ### D1 database (metadata + auth)
-Dashboard → **Workers & Pages** → **D1** → **Create database** → name it **`dropvault`**.
+Dashboard → **Workers & Pages** → **D1 SQL Database** → **Create** → name it **`dropvault`**.
 Copy the **Database ID** it shows you.
 
 ### R2 S3 API token (for presigned uploads/downloads)
 Dashboard → **R2** → **Manage R2 API Tokens** → **Create API token** (Object Read & Write).
-Save the **Access Key ID** and **Secret Access Key** — these become Worker secrets below.
+Save the **Access Key ID** and **Secret Access Key** — these become Worker secrets in step 5.
 
 ---
 
 ## 2. Fill in `apps/api/wrangler.toml`
 
-Edit these placeholders and commit:
+Edit these placeholders and commit (you can edit directly in the GitHub web UI):
 
 ```toml
 [[d1_databases]]
@@ -48,8 +47,8 @@ database_id = "PASTE_YOUR_D1_DATABASE_ID_HERE"   # from step 1
 migrations_dir = "migrations"
 
 [vars]
-PUBLIC_APP_URL = "https://dropvault.pages.dev"   # your Pages URL (set after step 5)
-R2_ACCOUNT_ID = "PASTE_YOUR_CLOUDFLARE_ACCOUNT_ID_HERE"  # Dashboard → right sidebar → Account ID
+PUBLIC_APP_URL = "https://dropvault.pages.dev"          # your Pages URL (set after step 3)
+R2_ACCOUNT_ID = "PASTE_YOUR_CLOUDFLARE_ACCOUNT_ID_HERE" # Dashboard → right sidebar → Account ID
 R2_BUCKET_NAME = "dropvault-files"
 DEFAULT_EXPIRY_DAYS = "2"
 MAX_EXPIRY_DAYS = "30"
@@ -57,28 +56,7 @@ MAX_EXPIRY_DAYS = "30"
 
 ---
 
-## 3. Create a Cloudflare API token (for GitHub Actions)
-
-Dashboard → **My Profile** → **API Tokens** → **Create Token** → use the **“Edit Cloudflare Workers”** template.
-Make sure it includes permissions for **Workers Scripts: Edit**, **D1: Edit**, and **Workers R2 Storage: Edit**.
-Copy the generated token.
-
-Also grab your **Account ID** (Dashboard → right sidebar).
-
----
-
-## 4. Add GitHub repo secrets
-
-Repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**. Add:
-
-| Secret name | Value |
-|-------------|-------|
-| `CLOUDFLARE_API_TOKEN` | the token from step 3 |
-| `CLOUDFLARE_ACCOUNT_ID` | your Cloudflare Account ID |
-
----
-
-## 5. Deploy the web app to Cloudflare Pages
+## 3. Deploy the web app to Cloudflare Pages
 
 Dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → pick **`Dropvault`**.
 
@@ -95,69 +73,31 @@ Save & deploy → you get `https://dropvault.pages.dev`. Put that URL into `PUBL
 
 ---
 
-## 6. The API deploy workflow
+## 4. Deploy the API with Workers Builds (Git integration)
 
-This repo already has `.github/workflows/deploy-api.yml`. **Replace its entire contents with the block below** (copy it straight from this file on GitHub — do **not** retype the `$ secrets.* ` parts, just copy):
+This replaces any GitHub Actions workflow — Cloudflare builds and deploys the Worker itself.
 
-```yaml
-name: Deploy API Worker
+1. Dashboard → **Workers & Pages** → **Create** → **Workers** → **Import a repository** (Connect to Git) → pick **`Dropvault`**.
+2. Configure the build:
 
-# Auto-deploys the Cloudflare Worker (apps/api) whenever its code changes on main.
-# The web app (apps/web) is deployed separately by the Cloudflare Pages Git integration.
-on:
-  push:
-    branches: [main]
-    paths:
-      - "apps/api/**"
-      - ".github/workflows/deploy-api.yml"
-  workflow_dispatch: {}
+| Setting | Value |
+|---------|-------|
+| Git branch | `main` |
+| **Root directory** | `apps/api` |
+| Build command | *(leave blank — dependencies install automatically)* |
+| **Deploy command** | `npx wrangler d1 migrations apply dropvault --remote && npx wrangler deploy` |
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: $ secrets.CLOUDFLARE_API_TOKEN 
-      CLOUDFLARE_ACCOUNT_ID: $ secrets.CLOUDFLARE_ACCOUNT_ID 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+> The root directory points Cloudflare at `apps/api`, where `wrangler.toml` lives. The deploy command applies any new D1 migrations first, then deploys. (Migrations are idempotent — already-applied ones are skipped.)
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+3. Save. Cloudflare creates the **`dropvault-api`** Worker and deploys it. Every future push that changes `apps/api/**` triggers a redeploy automatically.
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install
-
-      # Applies any new D1 migrations to the remote DB before deploying.
-      # Safe to re-run: already-applied migrations are skipped.
-      - name: Apply D1 migrations
-        working-directory: apps/api
-        run: pnpm exec wrangler d1 migrations apply dropvault --remote
-
-      - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          workingDirectory: apps/api
-          command: deploy
-```
-
-> The Cloudflare credentials are set once as job-level `env`. `wrangler-action` and Wrangler automatically read `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` from the environment, so no per-step inputs are needed.
+> **Optional — limit builds:** in the Worker's **Settings → Builds → Build watch paths**, set the include path to `apps/api/*` so web-only commits don't trigger an API build.
 
 ---
 
-## 7. Set the Worker's runtime secrets
+## 5. Set the Worker's runtime secrets
 
-These are the app's *runtime* secrets (kept out of CI on purpose). Set them on the Worker after its first deploy:
-
-Dashboard → **Workers & Pages** → **dropvault-api** → **Settings** → **Variables and Secrets** → add each as an **encrypted** secret:
+These are the app's *runtime* secrets. Set them on the Worker (Dashboard → **Workers & Pages** → **dropvault-api** → **Settings** → **Variables and Secrets** → add each as an **encrypted** secret):
 
 | Secret | What it is |
 |--------|-----------|
@@ -167,9 +107,11 @@ Dashboard → **Workers & Pages** → **dropvault-api** → **Settings** → **V
 | `R2_ACCESS_KEY_ID` | R2 S3 access key (step 1) |
 | `R2_SECRET_ACCESS_KEY` | R2 S3 secret key (step 1) |
 
+After adding secrets, redeploy once (push any commit, or **Deployments → Retry** on the Worker).
+
 ---
 
-## 8. Google OAuth
+## 6. Google OAuth
 
 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → **Create Credentials** → **OAuth client ID** → **Web application**.
 
@@ -181,24 +123,31 @@ https://dropvault.pages.dev/api/auth/callback/google
 
 (For local dev also add `http://localhost:8787/api/auth/callback/google`.)
 
-Put the client ID/secret into the Worker secrets from step 7.
+Put the client ID/secret into the Worker secrets from step 5.
 
 ---
 
-## 9. (Optional) R2 lifecycle backstop
+## 7. (Optional) R2 lifecycle backstop
 
-R2 → **dropvault-files** → **Settings** → **Object lifecycle rules** → add a rule to delete objects 30 days after creation. This is a final safety net behind the on-access expiry check and the hourly Cron sweep.
+R2 → **dropvault-files** → **Settings** → **Object lifecycle rules** → add a rule to delete objects 30 days after creation. A final safety net behind the on-access expiry check and the hourly Cron sweep.
+
+---
+
+## 8. Remove the old Actions workflow
+
+This repo contains `.github/workflows/deploy-api.yml` from an earlier approach. With Workers Builds handling deploys, **it's no longer needed** — delete it (GitHub web UI → open the file → trash icon → commit) so it doesn't run or show failed checks. No GitHub Actions secrets or Cloudflare API token are required anymore.
 
 ---
 
 ## ✅ After setup: how deploys work
 
-- **Push code under `apps/api/**`** → GitHub Actions runs `deploy-api.yml` → migrations applied + Worker deployed. (Or trigger manually: **Actions → Deploy API Worker → Run workflow**.)
-- **Push anything** → Cloudflare Pages rebuilds and redeploys the web app.
-- You never touch a local CLI again. 🎉
+- **Push under `apps/api/**`** → Workers Builds runs migrations + deploys the Worker.
+- **Push under `apps/web/**`** → Pages rebuilds and redeploys the web app.
+- No local CLI, no API tokens, no GitHub secrets. Just `git push`.
 
 ## Troubleshooting
 
-- **Actions deploy fails with an auth error** → check the `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo secrets exist and the token has Workers + D1 + R2 edit permissions.
-- **`command not found: wrangler` locally** → you don't need it; CI handles deploys. If you *want* it locally, use `pnpm exec wrangler ...` from `apps/api` (it's a dev dependency).
-- **Login/upload works but downloads 410** → that file expired; the on-access check deletes expired files by design.
+- **Worker build fails on install** → confirm **Root directory** is `apps/api`. pnpm resolves the workspace from there automatically.
+- **`No account id found`** → not applicable with Workers Builds (Cloudflare runs inside your account); if you ever deploy from a local CLI instead, run `npx wrangler login` first.
+- **`command not found: wrangler` locally** → you don't need it; Cloudflare handles deploys. If you want it locally, use `pnpm exec wrangler ...` from `apps/api` (it's a dev dependency).
+- **Login/upload works but downloads return 410** → that file expired; the on-access check deletes expired files by design.
