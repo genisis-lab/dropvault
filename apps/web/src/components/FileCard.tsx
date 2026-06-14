@@ -227,7 +227,7 @@ export default function FileCard({
                   onClick={() => setMoveOpen(false)}
                   className="flex w-full items-center gap-2.5 px-3 py-2 font-medium text-slate-600 hover:bg-slate-50"
                 >
-                  <ChevronLeft size={15} /> Move to\u2026
+                  <ChevronLeft size={15} /> Move to…
                 </button>
                 <div className="my-1 h-px bg-slate-100" />
                 <div className="max-h-52 overflow-y-auto">
