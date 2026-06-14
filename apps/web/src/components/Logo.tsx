@@ -11,7 +11,7 @@ export default function Logo({ size = 28 }: { size?: number }) {
         initial={initial}
         animate={animate}
         transition={transition}
-        className="grid place-items-center rounded-xl bg-gradient-to-br from-drift-400 to-drift-600 shadow-lg shadow-drift-600/30"
+        className="grid place-items-center rounded-xl bg-gradient-to-br from-drift-400 via-glow-500 to-blush-500 shadow-lg shadow-glow-600/30"
         style={boxStyle}
       >
         <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -19,7 +19,7 @@ export default function Logo({ size = 28 }: { size?: number }) {
           <path d="M12 11v7m0 0 2.5-2.5M12 18l-2.5-2.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </motion.div>
-      <span className="text-lg font-extrabold tracking-tight">Dropvault</span>
+      <span className="text-lg font-extrabold tracking-tight text-gradient">Dropvault</span>
     </div>
   )
 }

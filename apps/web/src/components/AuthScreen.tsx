@@ -41,8 +41,12 @@ export default function AuthScreen() {
         transition={cardTransition}
         className="glass w-full max-w-md rounded-3xl p-8 shadow-2xl shadow-black/40"
       >
-        <Logo size={26} />
-        <h1 className="mt-6 text-2xl font-bold">{mode === "in" ? "Welcome back" : "Create your account"}</h1>
+        <Logo size={28} />
+        <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/50">
+          <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-drift-400 to-blush-400" />
+          Files that drift away
+        </div>
+        <h1 className="mt-3 text-2xl font-bold">{mode === "in" ? "Welcome back" : "Create your account"}</h1>
         <p className="mt-1 text-sm text-white/50">Your files, shared with friends — and gone when they should be.</p>
 
         <button
@@ -66,7 +70,7 @@ export default function AuthScreen() {
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             disabled={busy}
-            className="w-full rounded-xl bg-gradient-to-r from-drift-500 to-drift-600 py-2.5 font-semibold shadow-lg shadow-drift-600/30 transition hover:opacity-95 disabled:opacity-50"
+            className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold shadow-lg shadow-glow-600/30 transition hover:opacity-95 disabled:opacity-50"
           >
             {busy ? "…" : mode === "in" ? "Sign in" : "Sign up"}
           </button>
@@ -74,7 +78,7 @@ export default function AuthScreen() {
 
         <p className="mt-5 text-center text-sm text-white/50">
           {mode === "in" ? "New here?" : "Already have an account?"}{" "}
-          <button onClick={() => setMode(mode === "in" ? "up" : "in")} className="font-semibold text-drift-400 hover:underline">
+          <button onClick={() => setMode(mode === "in" ? "up" : "in")} className="font-semibold text-drift-300 hover:underline">
             {mode === "in" ? "Create an account" : "Sign in"}
           </button>
         </p>
@@ -91,7 +95,7 @@ function Field(props: {
   type?: string
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 focus-within:border-drift-400">
+    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 transition focus-within:border-drift-400">
       <span className="text-white/40">{props.icon}</span>
       <input
         className="w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-white/30"

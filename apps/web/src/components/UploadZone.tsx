@@ -6,8 +6,8 @@ import { formatBytes } from "../lib/format"
 
 type Job = { name: string; size: number; pct: number; state: "uploading" | "done" | "error" }
 
-const zoneIdle = { scale: 1, borderColor: "rgba(255,255,255,0.12)" }
-const zoneActive = { scale: 1.01, borderColor: "rgba(99,102,241,0.8)" }
+const zoneIdle = { scale: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.02)" }
+const zoneActive = { scale: 1.01, borderColor: "rgba(139,92,246,0.85)", backgroundColor: "rgba(139,92,246,0.08)" }
 const iconUp = { y: -6 }
 const iconDown = { y: 0 }
 const rowInitial = { opacity: 0, height: 0 }
@@ -62,11 +62,11 @@ export default function UploadZone({
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
         onClick={() => inputRef.current?.click()}
-        className="glass flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed py-14 text-center transition"
+        className="relative flex cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border-2 border-dashed py-16 text-center backdrop-blur-md transition"
       >
         <motion.div
           animate={dragging ? iconUp : iconDown}
-          className="grid h-16 w-16 place-items-center rounded-2xl bg-drift-500/15 text-drift-400"
+          className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-drift-500/25 to-blush-500/20 text-drift-200 shadow-lg shadow-glow-600/20"
         >
           <UploadCloud size={30} />
         </motion.div>
@@ -83,7 +83,7 @@ export default function UploadZone({
             const barAnimate = { width: `${job.pct}%` }
             const barClass =
               "h-full rounded-full " +
-              (job.state === "error" ? "bg-red-500" : "bg-gradient-to-r from-drift-400 to-drift-600")
+              (job.state === "error" ? "bg-red-500" : "bg-gradient-to-r from-drift-400 via-glow-500 to-blush-500")
             return (
               <motion.div
                 key={key}

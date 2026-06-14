@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createAuth } from "./auth"
 import filesRoute from "./routes/files"
+import shareRoute from "./routes/share"
 import { sweepExpired } from "./lib/sweep"
 import type { Bindings, Variables } from "./types"
 
@@ -26,7 +27,10 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw)
 })
 
-// File operations
+// Public share downloads (no auth).
+app.route("/api/share", shareRoute)
+
+// Authenticated file operations
 app.route("/api/files", filesRoute)
 
 export default {

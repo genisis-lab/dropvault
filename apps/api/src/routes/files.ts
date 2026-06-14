@@ -35,8 +35,6 @@ files.post("/presign", async (c) => {
 
   // Return a SAME-ORIGIN relative path. The browser uploads to its own origin
   // (the Pages proxy forwards it to this Worker), so the session cookie is sent.
-  // Building an absolute URL from c.req.url would point at the Worker origin and
-  // make the upload cross-origin (no cookie -> 401).
   const uploadUrl = `/api/files/${id}/upload`
   return c.json({ id, uploadUrl, expiresAt })
 })
@@ -89,7 +87,7 @@ files.get("/", async (c) => {
   return c.json({ files: rows })
 })
 
-// 5) Download: enforce on-access expiry, then stream from R2.
+// 5) Download (owner): enforce on-access expiry, then stream from R2.
 files.get("/:id/download", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
@@ -99,7 +97,6 @@ files.get("/:id/download", async (c) => {
   if (row.status !== "ready") return c.json({ error: "not found" }, 404)
 
   if (isExpired(row.expiresAt)) {
-    // Never serve an expired file. Clean it up opportunistically.
     try { await c.env.FILES.delete(row.r2Key) } catch {}
     await db.delete(schema.files).where(eq(schema.files.id, id)).run()
     return c.json({ error: "expired" }, 410)
@@ -115,7 +112,33 @@ files.get("/:id/download", async (c) => {
   return new Response(object.body, { headers })
 })
 
-// 6) Extend expiry (clamped so total lifetime <= MAX_EXPIRY_DAYS).
+// 6) Create (or return existing) a public share link for a file.
+files.post("/:id/share", async (c) => {
+  const userId = c.get("userId")
+  const id = c.req.param("id")
+  const db = getDb(c.env.DB)
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
+  if (!row) return c.json({ error: "not found" }, 404)
+
+  const token = row.shareToken ?? crypto.randomUUID().replace(/-/g, "")
+  if (!row.shareToken) {
+    await db.update(schema.files).set({ shareToken: token }).where(eq(schema.files.id, id)).run()
+  }
+  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}` })
+})
+
+// 7) Revoke a file's public share link.
+files.delete("/:id/share", async (c) => {
+  const userId = c.get("userId")
+  const id = c.req.param("id")
+  const db = getDb(c.env.DB)
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
+  if (!row) return c.json({ error: "not found" }, 404)
+  await db.update(schema.files).set({ shareToken: null }).where(eq(schema.files.id, id)).run()
+  return c.json({ ok: true })
+})
+
+// 8) Extend expiry (clamped so total lifetime <= MAX_EXPIRY_DAYS).
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
@@ -130,7 +153,7 @@ files.patch("/:id", async (c) => {
   return c.json({ ok: true, expiresAt })
 })
 
-// 7) Delete now.
+// 9) Delete now.
 files.delete("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
