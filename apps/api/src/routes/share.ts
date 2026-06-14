@@ -1,12 +1,18 @@
 import { Hono } from "hono"
-import { and, desc, eq, gt } from "drizzle-orm"
+import { and, desc, eq, gt, sql } from "drizzle-orm"
+import { getCookie, setCookie } from "hono/cookie"
 import { getDb, schema } from "../db"
 import { isExpired, nowSeconds } from "../lib/expiry"
+import { sha256Hex } from "../lib/hash"
 import type { Bindings, Variables } from "../types"
+
+type FileRow = typeof schema.files.$inferSelect
 
 // Public, UNAUTHENTICATED downloads via a share token. Mounted at /api/share so
 // it rides through the same Pages proxy as the rest of the API. Anyone with the
 // link can fetch the file/folder until it expires or the owner revokes the token.
+// File links may additionally be protected with a password, a download limit,
+// and/or a link-specific expiry (folder links stay simple).
 const share = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 function esc(s: string): string {
@@ -56,11 +62,17 @@ const STYLE =
   `.card{background:#fff;border:1px solid #e2e8f0;border-radius:22px;padding:34px 28px;text-align:center;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06)}` +
   `.fic{width:72px;height:72px;border-radius:20px;margin:0 auto 18px;display:grid;place-items:center;font-size:32px;background:linear-gradient(135deg,#eef2ff,#f5f3ff);color:#7c3aed}` +
   `.btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:22px}` +
-  `.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:12px;font-weight:600;font-size:15px;text-decoration:none;border:1px solid transparent}` +
+  `.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:12px;font-weight:600;font-size:15px;text-decoration:none;border:1px solid transparent;cursor:pointer}` +
   `.btn.primary{background:linear-gradient(135deg,#7c3aed,#8b5cf6,#ec4899);color:#fff;box-shadow:0 8px 20px rgba(124,58,237,.28)}` +
   `.btn.primary:hover{filter:brightness(1.05)}` +
   `.btn.ghost{background:#fff;border-color:#e2e8f0;color:#475569}` +
   `.btn.ghost:hover{background:#f8fafc}` +
+  `.pwform{display:flex;flex-direction:column;gap:12px;max-width:320px;margin:22px auto 0}` +
+  `.pwin{padding:12px 14px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;outline:none;width:100%}` +
+  `.pwin:focus{border-color:#a78bfa}` +
+  `.badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:0 0 6px}` +
+  `.badge{display:inline-block;padding:4px 11px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:12px;font-weight:600}` +
+  `.err{color:#dc2626;font-size:14px;margin:0}` +
   `footer{text-align:center;color:#94a3b8;font-size:12px;margin-top:28px}`
 
 function pageShell(title: string, inner: string): string {
@@ -75,17 +87,33 @@ function pageShell(title: string, inner: string): string {
     `</div></body></html>`
 }
 
-function filePage(name: string, meta: string, token: string): string {
+function filePage(name: string, meta: string, token: string, notes: string): string {
   const inner =
     `<div class="card">` +
     `<div class="fic">\u2913</div>` +
     `<h1>${esc(name)}</h1>` +
     `<p class="muted">${esc(meta)}</p>` +
+    notes +
     `<div class="btns">` +
     `<a class="btn primary" href="/api/share/${token}?dl=1">\u2193 Download</a>` +
     `<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Preview</a>` +
     `</div></div>`
   return pageShell(name, inner)
+}
+
+function passwordPage(token: string, error: boolean): string {
+  const err = error ? `<p class="err">Incorrect password. Please try again.</p>` : ``
+  const inner =
+    `<div class="card">` +
+    `<div class="fic">\uD83D\uDD12</div>` +
+    `<h1>Password required</h1>` +
+    `<p class="muted">This file is protected. Enter the password to continue.</p>` +
+    `<form method="post" action="/api/share/${token}/unlock" class="pwform">` +
+    err +
+    `<input class="pwin" type="password" name="password" placeholder="Password" autofocus required/>` +
+    `<button type="submit" class="btn primary" style="justify-content:center">Unlock</button>` +
+    `</form></div>`
+  return pageShell("Password required", inner)
 }
 
 function infoPage(title: string, msg: string): string {
@@ -111,6 +139,30 @@ function streamObject(object: R2ObjectBody, filename: string, attachment: boolea
   return new Response(object.body, { headers })
 }
 
+// Cookie that proves a visitor entered the correct password for this link. We
+// store the password hash itself, scoped to this token's path so it is not sent
+// to unrelated links.
+function pwCookieName(token: string): string {
+  return `dvpw_${token}`
+}
+
+function pwUnlocked(c: any, row: FileRow, token: string): boolean {
+  if (!row.sharePassword) return true
+  return getCookie(c, pwCookieName(token)) === row.sharePassword
+}
+
+// Link-level gate (separate from the file's own auto-expiry): link expiry hit or
+// the download limit reached. Returns an info reason or null when the link is open.
+function shareClosed(row: FileRow): { title: string; msg: string } | null {
+  if (row.shareExpiresAt && row.shareExpiresAt <= nowSeconds()) {
+    return { title: "Link expired", msg: "This share link has expired. Ask the owner for a new one." }
+  }
+  if (row.shareDownloadLimit != null && row.shareDownloadCount >= row.shareDownloadLimit) {
+    return { title: "Link unavailable", msg: "This share link has reached its download limit." }
+  }
+  return null
+}
+
 // --- Folder share: public listing page -------------------------------------
 share.get("/folder/:token", async (c) => {
   const token = c.req.param("token")
@@ -127,7 +179,7 @@ share.get("/folder/:token", async (c) => {
     const base = `/api/share/folder/${token}/${r.id}`
     return `<div class="row">` +
       `<a class="rowmain" href="${base}?raw=1" target="_blank" rel="noopener">` +
-      `<div class="ic">\u1F5CE</div>` +
+      `<div class="ic">\uD83D\uDCC4</div>` +
       `<div class="grow"><div class="name">${esc(r.filename)}</div><div class="meta">${fmtBytes(r.sizeBytes)}</div></div>` +
       `</a>` +
       `<a class="dl" href="${base}?dl=1">\u2193 Download</a></div>`
@@ -159,6 +211,31 @@ share.get("/folder/:token/:fileId", async (c) => {
   return streamObject(object, row.filename, wantDownload)
 })
 
+// --- Single-file share: unlock a password-protected link --------------------
+share.post("/:token/unlock", async (c) => {
+  const token = c.req.param("token")
+  const db = getDb(c.env.DB)
+  const row = await db.select().from(schema.files).where(eq(schema.files.shareToken, token)).get()
+  if (!row || row.status !== "ready") {
+    return c.html(infoPage("Link unavailable", "This share link is invalid or has been revoked."), 404)
+  }
+  if (!row.sharePassword) return c.redirect(`/api/share/${token}`, 302)
+
+  const form = await c.req.parseBody()
+  const submitted = String(form?.password ?? "")
+  const ok = (await sha256Hex(submitted)) === row.sharePassword
+  if (!ok) return c.html(passwordPage(token, true), 401)
+
+  setCookie(c, pwCookieName(token), row.sharePassword, {
+    path: `/api/share/${token}`,
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: true,
+    maxAge: 86400,
+  })
+  return c.redirect(`/api/share/${token}`, 302)
+})
+
 // --- Single-file share: landing page (default) + download / preview ---------
 share.get("/:token", async (c) => {
   const token = c.req.param("token")
@@ -183,14 +260,43 @@ share.get("/:token", async (c) => {
       : c.html(infoPage("Link expired", "This file has expired and is no longer available."), 410)
   }
 
+  // Link-level limits (separate from the file's own auto-expiry).
+  const closed = shareClosed(row)
+  if (closed) {
+    return wantsBytes ? c.json({ error: closed.title }, 410) : c.html(infoPage(closed.title, closed.msg), 410)
+  }
+
+  // Password gate.
+  if (row.sharePassword && !pwUnlocked(c, row, token)) {
+    return wantsBytes ? c.json({ error: "password required" }, 401) : c.html(passwordPage(token, false), 401)
+  }
+
   if (wantsBytes) {
     const object = await c.env.FILES.get(row.r2Key)
     if (!object) return c.json({ error: "not found" }, 404)
+    // Count actual downloads only (previews via ?raw=1 do not consume the limit).
+    if (wantDownload) {
+      await db.update(schema.files)
+        .set({ shareDownloadCount: sql`${schema.files.shareDownloadCount} + 1` })
+        .where(eq(schema.files.id, row.id)).run()
+    }
     return streamObject(object, row.filename, wantDownload)
   }
 
-  const meta = `${fmtBytes(row.sizeBytes)} \u00b7 ${humanLeft(row.expiresAt)}`
-  return c.html(filePage(row.filename, meta, token))
+  // Landing page: surface any active protections as small badges.
+  const badges: string[] = []
+  if (row.shareDownloadLimit != null) {
+    const left = Math.max(0, row.shareDownloadLimit - row.shareDownloadCount)
+    badges.push(`<span class="badge">${left} download${left === 1 ? "" : "s"} left</span>`)
+  }
+  if (row.shareExpiresAt) badges.push(`<span class="badge">${esc(humanLeft(row.shareExpiresAt))}</span>`)
+  if (row.sharePassword) badges.push(`<span class="badge">\uD83D\uDD13 Unlocked</span>`)
+  const notesHtml = badges.length ? `<div class="badges">${badges.join("")}</div>` : ""
+
+  // Meta shows the soonest of the file's own expiry and the link expiry.
+  const effExpiry = row.shareExpiresAt && row.shareExpiresAt < row.expiresAt ? row.shareExpiresAt : row.expiresAt
+  const meta = `${fmtBytes(row.sizeBytes)} \u00b7 ${humanLeft(effExpiry)}`
+  return c.html(filePage(row.filename, meta, token, notesHtml))
 })
 
 export default share
