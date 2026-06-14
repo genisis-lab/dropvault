@@ -14,6 +14,12 @@ export type DriftFile = {
   folderId: string | null
   createdAt: number
   expiresAt: number
+  // Share-link protections (file links only). The server never returns the
+  // password itself \u2014 only whether one is set.
+  shareHasPassword?: boolean
+  shareDownloadLimit?: number | null
+  shareDownloadCount?: number
+  shareExpiresAt?: number | null
 }
 
 export type Folder = {
@@ -104,13 +110,41 @@ export function downloadUrl(id: string) {
   return `${API}/api/files/${id}/download`
 }
 
-// Create (or fetch existing) a public share link for a file.
-export async function createShare(id: string) {
-  const res = await fetch(`${API}/api/files/${id}/share`, { method: "POST", credentials: "include" })
-  return j<{ token: string; url: string }>(res)
+// Inline (in-browser) URL for owner previews and thumbnails. Same bytes as
+// download but served with an inline Content-Disposition.
+export function inlineUrl(id: string) {
+  return `${API}/api/files/${id}/inline`
 }
 
-// Revoke a file's public share link.
+// Optional protections for a file share link. Omit a field to leave it unset;
+// pass null to clear it. Any provided option resets the download counter.
+export type ShareOptions = {
+  password?: string | null
+  downloadLimit?: number | null
+  expiresInDays?: number | null
+}
+
+export type ShareResult = {
+  token: string
+  url: string
+  hasPassword?: boolean
+  downloadLimit?: number | null
+  shareExpiresAt?: number | null
+}
+
+// Create (or update) a public share link for a file. With no options it simply
+// ensures a token exists; with options it (re)configures the link protections.
+export async function createShare(id: string, options?: ShareOptions): Promise<ShareResult> {
+  const res = await fetch(`${API}/api/files/${id}/share`, {
+    method: "POST",
+    credentials: "include",
+    headers: options ? { "Content-Type": "application/json" } : undefined,
+    body: options ? JSON.stringify(options) : undefined,
+  })
+  return j<ShareResult>(res)
+}
+
+// Revoke a file's public share link (also clears any link protections).
 export async function revokeShare(id: string) {
   const res = await fetch(`${API}/api/files/${id}/share`, { method: "DELETE", credentials: "include" })
   return j<{ ok: true }>(res)
