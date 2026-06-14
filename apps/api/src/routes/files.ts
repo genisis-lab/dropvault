@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { and, desc, eq, gt } from "drizzle-orm"
 import { getDb, schema } from "../db"
-import { computeExpiresAt, clampExtension, isExpired, nowSeconds } from "../lib/expiry"
+import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
@@ -138,16 +138,20 @@ files.delete("/:id/share", async (c) => {
   return c.json({ ok: true })
 })
 
-// 8) Extend expiry (clamped so total lifetime <= MAX_EXPIRY_DAYS).
+// 8) Extend expiry. "extendDays" is ADDED to the current expiry (or to now, if the
+//    file is already past due in this request), so extending always gains time.
+//    Total lifetime is still capped at MAX_EXPIRY_DAYS from creation.
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
-  const body = await c.req.json<{ expiryDays: number }>()
+  const body = await c.req.json<{ extendDays?: number; expiryDays?: number }>()
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
 
-  const requested = computeExpiresAt(c.env, row.createdAt, body.expiryDays)
+  const addDays = Math.max(body.extendDays ?? body.expiryDays ?? 0, 0)
+  const base = Math.max(row.expiresAt, nowSeconds())
+  const requested = base + Math.round(addDays * DAY_SECONDS)
   const expiresAt = clampExtension(c.env, row.createdAt, requested)
   await db.update(schema.files).set({ expiresAt }).where(eq(schema.files.id, id)).run()
   return c.json({ ok: true, expiresAt })
