@@ -62,17 +62,17 @@ export default function UploadZone({
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
         onClick={() => inputRef.current?.click()}
-        className="relative flex cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border-2 border-dashed py-16 text-center backdrop-blur-md transition"
+        className="relative flex cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border-2 border-dashed px-4 py-12 text-center backdrop-blur-md transition sm:py-16"
       >
         <motion.div
           animate={dragging ? iconUp : iconDown}
-          className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-drift-500/25 to-blush-500/20 text-drift-200 shadow-lg shadow-glow-600/20"
+          className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-drift-500/25 to-blush-500/20 text-drift-200 shadow-lg shadow-glow-600/20 sm:h-16 sm:w-16"
         >
-          <UploadCloud size={30} />
+          <UploadCloud size={28} />
         </motion.div>
         <div>
-          <p className="font-semibold">Drop files here, or click to browse</p>
-          <p className="text-sm text-white/40">They’ll auto-expire in {expiryDays} day{expiryDays === 1 ? "" : "s"} (you can extend later)</p>
+          <p className="font-semibold">Drop files here, or tap to browse</p>
+          <p className="mt-0.5 text-sm text-white/40">They’ll auto-expire in {expiryDays} day{expiryDays === 1 ? "" : "s"} (you can extend later)</p>
         </div>
         <input ref={inputRef} type="file" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
       </motion.div>
@@ -94,16 +94,16 @@ export default function UploadZone({
                 className="glass flex items-center gap-3 rounded-xl px-4 py-2.5"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex justify-between text-sm">
+                  <div className="flex justify-between gap-2 text-sm">
                     <span className="truncate font-medium">{job.name}</span>
-                    <span className="text-white/40">{formatBytes(job.size)}</span>
+                    <span className="shrink-0 text-white/40">{formatBytes(job.size)}</span>
                   </div>
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10">
                     <motion.div className={barClass} animate={barAnimate} />
                   </div>
                 </div>
-                {job.state === "done" && <CheckCircle2 className="text-green-400" size={18} />}
-                {job.state === "error" && <AlertCircle className="text-red-400" size={18} />}
+                {job.state === "done" && <CheckCircle2 className="shrink-0 text-green-400" size={18} />}
+                {job.state === "error" && <AlertCircle className="shrink-0 text-red-400" size={18} />}
               </motion.div>
             )
           })}
