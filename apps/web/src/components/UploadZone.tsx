@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type RefObject } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { AlertCircle, CheckCircle2, UploadCloud } from "lucide-react"
-import { complete, presign, uploadToR2, uploadUrlFor } from "../lib/api"
+import { complete, MULTIPART_THRESHOLD, presign, uploadLargeFile, uploadToR2, uploadUrlFor } from "../lib/api"
 import { formatBytes } from "../lib/format"
 
 type Job = { name: string; size: number; pct: number; state: "uploading" | "done" | "error" }
@@ -38,10 +38,16 @@ export default function UploadZone({
       for (const file of Array.from(fileList)) {
         const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
         setJobs((j) => ({ ...j, [key]: { name: file.name, size: file.size, pct: 0, state: "uploading" } }))
+        const setPct = (pct: number) => setJobs((j) => (j[key] ? { ...j, [key]: { ...j[key], pct } } : j))
         try {
           const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId })
-          await uploadToR2(uploadUrlFor(id), file, (pct) => setJobs((j) => ({ ...j, [key]: { ...j[key], pct } })))
-          await complete(id)
+          if (file.size > MULTIPART_THRESHOLD) {
+            // Large file: upload in parts, then it's marked ready server-side.
+            await uploadLargeFile(id, file, setPct)
+          } else {
+            await uploadToR2(uploadUrlFor(id), file, setPct)
+            await complete(id)
+          }
           setJobs((j) => ({ ...j, [key]: { ...j[key], pct: 100, state: "done" } }))
           onUploaded()
           setTimeout(() => setJobs((j) => { const n = { ...j }; delete n[key]; return n }), 1600)
