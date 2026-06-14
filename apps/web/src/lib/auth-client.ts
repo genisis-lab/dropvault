@@ -1,15 +1,10 @@
 import { createAuthClient } from "better-auth/react"
 
-// In dev, Vite proxies /api to the Worker (same origin). In prod the API lives on
-// the Worker; default to it so no build var is required. Override with VITE_API_URL.
-const API_BASE =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
-    ? "https://dropvault-api.neil27.workers.dev"
-    : window.location.origin)
-
+// /api is same-origin in both dev (Vite proxy) and prod (Pages proxy), so the
+// auth client talks to the current origin. Override with VITE_API_URL if you
+// ever point the web app directly at the Worker.
 export const authClient = createAuthClient({
-  baseURL: API_BASE,
+  baseURL: import.meta.env.VITE_API_URL ?? window.location.origin,
 })
 
 export const { signIn, signUp, signOut, useSession } = authClient

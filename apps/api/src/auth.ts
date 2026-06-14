@@ -7,10 +7,11 @@ import type { Bindings } from "./types"
 export function createAuth(env: Bindings) {
   const db = getDb(env.DB)
   return betterAuth({
-    // The auth handler runs on the Worker, so baseURL must be the Worker's own
-    // URL (better-auth builds the Google OAuth redirect URI from it). The web app
-    // lives on a different origin (Pages), which we allow via trustedOrigins.
-    baseURL: env.API_URL,
+    // The web app proxies /api/* to this Worker (see functions/api/[[path]].ts),
+    // so from the browser everything is same-origin on PUBLIC_APP_URL. Using it
+    // as baseURL keeps the Google OAuth callback and the session cookie
+    // first-party to the web app domain, which works in every browser.
+    baseURL: env.PUBLIC_APP_URL,
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: [env.PUBLIC_APP_URL],
     database: drizzleAdapter(db, {
@@ -34,15 +35,6 @@ export function createAuth(env: Bindings) {
     session: {
       expiresIn: 60 * 60 * 24 * 30, // 30 days
       updateAge: 60 * 60 * 24, // refresh daily (sliding expiry)
-    },
-    advanced: {
-      // The web app (drop-vault.pages.dev) and the API (dropvault-api.workers.dev)
-      // are different sites, so the session cookie must be SameSite=None; Secure
-      // to be sent on cross-site requests with credentials.
-      defaultCookieAttributes: {
-        sameSite: "none",
-        secure: true,
-      },
     },
   })
 }
