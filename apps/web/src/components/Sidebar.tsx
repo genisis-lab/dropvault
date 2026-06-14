@@ -1,5 +1,5 @@
 import { motion } from "framer-motion"
-import { Clock, FolderOpen, HardDrive, Plus, Share2, type LucideIcon } from "lucide-react"
+import { Clock, FolderOpen, FolderPlus, HardDrive, Plus, Share2, type LucideIcon } from "lucide-react"
 import Logo from "./Logo"
 import { formatBytes } from "../lib/format"
 
@@ -16,6 +16,7 @@ const barInitial = { width: 0 }
 
 export default function Sidebar({
   onNew,
+  onNewFolder,
   totalBytes,
   fileCount,
   sharedCount,
@@ -23,6 +24,7 @@ export default function Sidebar({
   setFilter,
 }: {
   onNew: () => void
+  onNewFolder: () => void
   totalBytes: number
   fileCount: number
   sharedCount: number
@@ -38,13 +40,24 @@ export default function Sidebar({
         <Logo />
       </div>
 
-      <motion.button
-        whileTap={newTap}
-        onClick={onNew}
-        className="mt-7 flex items-center gap-3 self-start rounded-2xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-3 pl-4 pr-5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:shadow-glow-500/40"
-      >
-        <Plus size={20} /> New
-      </motion.button>
+      <div className="mt-7 flex items-center gap-2">
+        <motion.button
+          whileTap={newTap}
+          onClick={onNew}
+          className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-3 pl-4 pr-5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:shadow-glow-500/40"
+        >
+          <Plus size={20} /> New
+        </motion.button>
+        <motion.button
+          whileTap={newTap}
+          onClick={onNewFolder}
+          title="New folder"
+          aria-label="New folder"
+          className="grid h-12 w-12 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-drift-300 hover:text-drift-600"
+        >
+          <FolderPlus size={20} />
+        </motion.button>
+      </div>
 
       <nav className="mt-7 space-y-1">
         {NAV.map((item) => {
@@ -81,7 +94,7 @@ export default function Sidebar({
           />
         </div>
         <p className="mt-2 text-xs text-slate-500">
-          {formatBytes(totalBytes)} used · {fileCount} file{fileCount === 1 ? "" : "s"}
+          {formatBytes(totalBytes)} used \u00b7 {fileCount} file{fileCount === 1 ? "" : "s"}
         </p>
         <p className="mt-0.5 text-[11px] text-slate-400">Files auto-expire to free up space</p>
       </div>

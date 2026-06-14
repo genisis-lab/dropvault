@@ -18,10 +18,14 @@ export default function UploadZone({
   expiryDays,
   onUploaded,
   inputRef,
+  folderId = null,
+  folderName,
 }: {
   expiryDays: number
   onUploaded: () => void
   inputRef?: RefObject<HTMLInputElement>
+  folderId?: string | null
+  folderName?: string
 }) {
   const [dragging, setDragging] = useState(false)
   const [jobs, setJobs] = useState<Record<string, Job>>({})
@@ -35,7 +39,7 @@ export default function UploadZone({
         const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
         setJobs((j) => ({ ...j, [key]: { name: file.name, size: file.size, pct: 0, state: "uploading" } }))
         try {
-          const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays })
+          const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId })
           await uploadToR2(uploadUrlFor(id), file, (pct) => setJobs((j) => ({ ...j, [key]: { ...j[key], pct } })))
           await complete(id)
           setJobs((j) => ({ ...j, [key]: { ...j[key], pct: 100, state: "done" } }))
@@ -46,7 +50,7 @@ export default function UploadZone({
         }
       }
     },
-    [expiryDays, onUploaded],
+    [expiryDays, onUploaded, folderId],
   )
 
   return (
@@ -66,9 +70,11 @@ export default function UploadZone({
           <UploadCloud size={28} />
         </motion.div>
         <div>
-          <p className="font-semibold text-slate-700">Drop files here, or click to browse</p>
+          <p className="font-semibold text-slate-700">
+            {folderName ? `Drop files into \u201c${folderName}\u201d` : "Drop files here, or click to browse"}
+          </p>
           <p className="mt-0.5 text-sm text-slate-400">
-            Auto-expires in {expiryDays} day{expiryDays === 1 ? "" : "s"} · extend or delete anytime
+            Auto-expires in {expiryDays} day{expiryDays === 1 ? "" : "s"} \u00b7 extend or delete anytime
           </p>
         </div>
         <input ref={ref} type="file" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
