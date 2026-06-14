@@ -1,15 +1,33 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { listFiles, extendFile, deleteFile, createShare, revokeShare } from "../lib/api"
+import { ChevronRight, FolderPlus, HardDrive } from "lucide-react"
+import {
+  listFiles,
+  listFolders,
+  extendFile,
+  deleteFile,
+  createShare,
+  revokeShare,
+  moveFile,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  shareFolder,
+  revokeFolderShare,
+} from "../lib/api"
 import { signOut } from "../lib/auth-client"
 import Sidebar, { type Filter } from "./Sidebar"
 import Topbar, { type ViewMode } from "./Topbar"
 import UploadZone from "./UploadZone"
 import FileCard from "./FileCard"
+import FolderCard from "./FolderCard"
+import NameDialog from "./NameDialog"
 
 const EXPIRY_OPTIONS = [1, 2, 7, 14, 30]
 const DAY = 86400
+
+type DialogState = { mode: "create" } | { mode: "rename"; folderId: string; current: string } | null
 
 function titleFor(f: Filter): string {
   return f === "shared" ? "Shared" : f === "expiring" ? "Expiring soon" : "My Drive"
@@ -20,11 +38,18 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [expiryDays, setExpiryDays] = useState(7)
   const [search, setSearch] = useState("")
   const [view, setView] = useState<ViewMode>("grid")
-  const [filter, setFilter] = useState<Filter>("all")
+  const [filter, setFilterState] = useState<Filter>("all")
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<DialogState>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: listFiles })
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["files"] })
+  const foldersQuery = useQuery({ queryKey: ["folders"], queryFn: listFolders })
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["files"] })
+    qc.invalidateQueries({ queryKey: ["folders"] })
+  }
 
   const extendMut = useMutation({
     mutationFn: ({ id, days }: { id: string; days: number }) => extendFile(id, days),
@@ -32,34 +57,98 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   })
   const deleteMut = useMutation({ mutationFn: (id: string) => deleteFile(id), onSuccess: invalidate })
   const revokeMut = useMutation({ mutationFn: (id: string) => revokeShare(id), onSuccess: invalidate })
+  const moveMut = useMutation({
+    mutationFn: ({ id, folderId }: { id: string; folderId: string | null }) => moveFile(id, folderId),
+    onSuccess: invalidate,
+  })
+  const createFolderMut = useMutation({ mutationFn: (name: string) => createFolder(name), onSuccess: invalidate })
+  const renameFolderMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => renameFolder(id, name),
+    onSuccess: invalidate,
+  })
+  const deleteFolderMut = useMutation({ mutationFn: (id: string) => deleteFolder(id), onSuccess: invalidate })
+  const revokeFolderMut = useMutation({ mutationFn: (id: string) => revokeFolderShare(id), onSuccess: invalidate })
 
   async function handleShare(id: string): Promise<string> {
     const res = await createShare(id)
     await invalidate()
     return res.url
   }
+  async function handleShareFolder(id: string): Promise<string> {
+    const res = await shareFolder(id)
+    await invalidate()
+    return res.url
+  }
 
   const files = filesQuery.data ?? []
+  const folders = foldersQuery.data ?? []
   const totalBytes = useMemo(() => files.reduce((s, f) => s + (f.sizeBytes || 0), 0), [files])
-  const sharedCount = useMemo(() => files.filter((f) => f.shareToken).length, [files])
+  const sharedCount = useMemo(
+    () => files.filter((f) => f.shareToken).length + folders.filter((f) => f.shareToken).length,
+    [files, folders],
+  )
+
+  // If the open folder is deleted (or vanishes), fall back to the root.
+  useEffect(() => {
+    if (currentFolderId && foldersQuery.data && !folders.some((f) => f.id === currentFolderId)) {
+      setCurrentFolderId(null)
+    }
+  }, [currentFolderId, folders, foldersQuery.data])
+
+  const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null
+  const atRoot = currentFolderId === null
+
+  function setFilter(f: Filter) {
+    setCurrentFolderId(null)
+    setFilterState(f)
+  }
+
+  const q = search.trim().toLowerCase()
+  const now = Math.floor(Date.now() / 1000)
 
   const visible = useMemo(() => {
-    const now = Math.floor(Date.now() / 1000)
-    const q = search.trim().toLowerCase()
     return files.filter((f) => {
       if (q && !f.filename.toLowerCase().includes(q)) return false
       if (filter === "shared" && !f.shareToken) return false
       if (filter === "expiring" && f.expiresAt - now >= DAY) return false
+      if (currentFolderId) return f.folderId === currentFolderId
+      if (filter === "all") return !f.folderId
       return true
     })
-  }, [files, search, filter])
+  }, [files, q, filter, currentFolderId, now])
 
-  const subtitle = `${visible.length} item${visible.length === 1 ? "" : "s"}${userName ? ` · ${userName.split(" ")[0]}'s vault` : ""}`
+  const showFolderSection = atRoot && filter === "all"
+  const visibleFolders = useMemo(
+    () => (showFolderSection ? folders.filter((fd) => !q || fd.name.toLowerCase().includes(q)) : []),
+    [folders, q, showFolderSection],
+  )
+
+  const folderOptions = useMemo(() => folders.map((f) => ({ id: f.id, name: f.name })), [folders])
+
+  const heading = currentFolder ? currentFolder.name : titleFor(filter)
+  const itemCount = visible.length + visibleFolders.length
+  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` \u00b7 ${userName.split(" ")[0]}'s vault` : ""}`
+
+  function onDialogConfirm(name: string) {
+    if (!dialog) return
+    if (dialog.mode === "create") createFolderMut.mutate(name)
+    else renameFolderMut.mutate({ id: dialog.folderId, name })
+    setDialog(null)
+  }
+
+  function deleteFolderConfirm(id: string) {
+    const f = folders.find((x) => x.id === id)
+    const msg = f && f.fileCount > 0
+      ? `Delete \u201c${f.name}\u201d? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).`
+      : "Delete this folder?"
+    if (window.confirm(msg)) deleteFolderMut.mutate(id)
+  }
 
   return (
     <div>
       <Sidebar
         onNew={() => uploadInputRef.current?.click()}
+        onNewFolder={() => setDialog({ mode: "create" })}
         totalBytes={totalBytes}
         fileCount={files.length}
         sharedCount={sharedCount}
@@ -80,12 +169,28 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
         <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-slate-800 sm:text-2xl">{titleFor(filter)}</h1>
+            <div className="min-w-0">
+              {currentFolder && (
+                <button
+                  onClick={() => setCurrentFolderId(null)}
+                  className="mb-1 flex items-center gap-1 text-sm text-slate-500 hover:text-drift-600"
+                >
+                  <span>My Drive</span>
+                  <ChevronRight size={14} />
+                  <span className="font-medium text-slate-700">{currentFolder.name}</span>
+                </button>
+              )}
+              <h1 className="truncate text-xl font-bold text-slate-800 sm:text-2xl">{heading}</h1>
               <p className="text-sm text-slate-500">{subtitle}</p>
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-400">New files expire in</span>
+              <button
+                onClick={() => setDialog({ mode: "create" })}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
+              >
+                <FolderPlus size={16} /> New folder
+              </button>
+              <span className="hidden text-slate-400 sm:inline">Expire in</span>
               <select
                 value={expiryDays}
                 onChange={(e) => setExpiryDays(Number(e.target.value))}
@@ -100,13 +205,44 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
             </div>
           </div>
 
-          <UploadZone expiryDays={expiryDays} onUploaded={invalidate} inputRef={uploadInputRef} />
+          <UploadZone
+            expiryDays={expiryDays}
+            onUploaded={invalidate}
+            inputRef={uploadInputRef}
+            folderId={currentFolderId}
+            folderName={currentFolder?.name}
+          />
+
+          {showFolderSection && visibleFolders.length > 0 && (
+            <div className="mt-6">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Folders</h2>
+              <motion.div layout className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <AnimatePresence mode="popLayout">
+                  {visibleFolders.map((fd) => (
+                    <FolderCard
+                      key={fd.id}
+                      folder={fd}
+                      view="grid"
+                      onOpen={(id) => setCurrentFolderId(id)}
+                      onShare={handleShareFolder}
+                      onRevoke={(id) => revokeFolderMut.mutate(id)}
+                      onRename={(id) => setDialog({ mode: "rename", folderId: id, current: fd.name })}
+                      onDelete={deleteFolderConfirm}
+                    />
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            </div>
+          )}
 
           <div className="mt-6">
+            {(showFolderSection && visibleFolders.length > 0) && (
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</h2>
+            )}
             {filesQuery.isLoading ? (
               <p className="text-slate-400">Loading…</p>
             ) : visible.length === 0 ? (
-              <EmptyState filter={filter} hasFiles={files.length > 0} search={search} />
+              <EmptyState filter={filter} hasFiles={files.length > 0} search={search} inFolder={!!currentFolder} />
             ) : view === "grid" ? (
               <motion.div layout className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
                 <AnimatePresence mode="popLayout">
@@ -115,10 +251,12 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       key={f.id}
                       file={f}
                       view="grid"
+                      folders={folderOptions}
                       onExtend={(id, days) => extendMut.mutate({ id, days })}
                       onDelete={(id) => deleteMut.mutate(id)}
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
+                      onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
                     />
                   ))}
                 </AnimatePresence>
@@ -131,10 +269,12 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       key={f.id}
                       file={f}
                       view="list"
+                      folders={folderOptions}
                       onExtend={(id, days) => extendMut.mutate({ id, days })}
                       onDelete={(id) => deleteMut.mutate(id)}
                       onShare={handleShare}
                       onRevoke={(id) => revokeMut.mutate(id)}
+                      onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
                     />
                   ))}
                 </AnimatePresence>
@@ -143,22 +283,44 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
           </div>
         </main>
       </div>
+
+      <NameDialog
+        open={dialog !== null}
+        title={dialog?.mode === "rename" ? "Rename folder" : "New folder"}
+        initial={dialog?.mode === "rename" ? dialog.current : ""}
+        confirmLabel={dialog?.mode === "rename" ? "Rename" : "Create"}
+        onCancel={() => setDialog(null)}
+        onConfirm={onDialogConfirm}
+      />
     </div>
   )
 }
 
-function EmptyState({ filter, hasFiles, search }: { filter: Filter; hasFiles: boolean; search: string }) {
+function EmptyState({
+  filter,
+  hasFiles,
+  search,
+  inFolder,
+}: {
+  filter: Filter
+  hasFiles: boolean
+  search: string
+  inFolder: boolean
+}) {
   const msg = search.trim()
     ? "No files match your search."
-    : filter === "shared"
-      ? "No shared files yet — use a file's menu to create a link."
-      : filter === "expiring"
-        ? "Nothing expires in the next 24 hours."
-        : hasFiles
-          ? "No files here."
-          : "Your vault is empty — drop files above to get started."
+    : inFolder
+      ? "This folder is empty \u2014 drop files above to add some."
+      : filter === "shared"
+        ? "No shared files yet \u2014 use a file or folder's menu to create a link."
+        : filter === "expiring"
+          ? "Nothing expires in the next 24 hours."
+          : hasFiles
+            ? "No files here."
+            : "Your vault is empty \u2014 drop files above to get started."
   return (
     <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center text-sm text-slate-400">
+      <HardDrive size={28} className="mb-2 text-slate-300" />
       {msg}
     </div>
   )

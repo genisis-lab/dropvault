@@ -3,10 +3,14 @@ import { AnimatePresence, motion } from "framer-motion"
 import {
   Archive,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   FileText,
   Film,
+  FolderInput,
+  FolderMinus,
   Image as ImageIcon,
   Link2,
   MoreVertical,
@@ -39,13 +43,17 @@ function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } {
   return { Icon: FileText, tint: "indigo" }
 }
 
+type FolderOption = { id: string; name: string }
+
 type Props = {
   file: DriftFile
   view: "grid" | "list"
+  folders?: FolderOption[]
   onExtend: (id: string, days: number) => void
   onDelete: (id: string) => void
   onShare: (id: string) => Promise<string>
   onRevoke: (id: string) => void
+  onMove?: (id: string, folderId: string | null) => void
 }
 
 const cardInitial = { opacity: 0, y: 12, scale: 0.97 }
@@ -54,11 +62,12 @@ const cardExit = { opacity: 0, scale: 0.92 }
 const menuInitial = { opacity: 0, scale: 0.95, y: -4 }
 const menuAnimate = { opacity: 1, scale: 1, y: 0 }
 
-export default function FileCard({ file, view, onExtend, onDelete, onShare, onRevoke }: Props) {
+export default function FileCard({ file, view, folders = [], onExtend, onDelete, onShare, onRevoke, onMove }: Props) {
   const { Icon, tint } = kindOf(file.contentType)
   const tone = TINT[tint]
   const [left, setLeft] = useState(() => timeLeft(file.expiresAt))
   const [menuOpen, setMenuOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -66,6 +75,11 @@ export default function FileCard({ file, view, onExtend, onDelete, onShare, onRe
     const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30000)
     return () => clearInterval(t)
   }, [file.expiresAt])
+
+  function closeMenu() {
+    setMenuOpen(false)
+    setMoveOpen(false)
+  }
 
   async function copyLink() {
     setBusy(true)
@@ -78,9 +92,12 @@ export default function FileCard({ file, view, onExtend, onDelete, onShare, onRe
       /* ignore */
     } finally {
       setBusy(false)
-      setMenuOpen(false)
+      closeMenu()
     }
   }
+
+  const canMove = !!onMove
+  const moveTargets = folders.filter((f) => f.id !== file.folderId)
 
   const chipClass =
     "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
@@ -90,57 +107,109 @@ export default function FileCard({ file, view, onExtend, onDelete, onShare, onRe
     <AnimatePresence>
       {menuOpen && (
         <>
-          <button className="fixed inset-0 z-30 cursor-default" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
+          <button className="fixed inset-0 z-30 cursor-default" aria-label="Close menu" onClick={closeMenu} />
           <motion.div
             initial={menuInitial}
             animate={menuAnimate}
             exit={menuInitial}
-            className="absolute right-0 top-9 z-40 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
+            className="absolute right-0 top-9 z-40 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
           >
-            <a
-              href={downloadUrl(file.id)}
-              onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
-            >
-              <Download size={15} /> Download
-            </a>
-            <button
-              disabled={busy}
-              onClick={copyLink}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
-              {file.shareToken ? "Copy link" : "Get link"}
-            </button>
-            {file.shareToken && (
-              <button
-                onClick={() => {
-                  onRevoke(file.id)
-                  setMenuOpen(false)
-                }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
-              >
-                <X size={15} /> Revoke link
-              </button>
+            {!moveOpen ? (
+              <>
+                <a
+                  href={downloadUrl(file.id)}
+                  onClick={closeMenu}
+                  className="flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                >
+                  <Download size={15} /> Download
+                </a>
+                <button
+                  disabled={busy}
+                  onClick={copyLink}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
+                  {file.shareToken ? "Copy link" : "Get link"}
+                </button>
+                {file.shareToken && (
+                  <button
+                    onClick={() => {
+                      onRevoke(file.id)
+                      closeMenu()
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <X size={15} /> Revoke link
+                  </button>
+                )}
+                {canMove && (
+                  <button
+                    onClick={() => setMoveOpen(true)}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                  >
+                    <FolderInput size={15} /> Move to
+                    <ChevronRight size={14} className="ml-auto text-slate-400" />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    onExtend(file.id, 7)
+                    closeMenu()
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                >
+                  <Clock size={15} /> Extend 7 days
+                </button>
+                <button
+                  onClick={() => {
+                    onDelete(file.id)
+                    closeMenu()
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={15} /> Delete
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setMoveOpen(false)}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  <ChevronLeft size={15} /> Move to…
+                </button>
+                <div className="my-1 h-px bg-slate-100" />
+                <div className="max-h-52 overflow-y-auto">
+                  {file.folderId && onMove && (
+                    <button
+                      onClick={() => {
+                        onMove(file.id, null)
+                        closeMenu()
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                    >
+                      <FolderMinus size={15} /> Remove from folder
+                    </button>
+                  )}
+                  {moveTargets.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => {
+                        onMove?.(file.id, f.id)
+                        closeMenu()
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+                    >
+                      <FolderInput size={15} className="shrink-0 text-amber-500" />
+                      <span className="truncate">{f.name}</span>
+                    </button>
+                  ))}
+                  {moveTargets.length === 0 && !file.folderId && (
+                    <p className="px-3 py-2 text-xs text-slate-400">No other folders yet.</p>
+                  )}
+                </div>
+              </>
             )}
-            <button
-              onClick={() => {
-                onExtend(file.id, 7)
-                setMenuOpen(false)
-              }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
-            >
-              <Clock size={15} /> Extend 7 days
-            </button>
-            <button
-              onClick={() => {
-                onDelete(file.id)
-                setMenuOpen(false)
-              }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50"
-            >
-              <Trash2 size={15} /> Delete
-            </button>
           </motion.div>
         </>
       )}
