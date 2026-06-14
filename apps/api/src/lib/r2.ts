@@ -14,6 +14,14 @@ function s3(env: Bindings) {
       accessKeyId: env.R2_ACCESS_KEY_ID,
       secretAccessKey: env.R2_SECRET_ACCESS_KEY,
     },
+    // IMPORTANT: R2 does not support the CRC32 integrity checksums that AWS SDK
+    // v3 (>= 3.729.0) adds by default. With the default "WHEN_SUPPORTED", the
+    // presigner signs x-amz-checksum-* / x-amz-sdk-checksum-algorithm headers
+    // that a plain browser PUT/GET never sends, so R2 rejects the request with
+    // SignatureDoesNotMatch (403). Restrict checksums to operations that truly
+    // require them so presigned URLs work with a simple fetch/XHR.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   })
 }
 
