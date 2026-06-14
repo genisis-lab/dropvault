@@ -22,6 +22,8 @@ import type { DriftFile } from "../lib/api"
 import { downloadUrl, shareUrl } from "../lib/api"
 import { formatBytes, timeLeft } from "../lib/format"
 
+export const DRAG_MIME = "application/x-dropvault"
+
 type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber"
 
 const TINT: Record<Tint, { bg: string; fg: string }> = {
@@ -54,6 +56,10 @@ type Props = {
   onShare: (id: string) => Promise<string>
   onRevoke: (id: string) => void
   onMove?: (id: string, folderId: string | null) => void
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
+  anySelected?: boolean
+  getDragIds?: (id: string) => string[]
 }
 
 const cardInitial = { opacity: 0, y: 12, scale: 0.97 }
@@ -62,7 +68,20 @@ const cardExit = { opacity: 0, scale: 0.92 }
 const menuInitial = { opacity: 0, scale: 0.95, y: -4 }
 const menuAnimate = { opacity: 1, scale: 1, y: 0 }
 
-export default function FileCard({ file, view, folders = [], onExtend, onDelete, onShare, onRevoke, onMove }: Props) {
+export default function FileCard({
+  file,
+  view,
+  folders = [],
+  onExtend,
+  onDelete,
+  onShare,
+  onRevoke,
+  onMove,
+  selected = false,
+  onToggleSelect,
+  anySelected = false,
+  getDragIds,
+}: Props) {
   const { Icon, tint } = kindOf(file.contentType)
   const tone = TINT[tint]
   const [left, setLeft] = useState(() => timeLeft(file.expiresAt))
@@ -79,6 +98,18 @@ export default function FileCard({ file, view, folders = [], onExtend, onDelete,
   function closeMenu() {
     setMenuOpen(false)
     setMoveOpen(false)
+  }
+
+  function handleDragStart(e: React.DragEvent) {
+    const ids = getDragIds ? getDragIds(file.id) : [file.id]
+    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids))
+    e.dataTransfer.effectAllowed = "move"
+  }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    if (!onToggleSelect) return
+    e.preventDefault()
+    onToggleSelect(file.id)
   }
 
   async function copyLink() {
@@ -98,10 +129,30 @@ export default function FileCard({ file, view, folders = [], onExtend, onDelete,
 
   const canMove = !!onMove
   const moveTargets = folders.filter((f) => f.id !== file.folderId)
+  const showCheckbox = !!onToggleSelect && (anySelected || selected)
 
   const chipClass =
     "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
     (left.urgent ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500")
+
+  const checkbox = onToggleSelect ? (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggleSelect(file.id)
+      }}
+      aria-label={selected ? "Deselect" : "Select"}
+      className={
+        "grid h-5 w-5 place-items-center rounded-md border transition " +
+        (selected
+          ? "border-drift-500 bg-drift-500 text-white"
+          : "border-slate-300 bg-white/90 text-transparent hover:border-drift-400 " +
+            (showCheckbox ? "opacity-100" : "opacity-0 group-hover:opacity-100"))
+      }
+    >
+      <Check size={13} />
+    </button>
+  ) : null
 
   const menu = (
     <AnimatePresence>
@@ -176,7 +227,7 @@ export default function FileCard({ file, view, folders = [], onExtend, onDelete,
                   onClick={() => setMoveOpen(false)}
                   className="flex w-full items-center gap-2.5 px-3 py-2 font-medium text-slate-600 hover:bg-slate-50"
                 >
-                  <ChevronLeft size={15} /> Move to…
+                  <ChevronLeft size={15} /> Move to\u2026
                 </button>
                 <div className="my-1 h-px bg-slate-100" />
                 <div className="max-h-52 overflow-y-auto">
@@ -220,11 +271,18 @@ export default function FileCard({ file, view, folders = [], onExtend, onDelete,
     return (
       <motion.div
         layout
+        draggable
+        onDragStart={handleDragStart}
+        onContextMenu={handleContextMenu}
         initial={cardInitial}
         animate={cardAnimate}
         exit={cardExit}
-        className="relative flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+        className={
+          "group relative flex items-center gap-3 px-4 py-2.5 transition " +
+          (selected ? "bg-drift-500/10" : "hover:bg-slate-50")
+        }
       >
+        {onToggleSelect && <div className="flex w-5 justify-center">{checkbox}</div>}
         <div className={"grid h-9 w-9 shrink-0 place-items-center rounded-lg " + tone.bg + " " + tone.fg}>
           <Icon size={18} />
         </div>
@@ -260,21 +318,23 @@ export default function FileCard({ file, view, folders = [], onExtend, onDelete,
   return (
     <motion.div
       layout
+      draggable
+      onDragStart={handleDragStart}
+      onContextMenu={handleContextMenu}
       initial={cardInitial}
       animate={cardAnimate}
       exit={cardExit}
-      className="group relative flex flex-col rounded-2xl border border-slate-200 bg-white drive-shadow transition hover:border-slate-300 hover:shadow-md"
+      className={
+        "group relative flex flex-col rounded-2xl border bg-white drive-shadow transition hover:shadow-md " +
+        (selected ? "border-drift-400 ring-2 ring-drift-400/60" : "border-slate-200 hover:border-slate-300")
+      }
     >
       <div className={"relative flex h-24 items-center justify-center rounded-t-2xl " + tone.bg}>
         <Icon size={34} className={tone.fg} />
+        {onToggleSelect && <div className="absolute left-2 top-2">{checkbox}</div>}
         <span className={"absolute right-2 top-2 " + chipClass}>
           <Clock size={11} /> {left.label}
         </span>
-        {file.shareToken && (
-          <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-white/85 px-2 py-0.5 text-[11px] font-medium text-drift-600 backdrop-blur">
-            <Link2 size={11} /> Shared
-          </span>
-        )}
       </div>
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div className={"grid h-7 w-7 shrink-0 place-items-center rounded-md " + tone.bg + " " + tone.fg}>
@@ -283,6 +343,7 @@ export default function FileCard({ file, view, folders = [], onExtend, onDelete,
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800" title={file.filename}>
           {file.filename}
         </p>
+        {file.shareToken && <Link2 size={13} className="shrink-0 text-drift-500" />}
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}

@@ -4,6 +4,8 @@ import { Check, Folder, Link2, MoreVertical, Pencil, Share2, Trash2, X } from "l
 import type { Folder as FolderT } from "../lib/api"
 import { folderShareUrl } from "../lib/api"
 
+export const DRAG_MIME = "application/x-dropvault"
+
 const cardInitial = { opacity: 0, y: 12, scale: 0.97 }
 const cardAnimate = { opacity: 1, y: 0, scale: 1 }
 const cardExit = { opacity: 0, scale: 0.92 }
@@ -18,12 +20,14 @@ type Props = {
   onRevoke: (id: string) => void
   onRename: (id: string) => void
   onDelete: (id: string) => void
+  onDropFiles?: (folderId: string, ids: string[]) => void
 }
 
-export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete }: Props) {
+export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete, onDropFiles }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [dropActive, setDropActive] = useState(false)
 
   async function copyLink() {
     setBusy(true)
@@ -37,6 +41,25 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
     } finally {
       setBusy(false)
       setMenuOpen(false)
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    if (!onDropFiles || !e.dataTransfer.types.includes(DRAG_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+    setDropActive(true)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    setDropActive(false)
+    if (!onDropFiles || !e.dataTransfer.types.includes(DRAG_MIME)) return
+    e.preventDefault()
+    try {
+      const ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME))
+      if (Array.isArray(ids) && ids.length) onDropFiles(folder.id, ids)
+    } catch {
+      /* ignore */
     }
   }
 
@@ -96,6 +119,10 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
     </AnimatePresence>
   )
 
+  const ringClass = dropActive
+    ? "border-drift-400 ring-2 ring-drift-400/60 bg-drift-500/5"
+    : "border-slate-200 hover:border-slate-300"
+
   if (view === "list") {
     return (
       <motion.div
@@ -103,7 +130,10 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
         initial={cardInitial}
         animate={cardAnimate}
         exit={cardExit}
-        className="relative flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+        onDragOver={handleDragOver}
+        onDragLeave={() => setDropActive(false)}
+        onDrop={handleDrop}
+        className={"relative flex items-center gap-3 border-l-2 px-4 py-2.5 transition " + (dropActive ? "border-drift-400 bg-drift-500/5" : "border-transparent hover:bg-slate-50")}
       >
         <button onClick={() => onOpen(folder.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-500">
@@ -139,7 +169,10 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
       initial={cardInitial}
       animate={cardAnimate}
       exit={cardExit}
-      className="group relative flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 drive-shadow transition hover:border-slate-300 hover:shadow-md"
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDropActive(false)}
+      onDrop={handleDrop}
+      className={"group relative flex items-center gap-3 rounded-2xl border bg-white px-3 py-3 drive-shadow transition hover:shadow-md " + ringClass}
     >
       <button onClick={() => onOpen(folder.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-500">
@@ -150,8 +183,7 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             {folder.name}
           </p>
           <p className="text-xs text-slate-400">
-            {meta}
-            {folder.shareToken ? " \u00b7 shared" : ""}
+            {dropActive ? "Drop to move here" : meta + (folder.shareToken ? " \u00b7 shared" : "")}
           </p>
         </div>
       </button>
