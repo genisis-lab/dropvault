@@ -1,9 +1,8 @@
-// In dev, Vite proxies /api to the local Worker, so same-origin ("") is correct.
-// In prod the API lives on the Worker; default to it so no build var is required.
-// Override anytime with VITE_API_URL.
-const API =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD ? "https://dropvault-api.neil27.workers.dev" : "")
+// /api is same-origin: Vite proxies it to the local Worker in dev, and the Pages
+// proxy (functions/api/[[path]].ts) forwards it to the Worker in prod. So the
+// default base is "" (current origin). Override with VITE_API_URL only if you
+// point the web app directly at the Worker.
+const API = import.meta.env.VITE_API_URL ?? ""
 
 export type DriftFile = {
   id: string
@@ -59,12 +58,11 @@ export function downloadUrl(id: string) {
   return `${API}/api/files/${id}/download`
 }
 
-// Browser -> API -> R2 upload, with progress.
+// Direct browser -> R2 upload via the presigned PUT URL, with progress.
 export function uploadToR2(uploadUrl: string, file: File, onProgress: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open("PUT", uploadUrl)
-    xhr.withCredentials = true
     if (file.type) xhr.setRequestHeader("Content-Type", file.type)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
