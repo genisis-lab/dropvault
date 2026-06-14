@@ -33,7 +33,11 @@ files.post("/presign", async (c) => {
     expiresAt,
   }).run()
 
-  const uploadUrl = new URL(`/api/files/${id}/upload`, c.req.url).toString()
+  // Return a SAME-ORIGIN relative path. The browser uploads to its own origin
+  // (the Pages proxy forwards it to this Worker), so the session cookie is sent.
+  // Building an absolute URL from c.req.url would point at the Worker origin and
+  // make the upload cross-origin (no cookie -> 401).
+  const uploadUrl = `/api/files/${id}/upload`
   return c.json({ id, uploadUrl, expiresAt })
 })
 
