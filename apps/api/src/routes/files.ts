@@ -9,18 +9,27 @@ const files = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 files.use("*", requireAuth)
 
-// 1) Ask for an upload URL. Creates a pending row.
+// 1) Ask for an upload URL. Creates a pending row (optionally inside a folder).
 files.post("/presign", async (c) => {
   const userId = c.get("userId")
-  const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number }>()
+  const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null }>()
   if (!body?.filename) return c.json({ error: "filename required" }, 400)
+
+  const db = getDb(c.env.DB)
+
+  // If a folder was requested, make sure it belongs to this user.
+  let folderId: string | null = null
+  if (body.folderId) {
+    const folder = await db.select().from(schema.folders).where(and(eq(schema.folders.id, body.folderId), eq(schema.folders.ownerId, userId))).get()
+    if (!folder) return c.json({ error: "folder not found" }, 404)
+    folderId = body.folderId
+  }
 
   const id = crypto.randomUUID()
   const r2Key = `${userId}/${id}`
   const createdAt = nowSeconds()
   const expiresAt = computeExpiresAt(c.env, createdAt, body.expiryDays)
 
-  const db = getDb(c.env.DB)
   await db.insert(schema.files).values({
     id,
     ownerId: userId,
@@ -29,6 +38,7 @@ files.post("/presign", async (c) => {
     sizeBytes: body.sizeBytes ?? 0,
     contentType: body.contentType ?? null,
     status: "pending",
+    folderId,
     createdAt,
     expiresAt,
   }).run()
@@ -76,7 +86,9 @@ files.post("/:id/complete", async (c) => {
   return c.json({ ok: true })
 })
 
-// 4) List the current user's live (non-expired) files.
+// 4) List the current user's live (non-expired) files. Includes folderId so the
+//    client can group them; pass ?folderId=<id> to scope to one folder, or
+//    ?folderId=root for only top-level files.
 files.get("/", async (c) => {
   const userId = c.get("userId")
   const db = getDb(c.env.DB)
@@ -138,23 +150,41 @@ files.delete("/:id/share", async (c) => {
   return c.json({ ok: true })
 })
 
-// 8) Extend expiry. "extendDays" is ADDED to the current expiry (or to now, if the
-//    file is already past due in this request), so extending always gains time.
-//    Total lifetime is still capped at MAX_EXPIRY_DAYS from creation.
+// 8) Update a file: extend expiry and/or move it between folders.
+//    - "extendDays" is ADDED to the current expiry (or to now, if already past due),
+//      so extending always gains time. Total lifetime is capped at MAX_EXPIRY_DAYS.
+//    - "folderId" (string) moves the file into that folder; null moves it to the root.
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
-  const body = await c.req.json<{ extendDays?: number; expiryDays?: number }>()
+  const body = await c.req.json<{ extendDays?: number; expiryDays?: number; folderId?: string | null }>()
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
 
+  const update: { expiresAt?: number; folderId?: string | null } = {}
+
   const addDays = Math.max(body.extendDays ?? body.expiryDays ?? 0, 0)
-  const base = Math.max(row.expiresAt, nowSeconds())
-  const requested = base + Math.round(addDays * DAY_SECONDS)
-  const expiresAt = clampExtension(c.env, row.createdAt, requested)
-  await db.update(schema.files).set({ expiresAt }).where(eq(schema.files.id, id)).run()
-  return c.json({ ok: true, expiresAt })
+  if (addDays > 0) {
+    const base = Math.max(row.expiresAt, nowSeconds())
+    update.expiresAt = clampExtension(c.env, row.createdAt, base + Math.round(addDays * DAY_SECONDS))
+  }
+
+  if ("folderId" in body) {
+    const fid = body.folderId
+    if (fid) {
+      const folder = await db.select().from(schema.folders).where(and(eq(schema.folders.id, fid), eq(schema.folders.ownerId, userId))).get()
+      if (!folder) return c.json({ error: "folder not found" }, 404)
+      update.folderId = fid
+    } else {
+      update.folderId = null
+    }
+  }
+
+  if (Object.keys(update).length === 0) return c.json({ error: "nothing to update" }, 400)
+  await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
+  const next = await db.select().from(schema.files).where(eq(schema.files.id, id)).get()
+  return c.json({ ok: true, expiresAt: next?.expiresAt, folderId: next?.folderId ?? null })
 })
 
 // 9) Delete now.
