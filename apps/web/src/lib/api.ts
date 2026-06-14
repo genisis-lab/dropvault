@@ -1,7 +1,7 @@
 // /api is same-origin: Vite proxies it to the local Worker in dev, and the Pages
 // proxy (functions/api/[[path]].ts) forwards it to the Worker in prod. So the
-// default base is "" (current origin). Override with VITE_API_URL only if you
-// point the web app directly at the Worker.
+// default base is "" (current origin). Override with VITE_API_URL if you point
+// the web app directly at the Worker.
 const API = import.meta.env.VITE_API_URL ?? ""
 
 export type DriftFile = {
@@ -46,12 +46,13 @@ export async function complete(id: string) {
   return j<{ ok: true }>(res)
 }
 
-export async function extendFile(id: string, expiryDays: number) {
+// Adds `days` to the file's current expiry (server-side), capped at the max lifetime.
+export async function extendFile(id: string, days: number) {
   const res = await fetch(`${API}/api/files/${id}`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ expiryDays }),
+    body: JSON.stringify({ extendDays: days }),
   })
   return j<{ ok: true; expiresAt: number }>(res)
 }
