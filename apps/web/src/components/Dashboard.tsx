@@ -25,6 +25,7 @@ import UploadZone from "./UploadZone"
 import FileCard from "./FileCard"
 import FolderCard from "./FolderCard"
 import NameDialog from "./NameDialog"
+import { useToast } from "./Toast"
 
 const EXPIRY_OPTIONS = [1, 2, 7, 14, 30]
 const DAY = 86400
@@ -65,6 +66,9 @@ function triggerDownload(id: string) {
 
 export default function Dashboard({ userName, userEmail }: { userName?: string; userEmail?: string }) {
   const qc = useQueryClient()
+  const { success: toastOk, error: toastErr } = useToast()
+  const errHandler = (fallback: string) => (e: unknown) => toastErr((e as Error)?.message || fallback)
+
   const [expiryDays, setExpiryDays] = useState(7)
   const [search, setSearch] = useState("")
   const [view, setView] = useState<ViewMode>("grid")
@@ -87,34 +91,91 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const extendMut = useMutation({
     mutationFn: ({ id, days }: { id: string; days: number }) => extendFile(id, days),
     onSuccess: invalidate,
+    onError: errHandler("Couldn't extend file"),
   })
   const renameFileMut = useMutation({
     mutationFn: ({ id, filename }: { id: string; filename: string }) => renameFile(id, filename),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      toastOk("File renamed")
+    },
+    onError: errHandler("Couldn't rename file"),
   })
-  const deleteMut = useMutation({ mutationFn: (id: string) => deleteFile(id), onSuccess: invalidate })
-  const revokeMut = useMutation({ mutationFn: (id: string) => revokeShare(id), onSuccess: invalidate })
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteFile(id),
+    onSuccess: () => {
+      invalidate()
+      toastOk("File deleted")
+    },
+    onError: errHandler("Couldn't delete file"),
+  })
+  const revokeMut = useMutation({
+    mutationFn: (id: string) => revokeShare(id),
+    onSuccess: () => {
+      invalidate()
+      toastOk("Link revoked")
+    },
+    onError: errHandler("Couldn't revoke link"),
+  })
   const moveMut = useMutation({
     mutationFn: ({ id, folderId }: { id: string; folderId: string | null }) => moveFile(id, folderId),
     onSuccess: invalidate,
+    onError: errHandler("Couldn't move file"),
   })
-  const createFolderMut = useMutation({ mutationFn: (name: string) => createFolder(name), onSuccess: invalidate })
+  const createFolderMut = useMutation({
+    mutationFn: (name: string) => createFolder(name),
+    onSuccess: () => {
+      invalidate()
+      toastOk("Folder created")
+    },
+    onError: errHandler("Couldn't create folder"),
+  })
   const renameFolderMut = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => renameFolder(id, name),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      toastOk("Folder renamed")
+    },
+    onError: errHandler("Couldn't rename folder"),
   })
-  const deleteFolderMut = useMutation({ mutationFn: (id: string) => deleteFolder(id), onSuccess: invalidate })
-  const revokeFolderMut = useMutation({ mutationFn: (id: string) => revokeFolderShare(id), onSuccess: invalidate })
+  const deleteFolderMut = useMutation({
+    mutationFn: (id: string) => deleteFolder(id),
+    onSuccess: () => {
+      invalidate()
+      toastOk("Folder deleted")
+    },
+    onError: errHandler("Couldn't delete folder"),
+  })
+  const revokeFolderMut = useMutation({
+    mutationFn: (id: string) => revokeFolderShare(id),
+    onSuccess: () => {
+      invalidate()
+      toastOk("Folder link revoked")
+    },
+    onError: errHandler("Couldn't revoke folder link"),
+  })
 
   async function handleShare(id: string): Promise<string> {
-    const res = await createShare(id)
-    await invalidate()
-    return res.url
+    try {
+      const res = await createShare(id)
+      await invalidate()
+      toastOk("Share link copied")
+      return res.url
+    } catch (e) {
+      toastErr((e as Error)?.message || "Couldn't create share link")
+      throw e
+    }
   }
   async function handleShareFolder(id: string): Promise<string> {
-    const res = await shareFolder(id)
-    await invalidate()
-    return res.url
+    try {
+      const res = await shareFolder(id)
+      await invalidate()
+      toastOk("Folder link copied")
+      return res.url
+    } catch (e) {
+      toastErr((e as Error)?.message || "Couldn't create folder link")
+      throw e
+    }
   }
 
   const files = filesQuery.data ?? []
@@ -208,7 +269,9 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const expiringSoon = useMemo(() => files.filter((f) => f.expiresAt - now < DAY), [files, now])
 
   function extendAllExpiring() {
+    if (expiringSoon.length === 0) return
     expiringSoon.forEach((f) => extendMut.mutate({ id: f.id, days: 7 }))
+    toastOk(`Extending ${expiringSoon.length} file${expiringSoon.length === 1 ? "" : "s"} by 7 days`)
   }
 
   const showFolderSection = atRoot && filter === "all"
