@@ -3,6 +3,7 @@ export type Bindings = {
   DB: D1Database
   FILES: R2Bucket
   // vars
+  API_URL: string
   PUBLIC_APP_URL: string
   R2_ACCOUNT_ID: string
   R2_BUCKET_NAME: string

@@ -1,4 +1,9 @@
-const API = import.meta.env.VITE_API_URL ?? ""
+// In dev, Vite proxies /api to the local Worker, so same-origin ("") is correct.
+// In prod the API lives on the Worker; default to it so no build var is required.
+// Override anytime with VITE_API_URL.
+const API =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD ? "https://dropvault-api.neil27.workers.dev" : "")
 
 export type DriftFile = {
   id: string
