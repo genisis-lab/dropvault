@@ -467,7 +467,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</h2>
             )}
             {filesQuery.isLoading ? (
-              <p className="text-slate-400">Loading\u2026</p>
+              <p className="text-slate-400">Loading…</p>
             ) : visible.length === 0 ? (
               <EmptyState filter={filter} hasFiles={files.length > 0} search={search} inFolder={!!currentFolder} />
             ) : view === "grid" ? (

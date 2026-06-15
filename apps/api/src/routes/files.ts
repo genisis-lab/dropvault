@@ -10,11 +10,30 @@ const files = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 files.use("*", requireAuth)
 
+function normalizeUploadSize(value: unknown): number | null {
+  const n = Math.floor(Number(value))
+  if (!Number.isSafeInteger(n) || n <= 0) return null
+  return n
+}
+
+function isInlineSafeContentType(type: string | null): boolean {
+  if (!type) return false
+  return type.startsWith("image/") || type.includes("pdf")
+}
+
+function addInlineSecurityHeaders(headers: Headers): void {
+  headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; sandbox")
+  headers.set("X-Content-Type-Options", "nosniff")
+  headers.set("Referrer-Policy", "no-referrer")
+}
+
 // 1) Ask for an upload URL. Creates a pending row (optionally inside a folder).
 files.post("/presign", async (c) => {
   const userId = c.get("userId")
   const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null }>()
   if (!body?.filename) return c.json({ error: "filename required" }, 400)
+  const sizeBytes = normalizeUploadSize(body.sizeBytes)
+  if (sizeBytes == null) return c.json({ error: "valid file size required" }, 400)
 
   const db = getDb(c.env.DB)
 
@@ -31,7 +50,7 @@ files.post("/presign", async (c) => {
   if (account?.quotaBytes != null) {
     const owned = await db.select().from(schema.files).where(eq(schema.files.ownerId, userId)).all()
     const used = owned.reduce((s, f) => s + (f.sizeBytes || 0), 0)
-    if (used + (body.sizeBytes ?? 0) > account.quotaBytes) {
+    if (used + sizeBytes > account.quotaBytes) {
       return c.json({ error: "storage quota exceeded" }, 413)
     }
   }
@@ -44,10 +63,10 @@ files.post("/presign", async (c) => {
   await db.insert(schema.files).values({
     id,
     ownerId: userId,
-    filename: body.filename,
+    filename: body.filename.trim().slice(0, 255),
     r2Key,
-    sizeBytes: body.sizeBytes ?? 0,
-    contentType: body.contentType ?? null,
+    sizeBytes,
+    contentType: body.contentType ? String(body.contentType).slice(0, 255) : null,
     status: "pending",
     folderId,
     createdAt,
@@ -85,6 +104,11 @@ files.put("/:id/upload", async (c) => {
 
   const options = row.contentType ? { httpMetadata: { contentType: row.contentType } } : undefined
   await c.env.FILES.put(row.r2Key, body, options)
+  const object = await c.env.FILES.head(row.r2Key)
+  if (!object || object.size !== row.sizeBytes) {
+    try { await c.env.FILES.delete(row.r2Key) } catch {}
+    return c.json({ error: "upload size mismatch" }, 409)
+  }
   return c.json({ ok: true })
 })
 
@@ -152,7 +176,7 @@ files.post("/:id/multipart/complete", async (c) => {
     return c.json({ error: `multipart complete failed: ${(e as Error)?.message ?? "unknown"}` }, 400)
   }
 
-  if (row.sizeBytes > 0 && object.size !== row.sizeBytes) {
+  if (object.size !== row.sizeBytes) {
     try { await c.env.FILES.delete(row.r2Key) } catch {}
     return c.json({ error: "upload size mismatch" }, 409)
   }
@@ -184,7 +208,8 @@ files.post("/:id/complete", async (c) => {
   if (!row) return c.json({ error: "not found" }, 404)
   const object = await c.env.FILES.head(row.r2Key)
   if (!object) return c.json({ error: "upload missing" }, 409)
-  if (row.sizeBytes > 0 && object.size !== row.sizeBytes) {
+  if (object.size !== row.sizeBytes) {
+    try { await c.env.FILES.delete(row.r2Key) } catch {}
     return c.json({ error: "upload size mismatch" }, 409)
   }
   await db.update(schema.files).set({ status: "ready" }).where(eq(schema.files.id, id)).run()
@@ -227,18 +252,20 @@ files.get("/:id/download", async (c) => {
   object.writeHttpMetadata(headers)
   headers.set("Content-Length", String(object.size))
   headers.set("Content-Disposition", `attachment; filename="${row.filename.replace(/["\\]/g, "_")}"`)
+  headers.set("X-Content-Type-Options", "nosniff")
   return new Response(object.body, { headers })
 })
 
-// 5b) Inline view (owner): same bytes as download but with an inline
-//     Content-Disposition so the dashboard can render image/PDF previews and
-//     thumbnails. Auth + on-access expiry are enforced just like download.
+// 5b) Inline view (owner): image/PDF preview only. Auth + on-access expiry are
+//     enforced just like download, and the response is sandboxed.
 files.get("/:id/inline", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row || row.status !== "ready") return c.json({ error: "not found" }, 404)
+
+  if (!isInlineSafeContentType(row.contentType)) return c.json({ error: "inline preview not allowed" }, 415)
 
   if (isExpired(row.expiresAt)) {
     try { await c.env.FILES.delete(row.r2Key) } catch {}
@@ -254,6 +281,7 @@ files.get("/:id/inline", async (c) => {
   headers.set("Content-Length", String(object.size))
   headers.set("Content-Disposition", `inline; filename="${row.filename.replace(/["\\]/g, "_")}"`)
   headers.set("Cache-Control", "private, max-age=60")
+  addInlineSecurityHeaders(headers)
   return new Response(object.body, { headers })
 })
 
