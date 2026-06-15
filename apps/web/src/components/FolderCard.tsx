@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, Folder, Link2, MoreVertical, Pencil, Share2, Trash2, X } from "lucide-react"
+import { Check, Folder, Link2, MoreVertical, Pencil, Share2, SlidersHorizontal, Trash2, X } from "lucide-react"
 import type { Folder as FolderT } from "../lib/api"
 import { folderShareUrl } from "../lib/api"
 
@@ -20,10 +20,11 @@ type Props = {
   onRevoke: (id: string) => void
   onRename: (id: string) => void
   onDelete: (id: string) => void
+  onOpenShare?: (id: string) => void
   onDropFiles?: (folderId: string, ids: string[]) => void
 }
 
-export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete, onDropFiles }: Props) {
+export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete, onOpenShare, onDropFiles }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -84,6 +85,17 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
               {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
               {folder.shareToken ? "Copy link" : "Get link"}
             </button>
+            {onOpenShare && (
+              <button
+                onClick={() => {
+                  onOpenShare(folder.id)
+                  setMenuOpen(false)
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+              >
+                <SlidersHorizontal size={15} /> Share settings\u2026
+              </button>
+            )}
             {folder.shareToken && (
               <button
                 onClick={() => {

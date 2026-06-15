@@ -28,6 +28,12 @@ export type Folder = {
   shareToken: string | null
   createdAt: number
   fileCount: number
+  // Share-link protections (folder links). The server never returns the
+  // password itself \u2014 only whether one is set.
+  shareHasPassword?: boolean
+  shareDownloadLimit?: number | null
+  shareDownloadCount?: number
+  shareExpiresAt?: number | null
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -116,7 +122,7 @@ export function inlineUrl(id: string) {
   return `${API}/api/files/${id}/inline`
 }
 
-// Optional protections for a file share link. Omit a field to leave it unset;
+// Optional protections for a share link. Omit a field to leave it unset;
 // pass null to clear it. Any provided option resets the download counter.
 export type ShareOptions = {
   password?: string | null
@@ -187,13 +193,19 @@ export async function deleteFolder(id: string) {
   return j<{ ok: true }>(res)
 }
 
-// Create (or fetch existing) a public share link for a folder.
-export async function shareFolder(id: string) {
-  const res = await fetch(`${API}/api/folders/${id}/share`, { method: "POST", credentials: "include" })
-  return j<{ token: string; url: string }>(res)
+// Create (or update) a public share link for a folder. With no options it simply
+// ensures a token exists; with options it (re)configures the link protections.
+export async function shareFolder(id: string, options?: ShareOptions): Promise<ShareResult> {
+  const res = await fetch(`${API}/api/folders/${id}/share`, {
+    method: "POST",
+    credentials: "include",
+    headers: options ? { "Content-Type": "application/json" } : undefined,
+    body: options ? JSON.stringify(options) : undefined,
+  })
+  return j<ShareResult>(res)
 }
 
-// Revoke a folder's public share link.
+// Revoke a folder's public share link (also clears any link protections).
 export async function revokeFolderShare(id: string) {
   const res = await fetch(`${API}/api/folders/${id}/share`, { method: "DELETE", credentials: "include" })
   return j<{ ok: true }>(res)

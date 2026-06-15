@@ -130,6 +130,9 @@ body {
 .bg-white {
   background-color: rgb(var(--c-card)) !important;
 }
+.bg-white\/60 {
+  background-color: rgb(var(--c-card) / 0.6) !important;
+}
 .bg-white\/70 {
   background-color: rgb(var(--c-card) / 0.7) !important;
 }

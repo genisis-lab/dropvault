@@ -18,6 +18,7 @@ import {
   revokeFolderShare,
   downloadUrl,
   type DriftFile,
+  type Folder,
 } from "../lib/api"
 import { signOut } from "../lib/auth-client"
 import Sidebar, { type Filter } from "./Sidebar"
@@ -27,6 +28,7 @@ import FileCard from "./FileCard"
 import FolderCard from "./FolderCard"
 import NameDialog from "./NameDialog"
 import ShareDialog from "./ShareDialog"
+import FolderShareDialog from "./FolderShareDialog"
 import PreviewModal from "./PreviewModal"
 import { useToast } from "./Toast"
 
@@ -82,6 +84,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [moveBarOpen, setMoveBarOpen] = useState(false)
   const [shareFile, setShareFile] = useState<DriftFile | null>(null)
+  const [shareFolderTarget, setShareFolderTarget] = useState<Folder | null>(null)
   const [previewFile, setPreviewFile] = useState<DriftFile | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
@@ -438,6 +441,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
                       onRevoke={(id) => revokeFolderMut.mutate(id)}
                       onRename={(id) => setDialog({ mode: "rename", folderId: id, current: fd.name })}
                       onDelete={deleteFolderConfirm}
+                      onOpenShare={(id) => setShareFolderTarget(folders.find((x) => x.id === id) ?? null)}
                       onDropFiles={(folderId, ids) => moveIds(ids, folderId)}
                     />
                   ))}
@@ -587,6 +591,12 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
         key={shareFile?.id}
         file={shareFile}
         onClose={() => setShareFile(null)}
+        onChanged={invalidate}
+      />
+      <FolderShareDialog
+        key={shareFolderTarget?.id}
+        folder={shareFolderTarget}
+        onClose={() => setShareFolderTarget(null)}
         onChanged={invalidate}
       />
       <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
