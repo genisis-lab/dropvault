@@ -8,7 +8,7 @@
     "dev:web": "pnpm --filter @dropvault/web dev",
     "dev:api": "pnpm --filter @dropvault/api dev",
     "build": "pnpm --filter @dropvault/web build",
-    "deploy:api": "pnpm --filter @dropvault/api deploy",
+    "deploy:api": "pnpm --filter @dropvault/api run deploy",
     "db:generate": "pnpm --filter @dropvault/api db:generate",
     "db:migrate:local": "pnpm --filter @dropvault/api db:migrate:local",
     "db:migrate:remote": "pnpm --filter @dropvault/api db:migrate:remote"
