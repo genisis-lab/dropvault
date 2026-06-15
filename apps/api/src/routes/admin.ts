@@ -21,6 +21,25 @@ admin.get("/access", async (c) => {
   const role = await adminRole(c.env, db, c.get("userEmail"))
   return c.json({ isAdmin: role != null, role })
 })
+admin.post("/limit-requests", async (c) => {
+  const userId = c.get("userId")
+  const body = await c.req.json<{ requestedBytes?: number; reason?: string }>().catch(() => ({}))
+  if (!body.requestedBytes || body.requestedBytes < 1073741824) return c.json({ error: "requestedBytes must be at least 1GB" }, 400)
+  const db = getDb(c.env.DB)
+  const id = crypto.randomUUID()
+  await db.insert(schema.uploadLimitRequests).values({
+    id,
+    userId,
+    requestedBytes: Math.floor(body.requestedBytes),
+    reason: body.reason?.slice(0, 500) ?? null,
+    status: "pending",
+    approvedBy: null,
+    approvedAt: null,
+    createdAt: nowSeconds(),
+  }).run()
+  await logAction(c, db, "limit_request.create", "user", userId, `${body.requestedBytes} bytes`)
+  return c.json({ ok: true, id })
+})
 admin.use("*", requireAdmin)
 
 async function forbidUnless(c: any, minimum: AdminRole) {
@@ -181,39 +200,19 @@ admin.post("/flags/:id", async (c) => { const denied = await forbidUnless(c, "mo
 admin.post("/flags/:id/resolve", async (c) => { const denied = await forbidUnless(c, "moderator"); if (denied) return denied; const id = c.req.param("id"); const db = getDb(c.env.DB); await db.update(schema.fileFlags).set({ status: "resolved", resolvedAt: nowSeconds() }).where(eq(schema.fileFlags.id, id)).run(); await logAction(c, db, "flag.resolve", "flag", id, null); return c.json({ ok: true }) })
 admin.delete("/flags/:id", async (c) => { const denied = await forbidUnless(c, "moderator"); if (denied) return denied; const id = c.req.param("id"); const db = getDb(c.env.DB); await db.delete(schema.fileFlags).where(eq(schema.fileFlags.id, id)).run(); await logAction(c, db, "flag.delete", "flag", id, null); return c.json({ ok: true }) })
 
-admin.get("/admins", async (c) => { const db = getDb(c.env.DB); const envSet = adminEmailSet(c.env); const dbRows = await db.select().from(schema.adminEmails).all(); const admins = [...Array.from(envSet, (email) => ({ email, role: "owner" as const, source: "env" as const, addedBy: null as string | null, createdAt: null as number | null })), ...dbRows.filter((r) => !envSet.has(r.email.toLowerCase())).map((r) => ({ email, role: normalizeAdminRole(r.role), source: "db" as const, addedBy: r.addedBy ?? null, createdAt: r.createdAt as number | null }))]; return c.json({ admins }) })
+admin.get("/admins", async (c) => { const db = getDb(c.env.DB); const envSet = adminEmailSet(c.env); const dbRows = await db.select().from(schema.adminEmails).all(); const admins = [...Array.from(envSet, (email) => ({ email, role: "owner" as const, source: "env" as const, addedBy: null as string | null, createdAt: null as number | null })), ...dbRows.filter((r) => !envSet.has(r.email.toLowerCase())).map((r) => ({ email: r.email, role: normalizeAdminRole(r.role), source: "db" as const, addedBy: r.addedBy ?? null, createdAt: r.createdAt as number | null }))]; return c.json({ admins }) })
 admin.post("/admins", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const body = await c.req.json<{ email?: string; role?: AdminRole }>().catch(() => ({} as { email?: string; role?: AdminRole })); const email = String(body.email ?? "").trim().toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: "invalid email" }, 400); const role = normalizeAdminRole(body.role); const db = getDb(c.env.DB); if (adminEmailSet(c.env).has(email)) return c.json({ error: "already configured via ADMIN_EMAILS" }, 400); await db.delete(schema.adminEmails).where(eq(schema.adminEmails.email, email)).run().catch(() => {}); await db.insert(schema.adminEmails).values({ email, role, addedBy: c.get("userEmail") ?? null, createdAt: nowSeconds() }).run(); await logAction(c, db, "admin.add", "admin", email, role); return c.json({ ok: true }) })
 admin.delete("/admins/:email", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const email = decodeURIComponent(c.req.param("email")).toLowerCase(); if (adminEmailSet(c.env).has(email)) return c.json({ error: "managed via ADMIN_EMAILS config" }, 400); const db = getDb(c.env.DB); await db.delete(schema.adminEmails).where(eq(schema.adminEmails.email, email)).run(); await logAction(c, db, "admin.remove", "admin", email, null); return c.json({ ok: true }) })
 admin.get("/settings", async (c) => { const db = getDb(c.env.DB); return c.json({ settings: await settingsMap(db) }) })
 admin.post("/settings", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const body = await c.req.json<SettingsBody>().catch(() => ({} as SettingsBody)); const db = getDb(c.env.DB); for (const key of settingsKeys) { if (!(key in body)) continue; await db.delete(schema.appSettings).where(eq(schema.appSettings.key, key)).run().catch(() => {}); await db.insert(schema.appSettings).values({ key, value: String(body[key] ?? ""), updatedBy: c.get("userEmail"), updatedAt: nowSeconds() }).run() } await logAction(c, db, "settings.update", "settings", null, settingsKeys.filter((key) => key in body).join(", ")); return c.json({ ok: true, settings: await settingsMap(db) }) })
 admin.get("/audit", async (c) => { const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500); const actor = c.req.query("actor")?.toLowerCase(); const action = c.req.query("action"); const targetType = c.req.query("targetType"); const db = getDb(c.env.DB); let rows = await db.select().from(schema.auditLog).orderBy(desc(schema.auditLog.createdAt)).limit(limit).all(); if (actor) rows = rows.filter((r) => (r.actorEmail ?? "").toLowerCase().includes(actor)); if (action) rows = rows.filter((r) => r.action === action); if (targetType) rows = rows.filter((r) => r.targetType === targetType); return c.json({ entries: rows.map((r) => ({ id: r.id, actorEmail: r.actorEmail, action: r.action, targetType: r.targetType, targetId: r.targetId, detail: r.detail, createdAt: r.createdAt })) }) })
 
-// Upload limit request endpoints
 admin.get("/limit-requests", async (c) => {
   const db = getDb(c.env.DB)
   const rows = await db.select().from(schema.uploadLimitRequests).orderBy(desc(schema.uploadLimitRequests.createdAt)).all().catch(() => [])
   const users = await db.select().from(schema.user).all()
   const emailById = new Map(users.map((u) => [u.id, u.email] as const))
   return c.json({ requests: rows.map((r) => ({ ...r, userEmail: emailById.get(r.userId) ?? null })) })
-})
-admin.post("/limit-requests", async (c) => {
-  const userId = c.get("userId")
-  const body = await c.req.json<{ requestedBytes?: number; reason?: string }>().catch(() => ({}))
-  if (!body.requestedBytes || body.requestedBytes < 1073741824) return c.json({ error: "requestedBytes must be at least 1GB" }, 400)
-  const db = getDb(c.env.DB)
-  const id = crypto.randomUUID()
-  await db.insert(schema.uploadLimitRequests).values({
-    id,
-    userId,
-    requestedBytes: Math.floor(body.requestedBytes),
-    reason: body.reason?.slice(0, 500) ?? null,
-    status: "pending",
-    approvedBy: null,
-    approvedAt: null,
-    createdAt: nowSeconds(),
-  }).run()
-  await logAction(c, db, "limit_request.create", "user", userId, `${body.requestedBytes} bytes`)
-  return c.json({ ok: true, id })
 })
 admin.post("/limit-requests/:id/approve", async (c) => {
   const denied = await forbidUnless(c, "admin")
