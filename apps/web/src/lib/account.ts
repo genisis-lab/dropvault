@@ -7,6 +7,9 @@ export type AccountStatus = {
   user: { id: string; name: string; email: string }
   suspended: boolean
   suspensionReason: string | null
+  // null means unlimited storage (admins and the owner).
+  quotaBytes: number | null
+  isAdmin: boolean
 }
 
 export async function accountStatus(): Promise<AccountStatus> {
