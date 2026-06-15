@@ -4,6 +4,7 @@ import { captcha } from "better-auth/plugins"
 import { eq } from "drizzle-orm"
 import { getDb, schema } from "./db"
 import { adminEmailSet } from "./middleware/admin"
+import { isSafeWebhookUrl } from "./lib/url"
 import type { Bindings } from "./types"
 
 function nowSec() {
@@ -30,7 +31,7 @@ async function notifySignup(db: ReturnType<typeof getDb>, email: string) {
     const map = new Map(rows.map((r) => [r.key, r.value] as const))
     if (map.get("notifyOnSignup") !== "true") return
     const url = map.get("notifyWebhookUrl") ?? ""
-    if (!/^https?:\/\//.test(url)) return
+    if (!isSafeWebhookUrl(url)) return
     await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
