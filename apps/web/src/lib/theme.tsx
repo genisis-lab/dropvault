@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react"
@@ -73,7 +74,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  return <ThemeContext.Provider value= theme, setTheme >{children}</ThemeContext.Provider>
+  const value = useMemo<ThemeContextValue>(() => ({ theme, setTheme }), [theme, setTheme])
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
 const menuInitial = { opacity: 0, scale: 0.95, y: -4 }
