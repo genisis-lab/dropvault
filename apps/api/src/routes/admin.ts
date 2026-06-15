@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { and, desc, eq, gt, inArray } from "drizzle-orm"
+import { desc, eq, inArray } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
@@ -16,7 +16,6 @@ import {
 import type { Bindings, Variables } from "../types"
 
 const admin = new Hono<{ Bindings: Bindings; Variables: Variables }>()
-const ROLE_RANK: Record<AdminRole, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 }
 
 admin.use("*", requireAuth)
 
@@ -70,31 +69,6 @@ async function logAction(
       targetType,
       targetId,
       detail,
-      createdAt: nowSeconds(),
-    }).run()
-  } catch {}
-}
-
-async function logActivity(
-  c: any,
-  db: ReturnType<typeof getDb>,
-  action: string,
-  targetType: string | null,
-  targetId: string | null,
-  detail: string | null,
-  userId?: string | null,
-): Promise<void> {
-  try {
-    await db.insert(schema.activityLog).values({
-      id: crypto.randomUUID(),
-      userId: userId ?? null,
-      actorEmail: c.get("userEmail") ?? null,
-      action,
-      targetType,
-      targetId,
-      detail,
-      ip: c.req.header("CF-Connecting-IP") ?? null,
-      userAgent: c.req.header("User-Agent") ?? null,
       createdAt: nowSeconds(),
     }).run()
   } catch {}
@@ -193,7 +167,10 @@ admin.get("/stats", async (c) => {
     keys.push(k)
     growthMap.set(k, { users: 0, files: 0, bytes: 0 })
   }
-  for (const u of users) growthMap.get(dayKey(Math.floor(u.createdAt.getTime() / 1000)))?.users++
+  for (const u of users) {
+    const e = growthMap.get(dayKey(Math.floor(u.createdAt.getTime() / 1000)))
+    if (e) e.users += 1
+  }
   for (const f of files) {
     const e = growthMap.get(dayKey(f.createdAt))
     if (e) {
