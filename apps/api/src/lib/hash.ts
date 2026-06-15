@@ -1,11 +1,23 @@
-// Tiny SHA-256 helpers (Web Crypto) used to hash share-link / upload-request
-// passwords. We store only digests, never the plaintext.
+// Password hashing helpers (Web Crypto) for share-link / upload-request
+// passwords. We store only derived digests, never the plaintext.
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const len = hex.length >> 1
+  const out = new Uint8Array(len)
+  for (let i = 0; i < len; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16)
+  return out
+}
+
 export async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input)
   const digest = await crypto.subtle.digest("SHA-256", data)
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
+  return bytesToHex(new Uint8Array(digest))
 }
 
 // Constant-time comparison for hex digests so password checks do not
@@ -23,28 +35,47 @@ export async function timingSafeEqualHex(a: string, b: string): Promise<boolean>
 function randomSaltHex(bytes = 16): string {
   const arr = new Uint8Array(bytes)
   crypto.getRandomValues(arr)
-  return Array.from(arr)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
+  return bytesToHex(arr)
 }
 
-// Hash a secret (share / upload-request password) with a per-secret random
-// salt. Stored format is `salt$digest`, where digest = SHA-256(salt + plain).
-// Because the salt is unique per file/folder/request, identical passwords never
-// produce the same digest and precomputed rainbow tables are useless if the DB
-// ever leaks.
+// PBKDF2-SHA256 key derivation. Deliberately slow so a leaked digest resists
+// offline brute force far better than a single SHA-256 round would.
+const PBKDF2_ITERATIONS = 100000
+async function pbkdf2Hex(plain: string, saltHex: string, iterations: number, lenBytes = 32): Promise<string> {
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(plain), "PBKDF2", false, ["deriveBits"])
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: hexToBytes(saltHex), iterations },
+    keyMaterial,
+    lenBytes * 8,
+  )
+  return bytesToHex(new Uint8Array(bits))
+}
+
+// Hash a secret (share / upload-request password) with PBKDF2 and a per-secret
+// random salt. Stored format is `pbkdf2$<iterations>$<salt>$<digest>`. Because
+// the salt is unique per secret, identical passwords never produce the same
+// digest and precomputed tables are useless if the DB ever leaks.
 export async function hashSecret(plain: string): Promise<string> {
   const salt = randomSaltHex()
-  const digest = await sha256Hex(salt + plain)
-  return `${salt}$${digest}`
+  const digest = await pbkdf2Hex(plain, salt, PBKDF2_ITERATIONS)
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${salt}$${digest}`
 }
 
-// Verify a plaintext secret against a stored value. New values are `salt$digest`;
-// legacy values (written before per-secret salting) are bare digests, so we fall
-// back to an unsalted constant-time comparison to keep old share links working
-// until they are re-shared.
+// Verify a plaintext secret against a stored value. Supports three formats for
+// backward compatibility:
+//   - `pbkdf2$<iters>$<salt>$<digest>` (current)
+//   - `<salt>$<digest>`                legacy salted SHA-256
+//   - `<digest>`                       legacy unsalted SHA-256
+// Legacy values keep old share/upload links working until they are re-shared.
 export async function verifySecret(plain: string, stored: string | null | undefined): Promise<boolean> {
   if (!stored) return false
+  if (stored.startsWith("pbkdf2$")) {
+    const parts = stored.split("$")
+    if (parts.length !== 4) return false
+    const iterations = Number(parts[1])
+    if (!Number.isFinite(iterations) || iterations < 1) return false
+    return timingSafeEqualHex(await pbkdf2Hex(plain, parts[2], iterations), parts[3])
+  }
   const sep = stored.indexOf("$")
   if (sep === -1) {
     return timingSafeEqualHex(await sha256Hex(plain), stored)
