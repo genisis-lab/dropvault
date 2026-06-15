@@ -28,7 +28,7 @@ export default function SuspendedScreen({ email, reason }: { email: string; reas
         </div>
         <h1 className="mt-5 text-2xl font-bold text-slate-800">Your account is suspended</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Access for <span className="font-medium text-slate-700">{email}</span> has been suspended by an administrator. You can’t upload, share, or manage files while your account is suspended.
+          Access for <span className="font-medium text-slate-700">{email}</span> has been suspended by an administrator. You can't upload, share, or manage files while your account is suspended.
         </p>
         {reason && (
           <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-left text-sm text-red-700">
