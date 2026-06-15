@@ -26,6 +26,16 @@ files.post("/presign", async (c) => {
     folderId = body.folderId
   }
 
+  // Enforce a per-user storage quota when an admin has set one on the account.
+  const account = await db.select().from(schema.user).where(eq(schema.user.id, userId)).get()
+  if (account?.quotaBytes != null) {
+    const owned = await db.select().from(schema.files).where(eq(schema.files.ownerId, userId)).all()
+    const used = owned.reduce((s, f) => s + (f.sizeBytes || 0), 0)
+    if (used + (body.sizeBytes ?? 0) > account.quotaBytes) {
+      return c.json({ error: "storage quota exceeded" }, 413)
+    }
+  }
+
   const id = crypto.randomUUID()
   const r2Key = `${userId}/${id}`
   const createdAt = nowSeconds()
@@ -248,12 +258,6 @@ files.get("/:id/inline", async (c) => {
 })
 
 // 6) Create (or update) a public share link for a file.
-//    Body (all optional): { password, downloadLimit, expiresInDays }.
-//      - password: non-empty string sets a password (stored hashed); null/"" clears it.
-//      - downloadLimit: positive integer caps total downloads; null = unlimited.
-//      - expiresInDays: positive number sets a link-specific expiry; null = follow file.
-//    When any option key is present we treat it as a full (re)configure and reset
-//    the download counter. A bare call with no options just ensures a token exists.
 files.post("/:id/share", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
@@ -301,10 +305,6 @@ files.delete("/:id/share", async (c) => {
 })
 
 // 8) Update a file: rename, extend expiry, and/or move it between folders.
-//    - "filename" (string) renames the file (trimmed, non-empty).
-//    - "extendDays" is ADDED to the current expiry (or to now, if already past due),
-//      so extending always gains time. Total lifetime is capped at MAX_EXPIRY_DAYS.
-//    - "folderId" (string) moves the file into that folder; null moves it to the root.
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
