@@ -21,6 +21,7 @@ import {
   revokeFolderShare,
   downloadUrl,
   adminAccess,
+  createLimitRequest,
   type DriftFile,
   type Folder,
 } from "../lib/api"
@@ -93,6 +94,23 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   async function handleShare(id: string): Promise<string> { try { const res = await createShare(id); await invalidate(); toastOk("Share link copied"); return res.url } catch (e) { toastErr((e as Error)?.message || "Couldn't create share link"); throw e } }
   async function handleShareFolder(id: string): Promise<string> { try { const res = await shareFolder(id); await invalidate(); toastOk("Folder link copied"); return res.url } catch (e) { toastErr((e as Error)?.message || "Couldn't create folder link"); throw e } }
+  async function requestMoreLimit() {
+    const requestedGbRaw = window.prompt("How much upload space do you want in GB?", "5")
+    if (requestedGbRaw == null) return
+    const requestedGb = Number(requestedGbRaw)
+    if (!Number.isFinite(requestedGb) || requestedGb < 1) {
+      toastErr("Enter a valid GB amount")
+      return
+    }
+    const reason = window.prompt("Why do you need a larger upload limit?", "Uploading larger files for work")
+    if (reason == null) return
+    try {
+      await createLimitRequest(Math.floor(requestedGb * 1024 * 1024 * 1024), reason.trim() || undefined)
+      toastOk("Upload limit request sent")
+    } catch (e) {
+      toastErr((e as Error)?.message || "Couldn't send upload limit request")
+    }
+  }
 
   const liveFiles = filesQuery.data ?? []
   const trashFiles = trashQuery.data ?? []
@@ -147,7 +165,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   return (
     <div>
-      <Sidebar onNew={() => uploadInputRef.current?.click()} onNewFolder={() => setDialog({ mode: "create" })} totalBytes={totalBytes} fileCount={liveFiles.length} sharedCount={sharedCount} filter={filter} setFilter={setFilter} isAdmin={isAdmin} onOpenAdmin={() => setAdminOpen(true)} onSignOut={() => signOut()} mobileOpen={menuOpen} onCloseMobile={() => setMenuOpen(false)} />
+      <Sidebar onNew={() => uploadInputRef.current?.click()} onNewFolder={() => setDialog({ mode: "create" })} totalBytes={totalBytes} fileCount={liveFiles.length} sharedCount={sharedCount} filter={filter} setFilter={setFilter} isAdmin={isAdmin} onOpenAdmin={() => setAdminOpen(true)} onSignOut={() => signOut()} mobileOpen={menuOpen} onCloseMobile={() => setMenuOpen(false)} onRequestMore={requestMoreLimit} />
       <div className="md:pl-60"><Topbar search={search} setSearch={setSearch} view={view} setView={setView} userEmail={userEmail} onNew={() => uploadInputRef.current?.click()} onSignOut={() => signOut()} onOpenMenu={() => setMenuOpen(true)} />
         <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6"><div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div className="min-w-0">{currentFolder && <button onClick={goToRoot} className="mb-1 flex items-center gap-1 text-sm text-slate-500 hover:text-drift-600"><span>My Drive</span><ChevronRight size={14} /><span className="font-medium text-slate-700">{currentFolder.name}</span></button>}<h1 className="truncate text-xl font-bold text-slate-800 sm:text-2xl">{heading}</h1><p className="text-sm text-slate-500">{subtitle}</p></div><div className="flex flex-wrap items-center gap-2 text-sm">{expiringSoon.length > 0 && filter !== "trash" && <button onClick={extendAllExpiring} className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 transition hover:bg-amber-100"><Clock size={16} /> Extend {expiringSoon.length} expiring</button>}<button onClick={() => setDialog({ mode: "create" })} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"><FolderPlus size={16} /> New folder</button><select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort files" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400">{SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select><span className="hidden text-slate-400 sm:inline">Expire in</span><select value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400">{EXPIRY_OPTIONS.map((d) => <option key={d} value={d}>{d} day{d === 1 ? "" : "s"}</option>)}</select></div></div>
           {filter !== "trash" && <UploadZone expiryDays={expiryDays} onUploaded={invalidate} inputRef={uploadInputRef} folderId={currentFolderId} folderName={currentFolder?.name} />}
