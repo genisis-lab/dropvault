@@ -47,6 +47,8 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
   const usersQ = useQuery({ queryKey: ["admin-users"], queryFn: adminUsers, enabled: open && tab === "users" })
   const filesQ = useQuery({ queryKey: ["admin-files"], queryFn: adminFiles, enabled: open && tab === "files" })
 
+  const refreshing = statsQ.isFetching || usersQ.isFetching || filesQ.isFetching
+
   function refresh() {
     qc.invalidateQueries({ queryKey: ["admin-stats"] })
     qc.invalidateQueries({ queryKey: ["admin-users"] })
@@ -130,11 +132,12 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
           <div className="flex items-center gap-1">
             <button
               onClick={refresh}
+              disabled={refreshing}
               aria-label="Refresh"
               title="Refresh"
-              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:cursor-default disabled:opacity-60"
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
             </button>
             <button
               onClick={onClose}
