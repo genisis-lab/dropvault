@@ -1,5 +1,6 @@
 import { LayoutGrid, List, LogOut, Menu, Plus, Search } from "lucide-react"
 import { ThemeToggle } from "../lib/theme"
+import { LayoutToggle } from "../lib/layout"
 
 export type ViewMode = "grid" | "list"
 
@@ -76,6 +77,7 @@ export default function Topbar({
           </button>
         </div>
 
+        <LayoutToggle />
         <ThemeToggle />
 
         <div className="flex items-center gap-2">
