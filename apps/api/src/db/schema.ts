@@ -32,8 +32,8 @@ export const account = sqliteTable("account", {
   providerId: text("providerId").notNull(),
   accessToken: text("accessToken"),
   refreshToken: text("refreshToken"),
-  accessTokenExpiresAt: integer("accessTokenExpiresAt", { mode: "timestamp" }),
-  refreshTokenExpiresAt: integer("refreshTokenExpiresAt", { mode: "timestamp" }),
+  accessTokenExpiresAt: integer("accessTokenExpiresAt", { mode: "timestamp" }).notNull(),
+  refreshTokenExpiresAt: integer("refreshTokenExpiresAt", { mode: "timestamp" }).notNull(),
   scope: text("scope"),
   idToken: text("idToken"),
   password: text("password"),
@@ -211,3 +211,16 @@ export const userSuspensions = sqliteTable("user_suspensions", {
 })
 
 export type UserSuspensionRow = typeof userSuspensions.$inferSelect
+
+export const uploadLimitRequests = sqliteTable("upload_limit_requests", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  requestedBytes: integer("requested_bytes").notNull(),
+  reason: text("reason"),
+  status: text("status").notNull().default("pending"),
+  approvedBy: text("approved_by"),
+  approvedAt: integer("approved_at"),
+  createdAt: integer("created_at").notNull(),
+})
+
+export type UploadLimitRequestRow = typeof uploadLimitRequests.$inferSelect
