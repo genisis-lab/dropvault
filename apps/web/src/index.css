@@ -59,9 +59,13 @@ html.dark .text-drift-700, html.sunset .text-drift-700 { color: #a5b4fc !importa
 html.dark .text-drift-600, html.sunset .text-drift-600 { color: #818cf8 !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 
-@media (pointer: coarse) {
-  .canvas-glow { display: none; }
-  .backdrop-blur-xl, .backdrop-blur-sm { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-  main [style*="transform"] { transform: none !important; }
-  main [style*="opacity"] { opacity: 1 !important; }
+@media (pointer: coarse), (hover: none) {
+  html, body, #root { min-height: 100%; background: rgb(var(--c-app)) !important; }
+  * { -webkit-tap-highlight-color: transparent; }
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .canvas-glow { display: none !important; }
+  .backdrop-blur-xl, .backdrop-blur-sm, [class*="backdrop-blur"] { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  [style*="transform"] { transform: none !important; }
+  [style*="opacity"] { opacity: 1 !important; }
+  [style*="filter"] { filter: none !important; }
 }
