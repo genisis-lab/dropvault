@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, inArray } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import type { FileRow } from "../db/schema"
 import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry"
@@ -11,6 +11,8 @@ type SettingsKey = "defaultExpiryDays" | "maxExpiryDays" | "maxUploadBytes" | "a
 type SettingsBody = Partial<Record<SettingsKey, string | number | boolean | null>>
 type BulkUserBody = { action?: string; ids?: unknown[]; quotaBytes?: number | null }
 type BulkFileBody = { action?: string; ids?: unknown[]; days?: number }
+
+const MAX_PENDING_LIMIT_REQUESTS = 2
 
 const admin = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 const settingsKeys: SettingsKey[] = ["defaultExpiryDays", "maxExpiryDays", "maxUploadBytes", "allowedTypes", "defaultQuotaBytes", "requirePasswordForShares", "publicSharingEnabled"]
@@ -26,6 +28,8 @@ admin.post("/limit-requests", async (c) => {
   const body = await c.req.json<{ requestedBytes?: number; reason?: string }>().catch(() => ({} as { requestedBytes?: number; reason?: string }))
   if (!body.requestedBytes || body.requestedBytes < 1073741824) return c.json({ error: "requestedBytes must be at least 1GB" }, 400)
   const db = getDb(c.env.DB)
+  const pending = await db.select().from(schema.uploadLimitRequests).where(and(eq(schema.uploadLimitRequests.userId, userId), eq(schema.uploadLimitRequests.status, "pending"))).all().catch(() => [])
+  if (pending.length >= MAX_PENDING_LIMIT_REQUESTS) return c.json({ error: `You already have ${MAX_PENDING_LIMIT_REQUESTS} pending upload limit requests. Please wait for an admin to review them.` }, 429)
   const id = crypto.randomUUID()
   await db.insert(schema.uploadLimitRequests).values({
     id,
@@ -39,6 +43,12 @@ admin.post("/limit-requests", async (c) => {
   }).run()
   await logAction(c, db, "limit_request.create", "user", userId, `${body.requestedBytes} bytes`)
   return c.json({ ok: true, id })
+})
+admin.get("/limit-requests/mine", async (c) => {
+  const userId = c.get("userId")
+  const db = getDb(c.env.DB)
+  const rows = await db.select().from(schema.uploadLimitRequests).where(eq(schema.uploadLimitRequests.userId, userId)).orderBy(desc(schema.uploadLimitRequests.createdAt)).all().catch(() => [])
+  return c.json({ requests: rows })
 })
 admin.use("*", requireAdmin)
 
