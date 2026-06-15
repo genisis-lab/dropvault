@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { and, desc, eq, gt, sql } from "drizzle-orm"
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"
 import { getCookie, setCookie } from "hono/cookie"
 import { getDb, schema } from "../db"
 import { isExpired, nowSeconds } from "../lib/expiry"
@@ -227,7 +227,7 @@ share.get("/folder/:token", async (c) => {
   }
 
   const rows = await db.select().from(schema.files)
-    .where(and(eq(schema.files.folderId, folder.id), eq(schema.files.status, "ready"), gt(schema.files.expiresAt, nowSeconds())))
+    .where(and(eq(schema.files.folderId, folder.id), eq(schema.files.status, "ready"), isNull(schema.files.deletedAt), gt(schema.files.expiresAt, nowSeconds())))
     .orderBy(desc(schema.files.createdAt))
     .all()
 
@@ -292,7 +292,7 @@ share.get("/folder/:token/:fileId", async (c) => {
     return c.json({ error: "password required" }, 401)
   }
 
-  const row = await db.select().from(schema.files).where(and(eq(schema.files.id, fileId), eq(schema.files.folderId, folder.id))).get()
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.id, fileId), eq(schema.files.folderId, folder.id), isNull(schema.files.deletedAt))).get()
   if (!row || row.status !== "ready") return c.json({ error: "not found" }, 404)
 
   if (isExpired(row.expiresAt)) {
@@ -317,7 +317,7 @@ share.get("/folder/:token/:fileId", async (c) => {
 share.post("/:token/unlock", async (c) => {
   const token = c.req.param("token")
   const db = getDb(c.env.DB)
-  const row = await db.select().from(schema.files).where(eq(schema.files.shareToken, token)).get()
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt))).get()
   if (!row || row.status !== "ready") {
     return c.html(infoPage("Link unavailable", "This share link is invalid or has been revoked."), 404)
   }
@@ -346,7 +346,7 @@ share.get("/:token/report", (c) => c.html(reportPage(c.req.param("token"), false
 share.post("/:token/flag", async (c) => {
   const token = c.req.param("token")
   const db = getDb(c.env.DB)
-  const row = await db.select().from(schema.files).where(eq(schema.files.shareToken, token)).get()
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt))).get()
   if (!row || row.status !== "ready") {
     return c.html(infoPage("Link unavailable", "This share link is invalid or has been revoked."), 404)
   }
@@ -376,7 +376,7 @@ share.get("/:token", async (c) => {
   const wantsBytes = wantDownload || wantRaw
 
   const db = getDb(c.env.DB)
-  const row = await db.select().from(schema.files).where(eq(schema.files.shareToken, token)).get()
+  const row = await db.select().from(schema.files).where(and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt))).get()
   if (!row || row.status !== "ready") {
     return wantsBytes
       ? c.json({ error: "not found" }, 404)
