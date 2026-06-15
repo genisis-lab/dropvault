@@ -58,3 +58,10 @@ html.dark .hover\:bg-red-50:hover, html.sunset .hover\:bg-red-50:hover { backgro
 html.dark .text-drift-700, html.sunset .text-drift-700 { color: #a5b4fc !important; }
 html.dark .text-drift-600, html.sunset .text-drift-600 { color: #818cf8 !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
+
+@media (pointer: coarse) {
+  .canvas-glow { display: none; }
+  .backdrop-blur-xl, .backdrop-blur-sm { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  main [style*="transform"] { transform: none !important; }
+  main [style*="opacity"] { opacity: 1 !important; }
+}
