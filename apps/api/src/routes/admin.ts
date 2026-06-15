@@ -187,4 +187,54 @@ admin.delete("/admins/:email", async (c) => { const denied = await forbidUnless(
 admin.get("/settings", async (c) => { const db = getDb(c.env.DB); return c.json({ settings: await settingsMap(db) }) })
 admin.post("/settings", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const body = await c.req.json<SettingsBody>().catch(() => ({} as SettingsBody)); const db = getDb(c.env.DB); for (const key of settingsKeys) { if (!(key in body)) continue; await db.delete(schema.appSettings).where(eq(schema.appSettings.key, key)).run().catch(() => {}); await db.insert(schema.appSettings).values({ key, value: String(body[key] ?? ""), updatedBy: c.get("userEmail"), updatedAt: nowSeconds() }).run() } await logAction(c, db, "settings.update", "settings", null, settingsKeys.filter((key) => key in body).join(", ")); return c.json({ ok: true, settings: await settingsMap(db) }) })
 admin.get("/audit", async (c) => { const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500); const actor = c.req.query("actor")?.toLowerCase(); const action = c.req.query("action"); const targetType = c.req.query("targetType"); const db = getDb(c.env.DB); let rows = await db.select().from(schema.auditLog).orderBy(desc(schema.auditLog.createdAt)).limit(limit).all(); if (actor) rows = rows.filter((r) => (r.actorEmail ?? "").toLowerCase().includes(actor)); if (action) rows = rows.filter((r) => r.action === action); if (targetType) rows = rows.filter((r) => r.targetType === targetType); return c.json({ entries: rows.map((r) => ({ id: r.id, actorEmail: r.actorEmail, action: r.action, targetType: r.targetType, targetId: r.targetId, detail: r.detail, createdAt: r.createdAt })) }) })
+
+// Upload limit request endpoints
+admin.get("/limit-requests", async (c) => {
+  const db = getDb(c.env.DB)
+  const rows = await db.select().from(schema.uploadLimitRequests).orderBy(desc(schema.uploadLimitRequests.createdAt)).all().catch(() => [])
+  const users = await db.select().from(schema.user).all()
+  const emailById = new Map(users.map((u) => [u.id, u.email] as const))
+  return c.json({ requests: rows.map((r) => ({ ...r, userEmail: emailById.get(r.userId) ?? null })) })
+})
+admin.post("/limit-requests", async (c) => {
+  const userId = c.get("userId")
+  const body = await c.req.json<{ requestedBytes?: number; reason?: string }>().catch(() => ({}))
+  if (!body.requestedBytes || body.requestedBytes < 1073741824) return c.json({ error: "requestedBytes must be at least 1GB" }, 400)
+  const db = getDb(c.env.DB)
+  const id = crypto.randomUUID()
+  await db.insert(schema.uploadLimitRequests).values({
+    id,
+    userId,
+    requestedBytes: Math.floor(body.requestedBytes),
+    reason: body.reason?.slice(0, 500) ?? null,
+    status: "pending",
+    approvedBy: null,
+    approvedAt: null,
+    createdAt: nowSeconds(),
+  }).run()
+  await logAction(c, db, "limit_request.create", "user", userId, `${body.requestedBytes} bytes`)
+  return c.json({ ok: true, id })
+})
+admin.post("/limit-requests/:id/approve", async (c) => {
+  const denied = await forbidUnless(c, "admin")
+  if (denied) return denied
+  const id = c.req.param("id")
+  const db = getDb(c.env.DB)
+  const req = await db.select().from(schema.uploadLimitRequests).where(eq(schema.uploadLimitRequests.id, id)).get()
+  if (!req || req.status !== "pending") return c.json({ error: "not found or already handled" }, 404)
+  await db.update(schema.uploadLimitRequests).set({ status: "approved", approvedBy: c.get("userEmail"), approvedAt: nowSeconds() }).where(eq(schema.uploadLimitRequests.id, id)).run()
+  await db.update(schema.user).set({ quotaBytes: req.requestedBytes }).where(eq(schema.user.id, req.userId)).run()
+  await logAction(c, db, "limit_request.approve", "user", req.userId, `${req.requestedBytes} bytes`)
+  return c.json({ ok: true })
+})
+admin.post("/limit-requests/:id/reject", async (c) => {
+  const denied = await forbidUnless(c, "admin")
+  if (denied) return denied
+  const id = c.req.param("id")
+  const db = getDb(c.env.DB)
+  await db.update(schema.uploadLimitRequests).set({ status: "rejected", approvedBy: c.get("userEmail"), approvedAt: nowSeconds() }).where(eq(schema.uploadLimitRequests.id, id)).run()
+  await logAction(c, db, "limit_request.reject", "user", id, null)
+  return c.json({ ok: true })
+})
+
 export default admin
