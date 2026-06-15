@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { desc, eq, inArray } from "drizzle-orm"
 import { getDb, schema } from "../db"
+import type { FileRow } from "../db/schema"
 import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
 import { adminEmailSet, adminRole, effectiveAdmins, hasRole, normalizeAdminRole, requireAdmin, type AdminRole } from "../middleware/admin"
@@ -49,7 +50,7 @@ async function logAction(c: any, db: ReturnType<typeof getDb>, action: string, t
     await db.insert(schema.auditLog).values({ id: crypto.randomUUID(), actorId: c.get("userId") ?? null, actorEmail: c.get("userEmail") ?? null, action, targetType, targetId, detail, createdAt: nowSeconds() }).run()
   } catch {}
 }
-function fileRow(f: schema.FileRow, emailById: Map<string, string>, nameById: Map<string, string>) {
+function fileRow(f: FileRow, emailById: Map<string, string>, nameById: Map<string, string>) {
   return { id: f.id, filename: f.filename, sizeBytes: f.sizeBytes, contentType: f.contentType, status: f.status, shared: !!f.shareToken, shareToken: f.shareToken ?? null, folderId: f.folderId ?? null, favorite: !!f.favorite, tags: parseTags(f.tags ?? null), deletedAt: f.deletedAt ?? null, versionGroupId: f.versionGroupId ?? null, createdAt: f.createdAt, expiresAt: f.expiresAt, ownerId: f.ownerId, ownerEmail: emailById.get(f.ownerId) ?? null, ownerName: nameById.get(f.ownerId) ?? null }
 }
 async function settingsMap(db: ReturnType<typeof getDb>) {
