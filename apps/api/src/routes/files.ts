@@ -29,6 +29,7 @@ async function settings(db: ReturnType<typeof getDb>) {
     allowedTypes: (map.get("allowedTypes") || "").split(",").map((x) => x.trim()).filter(Boolean),
     requirePasswordForShares: map.get("requirePasswordForShares") === "true",
     publicSharingEnabled: map.get("publicSharingEnabled") !== "false",
+    defaultQuotaBytes: Number(map.get("defaultQuotaBytes") || 1073741824),
   }
 }
 function typeAllowed(type: string | null, allowed: string[]): boolean {
@@ -74,10 +75,11 @@ files.post("/presign", async (c) => {
     folderId = body.folderId
   }
   const account = await db.select().from(schema.user).where(eq(schema.user.id, userId)).get()
-  if (account?.quotaBytes != null) {
+  const quotaLimit = account?.quotaBytes ?? policy.defaultQuotaBytes
+  if (quotaLimit != null && quotaLimit > 0) {
     const owned = await db.select().from(schema.files).where(and(eq(schema.files.ownerId, userId), isNull(schema.files.deletedAt))).all()
     const used = owned.reduce((s, f) => s + (f.status === "ready" ? f.sizeBytes || 0 : 0), 0)
-    if (used + sizeBytes > account.quotaBytes) return c.json({ error: "storage quota exceeded" }, 413)
+    if (used + sizeBytes > quotaLimit) return c.json({ error: "storage quota exceeded" }, 413)
   }
   const id = crypto.randomUUID()
   const r2Key = `${userId}/${id}`
@@ -95,11 +97,13 @@ async function loadPendingOwned(c: any, id: string) {
   return { db, row }
 }
 async function markReady(c: any, db: ReturnType<typeof getDb>, row: any, id: string) {
+  const policy = await settings(db)
   const account = await db.select().from(schema.user).where(eq(schema.user.id, row.ownerId)).get()
-  if (account?.quotaBytes != null) {
+  const quotaLimit = account?.quotaBytes ?? policy.defaultQuotaBytes
+  if (quotaLimit != null && quotaLimit > 0) {
     const owned = await db.select().from(schema.files).where(and(eq(schema.files.ownerId, row.ownerId), isNull(schema.files.deletedAt))).all()
     const used = owned.reduce((s, f) => s + ((f.status === "ready" || f.id === id) ? f.sizeBytes || 0 : 0), 0)
-    if (used > account.quotaBytes) { try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); return c.json({ error: "storage quota exceeded" }, 413) }
+    if (used > quotaLimit) { try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); return c.json({ error: "storage quota exceeded" }, 413) }
   }
   await db.update(schema.files).set({ status: "ready" }).where(eq(schema.files.id, id)).run()
   await db.insert(schema.fileVersions).values({ id: crypto.randomUUID(), fileId: id, versionGroupId: row.versionGroupId ?? id, versionNumber: 1, r2Key: row.r2Key, sizeBytes: row.sizeBytes, createdAt: nowSeconds() }).run().catch(() => {})
