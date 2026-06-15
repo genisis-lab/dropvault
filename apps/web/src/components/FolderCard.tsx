@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, Folder, Link2, MoreVertical, Pencil, Share2, SlidersHorizontal, Trash2, X } from "lucide-react"
+import { Check, Folder, Info, Link2, Lock, MoreVertical, Pencil, Share2, SlidersHorizontal, Trash2, X } from "lucide-react"
 import type { Folder as FolderT } from "../lib/api"
 import { folderShareUrl } from "../lib/api"
 
@@ -21,10 +21,11 @@ type Props = {
   onRename: (id: string) => void
   onDelete: (id: string) => void
   onOpenShare?: (id: string) => void
+  onOpenDetails?: (id: string) => void
   onDropFiles?: (folderId: string, ids: string[]) => void
 }
 
-export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete, onOpenShare, onDropFiles }: Props) {
+export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete, onOpenShare, onOpenDetails, onDropFiles }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -77,6 +78,17 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             exit={menuInitial}
             className="absolute right-0 top-9 z-40 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
           >
+            {onOpenDetails && (
+              <button
+                onClick={() => {
+                  onOpenDetails(folder.id)
+                  setMenuOpen(false)
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+              >
+                <Info size={15} /> Details
+              </button>
+            )}
             <button
               disabled={busy}
               onClick={copyLink}
@@ -93,7 +105,7 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
                 }}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
               >
-                <SlidersHorizontal size={15} /> Share settings\u2026
+                <SlidersHorizontal size={15} /> Share settings…
               </button>
             )}
             {folder.shareToken && (
@@ -135,6 +147,12 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
     ? "border-drift-400 ring-2 ring-drift-400/60 bg-drift-500/5"
     : "border-slate-200 hover:border-slate-300"
 
+  const shareBadge = folder.shareToken ? (
+    <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
+      <Share2 size={11} /> Shared{folder.shareHasPassword && <Lock size={10} className="text-drift-500/80" />}
+    </span>
+  ) : null
+
   if (view === "list") {
     return (
       <motion.div
@@ -156,11 +174,7 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             <p className="text-xs text-slate-400">{meta}</p>
           </div>
         </button>
-        {folder.shareToken && (
-          <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
-            <Share2 size={11} /> Shared
-          </span>
-        )}
+        {shareBadge}
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
@@ -195,7 +209,7 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             {folder.name}
           </p>
           <p className="text-xs text-slate-400">
-            {dropActive ? "Drop to move here" : meta + (folder.shareToken ? " \u00b7 shared" : "")}
+            {dropActive ? "Drop to move here" : meta + (folder.shareToken ? " · shared" : "")}
           </p>
         </div>
       </button>
