@@ -8,3 +8,14 @@ export async function sha256Hex(input: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
 }
+
+// Constant-time comparison for hex digests so password unlock checks do not
+// short-circuit on the first different character.
+export async function timingSafeEqualHex(a: string, b: string): Promise<boolean> {
+  if (a.length !== b.length) return false
+  const aBytes = new TextEncoder().encode(a)
+  const bBytes = new TextEncoder().encode(b)
+  let diff = 0
+  for (let i = 0; i < aBytes.length; i++) diff |= aBytes[i] ^ bBytes[i]
+  return diff === 0
+}

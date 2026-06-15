@@ -3,7 +3,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm"
 import { getCookie, setCookie } from "hono/cookie"
 import { getDb, schema } from "../db"
 import { isExpired, nowSeconds } from "../lib/expiry"
-import { sha256Hex } from "../lib/hash"
+import { sha256Hex, timingSafeEqualHex } from "../lib/hash"
 import type { Bindings, Variables } from "../types"
 
 type FileRow = typeof schema.files.$inferSelect
@@ -166,6 +166,7 @@ function streamObject(object: R2ObjectBody, filename: string, attachment: boolea
   const safe = filename.replace(/[\"\\]/g, "_")
   headers.set("Content-Disposition", `${attachment ? "attachment" : "inline"}; filename=\"${safe}\"`)
   headers.set("Cache-Control", "private, max-age=0, no-store")
+  headers.set("X-Content-Type-Options", "nosniff")
   return new Response(object.body, { headers })
 }
 
@@ -262,7 +263,7 @@ share.post("/folder/:token/unlock", async (c) => {
 
   const form = await c.req.parseBody()
   const submitted = String(form?.password ?? "")
-  const ok = (await sha256Hex(submitted)) === folder.sharePassword
+  const ok = await timingSafeEqualHex(await sha256Hex(submitted), folder.sharePassword)
   if (!ok) return c.html(passwordPage(`/api/share/folder/${token}/unlock`, true), 401)
 
   setCookie(c, pwfCookieName(token), folder.sharePassword, {
@@ -324,7 +325,7 @@ share.post("/:token/unlock", async (c) => {
 
   const form = await c.req.parseBody()
   const submitted = String(form?.password ?? "")
-  const ok = (await sha256Hex(submitted)) === row.sharePassword
+  const ok = await timingSafeEqualHex(await sha256Hex(submitted), row.sharePassword)
   if (!ok) return c.html(passwordPage(`/api/share/${token}/unlock`, true), 401)
 
   setCookie(c, pwCookieName(token), row.sharePassword, {
@@ -346,13 +347,16 @@ share.post("/:token/flag", async (c) => {
   const token = c.req.param("token")
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(eq(schema.files.shareToken, token)).get()
+  if (!row || row.status !== "ready") {
+    return c.html(infoPage("Link unavailable", "This share link is invalid or has been revoked."), 404)
+  }
   const form = await c.req.parseBody()
   const reason = String(form?.reason ?? "").trim().slice(0, 2000)
   const email = String(form?.email ?? "").trim().slice(0, 320) || null
   if (!reason) return c.html(reportPage(token, false), 400)
   await db.insert(schema.fileFlags).values({
     id: crypto.randomUUID(),
-    fileId: row?.id ?? null,
+    fileId: row.id,
     token,
     reason,
     reporterEmail: email,
