@@ -53,12 +53,18 @@ export const verification = sqliteTable("verification", {
 
 // ---------------------------------------------------------------------------
 // Folders: group files; optional public share token (NULL = not shared).
+// share_password / share_download_limit / share_download_count / share_expires_at:
+//   optional per-link protections (see migration 0004), mirroring files. NULL = not set.
 // ---------------------------------------------------------------------------
 export const folders = sqliteTable("folders", {
   id: text("id").primaryKey(), // uuid
   ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   shareToken: text("share_token"), // null = not shared
+  sharePassword: text("share_password"), // sha-256 hash; null = no password
+  shareDownloadLimit: integer("share_download_limit"), // null = unlimited
+  shareDownloadCount: integer("share_download_count").notNull().default(0),
+  shareExpiresAt: integer("share_expires_at"), // link-specific expiry (epoch s); null = no expiry
   createdAt: integer("created_at").notNull(),
 })
 
