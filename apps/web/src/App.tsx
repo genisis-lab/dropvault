@@ -34,10 +34,10 @@ export default function App() {
     <>
       <div className="canvas-glow" aria-hidden="true" />
       {isPending ? (
-        <div className="grid min-h-screen place-items-center text-slate-400">Loading\u2026</div>
+        <div className="grid min-h-screen place-items-center text-slate-400">Loading…</div>
       ) : session?.user ? (
         !statusChecked ? (
-          <div className="grid min-h-screen place-items-center text-slate-400">Loading\u2026</div>
+          <div className="grid min-h-screen place-items-center text-slate-400">Loading…</div>
         ) : status?.suspended ? (
           <SuspendedScreen email={session.user.email} reason={status.suspensionReason} />
         ) : (
