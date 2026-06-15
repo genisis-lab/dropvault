@@ -34,6 +34,7 @@ type SidebarProps = {
   onSignOut?: () => void
   mobileOpen?: boolean
   onCloseMobile?: () => void
+  onRequestMore?: () => void
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -56,7 +57,7 @@ export default function Sidebar(props: SidebarProps) {
   )
 }
 
-function SidebarContent({ onNew, onNewFolder, totalBytes, fileCount, sharedCount, filter, setFilter, isAdmin, onOpenAdmin, onSignOut, onClose }: SidebarProps & { onClose?: () => void }) {
+function SidebarContent({ onNew, onNewFolder, totalBytes, fileCount, sharedCount, filter, setFilter, isAdmin, onOpenAdmin, onSignOut, onClose, onRequestMore }: SidebarProps & { onClose?: () => void }) {
   const pct = Math.min((totalBytes / (1024 * 1024 * 1024)) * 100, 100)
   const barAnimate = { width: `${pct}%` }
   const run = (fn?: () => void) => () => { fn?.(); onClose?.() }
@@ -79,7 +80,7 @@ function SidebarContent({ onNew, onNewFolder, totalBytes, fileCount, sharedCount
         {isAdmin && <button onClick={run(onOpenAdmin)} className="flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"><Shield size={18} /><span>Admin</span></button>}
       </nav>
       <div className="mt-auto space-y-3">
-        <div className="rounded-2xl border border-slate-200 p-4"><div className="flex items-center gap-2 text-sm font-medium text-slate-700"><HardDrive size={16} /> Storage</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"><motion.div className="h-full rounded-full bg-gradient-to-r from-drift-500 to-blush-500" initial={barInitial} animate={barAnimate} /></div><p className="mt-2 text-xs text-slate-500">{formatBytes(totalBytes)} / 1 GB used · {fileCount} file{fileCount === 1 ? "" : "s"}</p><p className="mt-0.5 text-[11px] text-slate-400">Default limit is 1 GB. Request more from admin if needed.</p></div>
+        <div className="rounded-2xl border border-slate-200 p-4"><div className="flex items-center gap-2 text-sm font-medium text-slate-700"><HardDrive size={16} /> Storage</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"><motion.div className="h-full rounded-full bg-gradient-to-r from-drift-500 to-blush-500" initial={barInitial} animate={barAnimate} /></div><p className="mt-2 text-xs text-slate-500">{formatBytes(totalBytes)} / 1 GB used · {fileCount} file{fileCount === 1 ? "" : "s"}</p><p className="mt-0.5 text-[11px] text-slate-400">Default limit is 1 GB.</p><button onClick={run(onRequestMore)} className="mt-2 w-full rounded-lg border border-drift-200 px-3 py-1 text-xs text-drift-600 hover:bg-drift-50">Request larger limit</button></div>
         {onClose && onSignOut && <button onClick={run(onSignOut)} className="flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 md:hidden"><LogOut size={18} /><span>Sign out</span></button>}
       </div>
     </>
