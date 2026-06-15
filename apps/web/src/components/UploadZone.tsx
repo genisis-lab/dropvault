@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type RefObject } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { AlertCircle, CheckCircle2, UploadCloud } from "lucide-react"
+import { AlertCircle, CheckCircle2, FolderUp, UploadCloud } from "lucide-react"
 import { complete, MULTIPART_THRESHOLD, presign, uploadLargeFile, uploadToR2, uploadUrlFor } from "../lib/api"
 import { formatBytes } from "../lib/format"
 
@@ -13,6 +13,41 @@ const iconDown = { y: 0 }
 const rowInitial = { opacity: 0, height: 0 }
 const rowAnimate = { opacity: 1, height: "auto" }
 const rowExit = { opacity: 0, height: 0 }
+
+// Recursively reads a dropped file-system entry (file or directory) into a flat
+// list of File objects, so dropping a folder uploads everything inside it.
+function readEntry(entry: any, out: File[]): Promise<void> {
+  return new Promise((resolve) => {
+    if (!entry) return resolve()
+    if (entry.isFile) {
+      entry.file((f: File) => { out.push(f); resolve() }, () => resolve())
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader()
+      const all: any[] = []
+      const readBatch = () => reader.readEntries((batch: any[]) => {
+        if (!batch.length) {
+          Promise.all(all.map((e) => readEntry(e, out))).then(() => resolve())
+        } else { all.push(...batch); readBatch() }
+      }, () => resolve())
+      readBatch()
+    } else resolve()
+  })
+}
+
+async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
+  const items = dt.items
+  const canTraverse = items && items.length > 0 && typeof (items[0] as any).webkitGetAsEntry === "function"
+  if (canTraverse) {
+    const entries: any[] = []
+    for (const it of Array.from(items)) { const e = (it as any).webkitGetAsEntry?.(); if (e) entries.push(e) }
+    if (entries.length) {
+      const out: File[] = []
+      for (const e of entries) await readEntry(e, out)
+      if (out.length) return out
+    }
+  }
+  return Array.from(dt.files)
+}
 
 export default function UploadZone({
   expiryDays,
@@ -30,19 +65,20 @@ export default function UploadZone({
   const [dragging, setDragging] = useState(false)
   const [jobs, setJobs] = useState<Record<string, Job>>({})
   const localRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
   const ref = inputRef ?? localRef
 
   const handleFiles = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList) return
-      for (const file of Array.from(fileList)) {
+    async (incoming: FileList | File[] | null) => {
+      if (!incoming) return
+      const files = Array.from(incoming)
+      for (const file of files) {
         const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
         setJobs((j) => ({ ...j, [key]: { name: file.name, size: file.size, pct: 0, state: "uploading" } }))
         const setPct = (pct: number) => setJobs((j) => (j[key] ? { ...j, [key]: { ...j[key], pct } } : j))
         try {
           const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId })
           if (file.size > MULTIPART_THRESHOLD) {
-            // Large file: upload in parts, then it's marked ready server-side.
             await uploadLargeFile(id, file, setPct)
           } else {
             await uploadToR2(uploadUrlFor(id), file, setPct)
@@ -65,7 +101,7 @@ export default function UploadZone({
         animate={dragging ? zoneActive : zoneIdle}
         onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); filesFromDrop(e.dataTransfer).then(handleFiles) }}
         onClick={() => ref.current?.click()}
         className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-10 text-center drive-shadow transition sm:py-12"
       >
@@ -77,13 +113,21 @@ export default function UploadZone({
         </motion.div>
         <div>
           <p className="font-semibold text-slate-700">
-            {folderName ? `Drop files into “${folderName}”` : "Drop files here, or click to browse"}
+            {folderName ? `Drop files or folders into “${folderName}”` : "Drop files or folders here, or click to browse"}
           </p>
           <p className="mt-0.5 text-sm text-slate-400">
             Auto-expires in {expiryDays} day{expiryDays === 1 ? "" : "s"} · extend or delete anytime
           </p>
         </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click() }}
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
+        >
+          <FolderUp size={14} /> Upload a folder
+        </button>
         <input ref={ref} type="file" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
+        <input ref={folderInputRef} type="file" multiple hidden onChange={(e) => handleFiles(e.target.files)} {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} />
       </motion.div>
 
       <div className="mt-3 space-y-2">
