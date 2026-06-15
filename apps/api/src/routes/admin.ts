@@ -5,6 +5,7 @@ import type { FileRow } from "../db/schema"
 import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
 import { adminEmailSet, adminRole, effectiveAdmins, hasRole, normalizeAdminRole, requireAdmin, type AdminRole } from "../middleware/admin"
+import { isSafeWebhookUrl } from "../lib/url"
 import type { Bindings, Variables } from "../types"
 
 type SettingsKey =
@@ -122,13 +123,14 @@ async function logAction(c: any, db: ReturnType<typeof getDb>, action: string, t
   } catch {}
 }
 // Best-effort notification webhook. Fires only when the matching toggle is on
-// and a valid webhook URL is configured. Never blocks the response.
+// and a valid, public webhook URL is configured (SSRF-guarded). Never blocks
+// the response.
 async function notify(c: any, db: ReturnType<typeof getDb>, message: string, toggleKey: SettingsKey, event: string) {
   try {
     const settings = await settingsMap(db)
     if (settings[toggleKey] !== "true") return
     const url = settings.notifyWebhookUrl
-    if (!url || !/^https?:\/\//.test(url)) return
+    if (!isSafeWebhookUrl(url)) return
     const p = fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event, message, at: nowSeconds() }) }).then(() => {}).catch(() => {})
     try { c.executionCtx?.waitUntil(p) } catch { await p }
   } catch {}
