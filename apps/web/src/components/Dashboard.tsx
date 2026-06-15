@@ -27,6 +27,8 @@ import {
   type Folder,
 } from "../lib/api"
 import { signOut } from "../lib/auth-client"
+import { accountStatus } from "../lib/account"
+import { formatBytes } from "../lib/format"
 import Sidebar, { type Filter } from "./Sidebar"
 import Topbar, { type ViewMode } from "./Topbar"
 import UploadZone from "./UploadZone"
@@ -78,6 +80,8 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const foldersQuery = useQuery({ queryKey: ["folders"], queryFn: listFolders })
   const accessQuery = useQuery({ queryKey: ["admin-access"], queryFn: adminAccess })
   const isAdmin = accessQuery.data?.isAdmin ?? false
+  const accountQuery = useQuery({ queryKey: ["account"], queryFn: accountStatus, refetchInterval: 60000, refetchOnWindowFocus: true })
+  const quotaBytes = accountQuery.data?.quotaBytes ?? null
   const myLimitRequestsQuery = useQuery({ queryKey: ["my-limit-requests"], queryFn: listMyLimitRequests, refetchInterval: 60000, refetchOnWindowFocus: true })
   useEffect(() => {
     const requests = myLimitRequestsQuery.data
@@ -87,19 +91,21 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
     let seen: Record<string, string> = {}
     try { seen = JSON.parse(localStorage.getItem(KEY) || "{}") } catch { seen = {} }
     let changed = false
+    let approved = false
     for (const r of requests) {
       if (r.status !== "approved" && r.status !== "rejected") continue
       if (seen[r.id] === r.status) continue
       if (!firstRun) {
         const gbVal = r.requestedBytes / (1024 * 1024 * 1024)
         const gb = `${Number.isInteger(gbVal) ? gbVal : gbVal.toFixed(1)} GB`
-        if (r.status === "approved") toastOk(`Your request for ${gb} of storage was approved \u2014 your new limit is active.`)
+        if (r.status === "approved") { toastOk(`Your request for ${gb} of storage was approved \u2014 your new limit is active.`); approved = true }
         else toastErr(`Your request for ${gb} of storage was rejected.`)
       }
       seen[r.id] = r.status
       changed = true
     }
     if (changed || firstRun) localStorage.setItem(KEY, JSON.stringify(seen))
+    if (approved) qc.invalidateQueries({ queryKey: ["account"] })
   }, [myLimitRequestsQuery.data])
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["files"] }); qc.invalidateQueries({ queryKey: ["folders"] }) }
 
@@ -190,10 +196,10 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 
   return (
     <div>
-      <Sidebar onNew={() => uploadInputRef.current?.click()} onNewFolder={() => setDialog({ mode: "create" })} totalBytes={totalBytes} fileCount={liveFiles.length} sharedCount={sharedCount} filter={filter} setFilter={setFilter} isAdmin={isAdmin} onOpenAdmin={() => setAdminOpen(true)} onSignOut={() => signOut()} mobileOpen={menuOpen} onCloseMobile={() => setMenuOpen(false)} onRequestMore={requestMoreLimit} />
+      <Sidebar onNew={() => uploadInputRef.current?.click()} onNewFolder={() => setDialog({ mode: "create" })} totalBytes={totalBytes} fileCount={liveFiles.length} sharedCount={sharedCount} filter={filter} setFilter={setFilter} isAdmin={isAdmin} onOpenAdmin={() => setAdminOpen(true)} onSignOut={() => signOut()} mobileOpen={menuOpen} onCloseMobile={() => setMenuOpen(false)} onRequestMore={requestMoreLimit} quotaBytes={quotaBytes} />
       <div className="md:pl-60"><Topbar search={search} setSearch={setSearch} view={view} setView={setView} userEmail={userEmail} onNew={() => uploadInputRef.current?.click()} onSignOut={() => signOut()} onOpenMenu={() => setMenuOpen(true)} />
         <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6"><div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div className="min-w-0">{currentFolder && <button onClick={goToRoot} className="mb-1 flex items-center gap-1 text-sm text-slate-500 hover:text-drift-600"><span>My Drive</span><ChevronRight size={14} /><span className="font-medium text-slate-700">{currentFolder.name}</span></button>}<h1 className="truncate text-xl font-bold text-slate-800 sm:text-2xl">{heading}</h1><p className="text-sm text-slate-500">{subtitle}</p></div><div className="flex flex-wrap items-center gap-2 text-sm">{expiringSoon.length > 0 && filter !== "trash" && <button onClick={extendAllExpiring} className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 transition hover:bg-amber-100"><Clock size={16} /> Extend {expiringSoon.length} expiring</button>}<button onClick={() => setDialog({ mode: "create" })} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"><FolderPlus size={16} /> New folder</button><select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort files" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400">{SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select><span className="hidden text-slate-400 sm:inline">Expire in</span><select value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400">{EXPIRY_OPTIONS.map((d) => <option key={d} value={d}>{d} day{d === 1 ? "" : "s"}</option>)}</select></div></div>
-          {filter !== "trash" && <div className="mb-4 rounded-2xl border border-drift-200 bg-drift-50/70 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-slate-800">Storage limit</p><p className="text-sm text-slate-600">Every account starts with 1 GB. If you need more, send an upload limit request for admin approval.</p></div><button onClick={requestMoreLimit} className="rounded-lg border border-drift-200 bg-white px-3 py-2 text-sm font-medium text-drift-600 transition hover:bg-drift-50">Request larger limit</button></div></div>}
+          {filter !== "trash" && quotaBytes != null && <div className="mb-4 rounded-2xl border border-drift-200 bg-drift-50/70 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-slate-800">Storage limit</p><p className="text-sm text-slate-600">Your upload limit is {formatBytes(quotaBytes)}. If you need more, send an upload limit request for admin approval.</p></div><button onClick={requestMoreLimit} className="rounded-lg border border-drift-200 bg-white px-3 py-2 text-sm font-medium text-drift-600 transition hover:bg-drift-50">Request larger limit</button></div></div>}
           {filter !== "trash" && <UploadZone expiryDays={expiryDays} onUploaded={invalidate} inputRef={uploadInputRef} folderId={currentFolderId} folderName={currentFolder?.name} />}
           {showFolderSection && visibleFolders.length > 0 && <div className="mt-6"><h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Folders</h2><motion.div layout className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"><AnimatePresence mode="popLayout">{visibleFolders.map((fd) => <FolderCard key={fd.id} folder={fd} view="grid" onOpen={openFolder} onShare={handleShareFolder} onRevoke={(id) => revokeFolderMut.mutate(id)} onRename={(id) => setDialog({ mode: "rename", folderId: id, current: fd.name })} onDelete={deleteFolderConfirm} onOpenShare={(id) => setShareFolderTarget(folders.find((x) => x.id === id) ?? null)} onDropFiles={(folderId, ids) => moveIds(ids, folderId)} />)}</AnimatePresence></motion.div></div>}
           <div className="mt-6">{showFolderSection && visibleFolders.length > 0 && <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</h2>}{filesQuery.isLoading || (filter === "trash" && trashQuery.isLoading) ? <p className="text-slate-400">Loading...</p> : visible.length === 0 ? <EmptyState filter={filter} hasFiles={liveFiles.length > 0} search={search} inFolder={!!currentFolder} /> : view === "grid" ? <motion.div layout className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4"><AnimatePresence mode="popLayout">{sorted.map((f) => <FileCard key={f.id} file={f} view="grid" folders={folderOptions} onExtend={(id, days) => extendMut.mutate({ id, days })} onRename={(id) => setDialog({ mode: "renameFile", fileId: id, current: f.filename })} onDelete={(id) => deleteMut.mutate(id)} onShare={handleShare} onRevoke={(id) => revokeMut.mutate(id)} onMove={(id, folderId) => moveMut.mutate({ id, folderId })} onOpenShare={(id) => setShareFile(files.find((x) => x.id === id) ?? null)} onPreview={(file) => setPreviewFile(file)} onToggleFavorite={(id) => metaMut.mutate({ id, favorite: !f.favorite })} onEditTags={() => editTags(f)} onRestore={(id) => restoreMut.mutate(id)} onPermanentDelete={(id) => window.confirm("Permanently delete this file?") && permanentMut.mutate(id)} selected={selected.has(f.id)} onToggleSelect={toggleSelect} anySelected={selCount > 0} getDragIds={getDragIds} />)}</AnimatePresence></motion.div> : <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow"><AnimatePresence mode="popLayout">{sorted.map((f) => <FileCard key={f.id} file={f} view="list" folders={folderOptions} onExtend={(id, days) => extendMut.mutate({ id, days })} onRename={(id) => setDialog({ mode: "renameFile", fileId: id, current: f.filename })} onDelete={(id) => deleteMut.mutate(id)} onShare={handleShare} onRevoke={(id) => revokeMut.mutate(id)} onMove={(id, folderId) => moveMut.mutate({ id, folderId })} onOpenShare={(id) => setShareFile(files.find((x) => x.id === id) ?? null)} onPreview={(file) => setPreviewFile(file)} onToggleFavorite={(id) => metaMut.mutate({ id, favorite: !f.favorite })} onEditTags={() => editTags(f)} onRestore={(id) => restoreMut.mutate(id)} onPermanentDelete={(id) => window.confirm("Permanently delete this file?") && permanentMut.mutate(id)} selected={selected.has(f.id)} onToggleSelect={toggleSelect} anySelected={selCount > 0} getDragIds={getDragIds} />)}</AnimatePresence></div>}</div>
