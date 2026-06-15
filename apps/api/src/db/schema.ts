@@ -13,6 +13,8 @@ export const user = sqliteTable("user", {
   image: text("image"),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
+  // Per-user storage cap in bytes. NULL = no limit (default). Set by admins.
+  quotaBytes: integer("quota_bytes"),
 })
 
 export const session = sqliteTable("session", {
@@ -96,3 +98,49 @@ export const files = sqliteTable("files", {
 })
 
 export type FileRow = typeof files.$inferSelect
+
+// ---------------------------------------------------------------------------
+// Admin allowlist (DB-managed). The env var ADMIN_EMAILS is the bootstrap
+// allowlist; this table lets admins promote/demote others from the UI. The
+// effective admin set is the UNION of both. Emails are stored lowercased.
+// ---------------------------------------------------------------------------
+export const adminEmails = sqliteTable("admin_emails", {
+  email: text("email").primaryKey(), // lowercased
+  addedBy: text("added_by"), // actor email that granted it
+  createdAt: integer("created_at").notNull(),
+})
+
+export type AdminEmailRow = typeof adminEmails.$inferSelect
+
+// ---------------------------------------------------------------------------
+// Audit log: an append-only record of every admin write action.
+// ---------------------------------------------------------------------------
+export const auditLog = sqliteTable("audit_log", {
+  id: text("id").primaryKey(),
+  actorId: text("actor_id"),
+  actorEmail: text("actor_email"),
+  action: text("action").notNull(), // e.g. file.delete, user.quota, admin.add
+  targetType: text("target_type"), // file | user | admin | flag
+  targetId: text("target_id"),
+  detail: text("detail"), // short human-readable summary
+  createdAt: integer("created_at").notNull(),
+})
+
+export type AuditLogRow = typeof auditLog.$inferSelect
+
+// ---------------------------------------------------------------------------
+// File flags: abuse / takedown reports submitted from a public share page.
+// fileId is nullable so a flag survives the file being deleted.
+// ---------------------------------------------------------------------------
+export const fileFlags = sqliteTable("file_flags", {
+  id: text("id").primaryKey(),
+  fileId: text("file_id"), // null if the file no longer exists
+  token: text("token"), // the share token used to reach it
+  reason: text("reason"),
+  reporterEmail: text("reporter_email"), // optional, self-reported
+  status: text("status").notNull().default("open"), // open | resolved
+  createdAt: integer("created_at").notNull(),
+  resolvedAt: integer("resolved_at"),
+})
+
+export type FileFlagRow = typeof fileFlags.$inferSelect
