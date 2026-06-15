@@ -51,6 +51,7 @@ export default function Sidebar(props: SidebarProps) {
             <motion.aside initial={drawerInitial} animate={drawerAnimate} exit={drawerInitial} transition={drawerTransition} className="absolute inset-y-0 left-0 flex w-72 max-w-[80vw] flex-col border-r border-slate-200 bg-white px-3 py-4">
               <SidebarContent {...props} onClose={onCloseMobile} />
             </motion.aside>
+          </div>
         )}
       </AnimatePresence>
     </>
