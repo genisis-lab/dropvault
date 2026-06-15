@@ -23,7 +23,7 @@ admin.get("/access", async (c) => {
 })
 admin.post("/limit-requests", async (c) => {
   const userId = c.get("userId")
-  const body = await c.req.json<{ requestedBytes?: number; reason?: string }>().catch(() => ({}))
+  const body = await c.req.json<{ requestedBytes?: number; reason?: string }>().catch(() => ({} as { requestedBytes?: number; reason?: string }))
   if (!body.requestedBytes || body.requestedBytes < 1073741824) return c.json({ error: "requestedBytes must be at least 1GB" }, 400)
   const db = getDb(c.env.DB)
   const id = crypto.randomUUID()
