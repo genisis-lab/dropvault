@@ -1,9 +1,13 @@
 import { useSession } from "./lib/auth-client"
 import AuthScreen from "./components/AuthScreen"
 import Dashboard from "./components/Dashboard"
+import PublicUploadRequest from "./components/PublicUploadRequest"
 
 export default function App() {
   const { data: session, isPending } = useSession()
+  const isRequestPage = typeof window !== "undefined" && window.location.pathname.startsWith("/request/")
+
+  if (isRequestPage) return <PublicUploadRequest />
 
   return (
     <>
