@@ -50,7 +50,6 @@ export default function Sidebar(props: SidebarProps) {
             <motion.aside initial={drawerInitial} animate={drawerAnimate} exit={drawerInitial} transition={drawerTransition} className="absolute inset-y-0 left-0 flex w-72 max-w-[80vw] flex-col border-r border-slate-200 bg-white px-3 py-4">
               <SidebarContent {...props} onClose={onCloseMobile} />
             </motion.aside>
-          </div>
         )}
       </AnimatePresence>
     </>
@@ -80,7 +79,7 @@ function SidebarContent({ onNew, onNewFolder, totalBytes, fileCount, sharedCount
         {isAdmin && <button onClick={run(onOpenAdmin)} className="flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"><Shield size={18} /><span>Admin</span></button>}
       </nav>
       <div className="mt-auto space-y-3">
-        <div className="rounded-2xl border border-slate-200 p-4"><div className="flex items-center gap-2 text-sm font-medium text-slate-700"><HardDrive size={16} /> Storage</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"><motion.div className="h-full rounded-full bg-gradient-to-r from-drift-500 to-blush-500" initial={barInitial} animate={barAnimate} /></div><p className="mt-2 text-xs text-slate-500">{formatBytes(totalBytes)} used · {fileCount} file{fileCount === 1 ? "" : "s"}</p><p className="mt-0.5 text-[11px] text-slate-400">Deleted files stay in Trash before cleanup</p></div>
+        <div className="rounded-2xl border border-slate-200 p-4"><div className="flex items-center gap-2 text-sm font-medium text-slate-700"><HardDrive size={16} /> Storage</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"><motion.div className="h-full rounded-full bg-gradient-to-r from-drift-500 to-blush-500" initial={barInitial} animate={barAnimate} /></div><p className="mt-2 text-xs text-slate-500">{formatBytes(totalBytes)} / 1 GB used · {fileCount} file{fileCount === 1 ? "" : "s"}</p><p className="mt-0.5 text-[11px] text-slate-400">Default limit is 1 GB. Request more from admin if needed.</p></div>
         {onClose && onSignOut && <button onClick={run(onSignOut)} className="flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 md:hidden"><LogOut size={18} /><span>Sign out</span></button>}
       </div>
     </>
