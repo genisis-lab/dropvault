@@ -5,6 +5,7 @@ import filesRoute from "./routes/files"
 import foldersRoute from "./routes/folders"
 import shareRoute from "./routes/share"
 import adminRoute from "./routes/admin"
+import accountRoute from "./routes/account"
 import uploadRequestsRoute from "./routes/uploadRequests"
 import { sweepExpired } from "./lib/sweep"
 import type { Bindings, Variables } from "./types"
@@ -42,6 +43,7 @@ app.route("/api/share", shareRoute)
 app.route("/api/files", filesRoute)
 app.route("/api/folders", foldersRoute)
 app.route("/api/upload-requests", uploadRequestsRoute)
+app.route("/api/account", accountRoute)
 app.route("/api/admin", adminRoute)
 
 export default {
