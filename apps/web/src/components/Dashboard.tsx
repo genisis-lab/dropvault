@@ -22,6 +22,7 @@ import {
   downloadUrl,
   adminAccess,
   createLimitRequest,
+  listMyLimitRequests,
   type DriftFile,
   type Folder,
 } from "../lib/api"
@@ -77,6 +78,29 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const foldersQuery = useQuery({ queryKey: ["folders"], queryFn: listFolders })
   const accessQuery = useQuery({ queryKey: ["admin-access"], queryFn: adminAccess })
   const isAdmin = accessQuery.data?.isAdmin ?? false
+  const myLimitRequestsQuery = useQuery({ queryKey: ["my-limit-requests"], queryFn: listMyLimitRequests, refetchInterval: 60000, refetchOnWindowFocus: true })
+  useEffect(() => {
+    const requests = myLimitRequestsQuery.data
+    if (!requests) return
+    const KEY = "dropvault-seen-limit-requests"
+    const firstRun = localStorage.getItem(KEY) == null
+    let seen: Record<string, string> = {}
+    try { seen = JSON.parse(localStorage.getItem(KEY) || "{}") } catch { seen = {} }
+    let changed = false
+    for (const r of requests) {
+      if (r.status !== "approved" && r.status !== "rejected") continue
+      if (seen[r.id] === r.status) continue
+      if (!firstRun) {
+        const gbVal = r.requestedBytes / (1024 * 1024 * 1024)
+        const gb = `${Number.isInteger(gbVal) ? gbVal : gbVal.toFixed(1)} GB`
+        if (r.status === "approved") toastOk(`Your request for ${gb} of storage was approved \u2014 your new limit is active.`)
+        else toastErr(`Your request for ${gb} of storage was rejected.`)
+      }
+      seen[r.id] = r.status
+      changed = true
+    }
+    if (changed || firstRun) localStorage.setItem(KEY, JSON.stringify(seen))
+  }, [myLimitRequestsQuery.data])
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["files"] }); qc.invalidateQueries({ queryKey: ["folders"] }) }
 
   const extendMut = useMutation({ mutationFn: ({ id, days }: { id: string; days: number }) => extendFile(id, days), onSuccess: invalidate, onError: errHandler("Couldn't extend file") })
@@ -107,6 +131,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
     try {
       await createLimitRequest(Math.floor(requestedGb * 1024 * 1024 * 1024), reason.trim() || undefined)
       toastOk("Upload limit request sent")
+      qc.invalidateQueries({ queryKey: ["my-limit-requests"] })
     } catch (e) {
       toastErr((e as Error)?.message || "Couldn't send upload limit request")
     }
@@ -152,9 +177,9 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const folderOptions = useMemo(() => folders.map((f) => ({ id: f.id, name: f.name })), [folders])
   const heading = currentFolder ? currentFolder.name : titleFor(filter)
   const itemCount = visible.length + visibleFolders.length
-  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` · ${userName.split(" ")[0]}'s vault` : ""}`
+  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` \u00b7 ${userName.split(" ")[0]}'s vault` : ""}`
   function onDialogConfirm(name: string) { if (!dialog) return; if (dialog.mode === "create") { createFolderMut.mutate(name); setCurrentFolderId(null); setFilterState("all") } else if (dialog.mode === "rename") renameFolderMut.mutate({ id: dialog.folderId, name }); else renameFileMut.mutate({ id: dialog.fileId, filename: name }); setDialog(null) }
-  function deleteFolderConfirm(id: string) { const f = folders.find((x) => x.id === id); const msg = f && f.fileCount > 0 ? `Delete “${f.name}”? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).` : "Delete this folder?"; if (window.confirm(msg)) deleteFolderMut.mutate(id) }
+  function deleteFolderConfirm(id: string) { const f = folders.find((x) => x.id === id); const msg = f && f.fileCount > 0 ? `Delete \u201c${f.name}\u201d? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to My Drive (not deleted).` : "Delete this folder?"; if (window.confirm(msg)) deleteFolderMut.mutate(id) }
   const selCount = selected.size
   function bulkMove(folderId: string | null) { moveIds(Array.from(selected), folderId); clearSelection() }
   function bulkDownload() { Array.from(selected).forEach((id, i) => setTimeout(() => triggerDownload(id), i * 400)) }
@@ -180,6 +205,6 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
 }
 
 function EmptyState({ filter, hasFiles, search, inFolder }: { filter: Filter; hasFiles: boolean; search: string; inFolder: boolean }) {
-  const msg = search.trim() ? "No files match your search." : inFolder ? "This folder is empty — drop files above, or drag files onto it." : filter === "shared" ? "No shared files yet — use a file or folder's menu to create a link." : filter === "favorites" ? "No favorites yet — star files to keep them handy." : filter === "trash" ? "Trash is empty." : filter === "expiring" ? "Nothing expires in the next 24 hours." : hasFiles ? "No files here." : "Your vault is empty — drop files above to get started."
+  const msg = search.trim() ? "No files match your search." : inFolder ? "This folder is empty \u2014 drop files above, or drag files onto it." : filter === "shared" ? "No shared files yet \u2014 use a file or folder's menu to create a link." : filter === "favorites" ? "No favorites yet \u2014 star files to keep them handy." : filter === "trash" ? "Trash is empty." : filter === "expiring" ? "Nothing expires in the next 24 hours." : hasFiles ? "No files here." : "Your vault is empty \u2014 drop files above to get started."
   return <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center text-sm text-slate-400"><HardDrive size={28} className="mb-2 text-slate-300" />{msg}</div>
 }
