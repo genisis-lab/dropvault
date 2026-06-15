@@ -6,6 +6,18 @@
     <title>Dropvault — files that drift away</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the wrong theme.
+      (function () {
+        try {
+          var t = localStorage.getItem("dropvault-theme")
+          if (t === "dark" || t === "sunset") {
+            document.documentElement.classList.add(t)
+            document.documentElement.style.colorScheme = "dark"
+          }
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

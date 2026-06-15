@@ -2,8 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme design tokens. Every surface color is expressed as an "R G B" triple so
+ * Tailwind's <alpha-value> syntax keeps working through the CSS variables. Light
+ * is the default (:root); dark and sunset override the same tokens. Switching
+ * themes is just toggling a class on <html> (see lib/theme.tsx).
+ */
 :root {
   color-scheme: light;
+  --c-app: 246 248 252;
+  --c-card: 255 255 255;
+  --c-line: 226 232 240;
+  --c-strong: 31 36 48;
+  --c-muted: 100 116 139;
+  --c-faint: 148 163 184;
+  --c-hover: 248 250 252;
+  --c-subtle: 241 245 249;
+  --c-track: 226 232 240;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 12px 32px -10px rgba(16, 24, 40, 0.22), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --scroll-thumb: 212 216 226;
+  --scroll-track: 246 248 252;
+  --glow-a: rgba(124, 58, 237, 0.1);
+  --glow-b: rgba(79, 70, 229, 0.1);
+}
+
+html.dark {
+  color-scheme: dark;
+  --c-app: 8 10 20;
+  --c-card: 20 24 38;
+  --c-line: 38 44 64;
+  --c-strong: 226 232 240;
+  --c-muted: 148 163 184;
+  --c-faint: 100 116 139;
+  --c-hover: 30 36 54;
+  --c-subtle: 30 36 54;
+  --c-track: 38 44 64;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --scroll-thumb: 51 58 80;
+  --scroll-track: 8 10 20;
+  --glow-a: rgba(124, 58, 237, 0.18);
+  --glow-b: rgba(79, 70, 229, 0.16);
+}
+
+html.sunset {
+  color-scheme: dark;
+  --c-app: 26 14 24;
+  --c-card: 43 24 40;
+  --c-line: 74 42 64;
+  --c-strong: 253 232 226;
+  --c-muted: 214 162 170;
+  --c-faint: 158 112 122;
+  --c-hover: 58 32 52;
+  --c-subtle: 58 32 52;
+  --c-track: 74 42 64;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --scroll-thumb: 90 52 78;
+  --scroll-track: 26 14 24;
+  --glow-a: rgba(244, 114, 182, 0.16);
+  --glow-b: rgba(251, 146, 60, 0.12);
 }
 
 html,
@@ -14,19 +73,19 @@ body,
 
 body {
   margin: 0;
-  background: #f6f8fc;
-  color: #1f2430;
+  background: rgb(var(--c-app));
+  color: rgb(var(--c-strong));
   font-family: Inter, "Google Sans", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Soft Drive-like elevation */
+/* Soft Drive-like elevation (theme-aware) */
 .drive-shadow {
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 .drive-shadow-lg {
-  box-shadow: 0 12px 32px -10px rgba(16, 24, 40, 0.22), 0 2px 6px rgba(16, 24, 40, 0.06);
+  box-shadow: var(--shadow-lg);
 }
 
 /* Gradient brand text */
@@ -44,22 +103,129 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(55vw 38vh at 82% -8%, rgba(124, 58, 237, 0.1), transparent 70%),
-    radial-gradient(48vw 36vh at -5% 2%, rgba(79, 70, 229, 0.1), transparent 70%);
+    radial-gradient(55vw 38vh at 82% -8%, var(--glow-a), transparent 70%),
+    radial-gradient(48vw 36vh at -5% 2%, var(--glow-b), transparent 70%);
 }
 
-/* Light scrollbar */
+/* Scrollbar (theme-aware) */
 ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d4d8e2;
+  background: rgb(var(--scroll-thumb));
   border-radius: 9999px;
-  border: 3px solid #f6f8fc;
+  border: 3px solid rgb(var(--scroll-track));
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #c2c7d4;
+  background: rgb(var(--scroll-thumb) / 0.85);
+}
+
+/*
+ * Token bridge: map the existing hard-coded utility classes onto theme tokens.
+ * In light mode these values match the original palette, so the light UI is
+ * unchanged; dark/sunset inherit automatically. These rules are intentionally
+ * un-layered (outside @layer) so they win over Tailwind's utilities.
+ */
+.bg-white {
+  background-color: rgb(var(--c-card)) !important;
+}
+.bg-white\/70 {
+  background-color: rgb(var(--c-card) / 0.7) !important;
+}
+.bg-white\/80 {
+  background-color: rgb(var(--c-card) / 0.8) !important;
+}
+.bg-white\/90 {
+  background-color: rgb(var(--c-card) / 0.9) !important;
+}
+.focus\:bg-white:focus {
+  background-color: rgb(var(--c-card)) !important;
+}
+.bg-slate-50 {
+  background-color: rgb(var(--c-hover)) !important;
+}
+.bg-slate-100 {
+  background-color: rgb(var(--c-subtle)) !important;
+}
+.bg-slate-200 {
+  background-color: rgb(var(--c-track)) !important;
+}
+.hover\:bg-slate-50:hover {
+  background-color: rgb(var(--c-hover)) !important;
+}
+.hover\:bg-slate-100:hover {
+  background-color: rgb(var(--c-subtle)) !important;
+}
+
+.text-slate-800,
+.text-slate-700 {
+  color: rgb(var(--c-strong)) !important;
+}
+.text-slate-600,
+.text-slate-500 {
+  color: rgb(var(--c-muted)) !important;
+}
+.text-slate-400,
+.text-slate-300 {
+  color: rgb(var(--c-faint)) !important;
+}
+.hover\:text-slate-600:hover {
+  color: rgb(var(--c-muted)) !important;
+}
+.placeholder\:text-slate-400::placeholder {
+  color: rgb(var(--c-faint)) !important;
+}
+
+.border-slate-100,
+.border-slate-200,
+.border-slate-300 {
+  border-color: rgb(var(--c-line)) !important;
+}
+
+/* Accent tint chips read as light pastels by default; on dark themes swap them
+ * for translucent accents so they sit correctly on dark surfaces. */
+html.dark .bg-amber-50,
+html.sunset .bg-amber-50 {
+  background-color: rgb(245 158 11 / 0.16) !important;
+}
+html.dark .bg-indigo-50,
+html.sunset .bg-indigo-50 {
+  background-color: rgb(99 102 241 / 0.16) !important;
+}
+html.dark .bg-emerald-50,
+html.sunset .bg-emerald-50 {
+  background-color: rgb(16 185 129 / 0.16) !important;
+}
+html.dark .bg-rose-50,
+html.sunset .bg-rose-50 {
+  background-color: rgb(244 63 94 / 0.16) !important;
+}
+html.dark .bg-violet-50,
+html.sunset .bg-violet-50 {
+  background-color: rgb(139 92 246 / 0.16) !important;
+}
+html.dark .bg-red-50,
+html.sunset .bg-red-50 {
+  background-color: rgb(239 68 68 / 0.16) !important;
+}
+html.dark .bg-drift-50,
+html.sunset .bg-drift-50 {
+  background-color: rgb(99 102 241 / 0.18) !important;
+}
+html.dark .hover\:bg-red-50:hover,
+html.sunset .hover\:bg-red-50:hover {
+  background-color: rgb(239 68 68 / 0.16) !important;
+}
+
+/* Indigo accent text needs lifting for contrast on dark surfaces. */
+html.dark .text-drift-700,
+html.sunset .text-drift-700 {
+  color: #a5b4fc !important;
+}
+html.dark .text-drift-600,
+html.sunset .text-drift-600 {
+  color: #818cf8 !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
