@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { eq } from "drizzle-orm"
 import { createAuth } from "../auth"
 import { getDb, schema } from "../db"
+import { adminRole } from "../middleware/admin"
 import type { Bindings, Variables } from "../types"
 
 // Lightweight account endpoint that intentionally does NOT use requireAuth, so a
@@ -20,10 +21,22 @@ account.get("/me", async (c) => {
     .where(eq(schema.userSuspensions.userId, session.user.id))
     .get()
     .catch(() => null)
+  // Admins and the owner have unlimited storage (no quota). Everyone else gets
+  // their per-user quota, falling back to the workspace default.
+  const role = await adminRole(c.env, db, session.user.email)
+  let quotaBytes: number | null = null
+  if (role == null) {
+    const u = await db.select().from(schema.user).where(eq(schema.user.id, session.user.id)).get().catch(() => null)
+    const setting = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, "defaultQuotaBytes")).get().catch(() => null)
+    const defaultQuota = Number(setting?.value) || 1073741824
+    quotaBytes = u?.quotaBytes ?? defaultQuota
+  }
   return c.json({
     user: { id: session.user.id, name: session.user.name, email: session.user.email },
     suspended: !!suspension,
     suspensionReason: suspension?.reason ?? null,
+    quotaBytes,
+    isAdmin: role != null,
   })
 })
 
