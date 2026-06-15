@@ -2,8 +2,18 @@ import { createMiddleware } from "hono/factory"
 import { getDb, schema } from "../db"
 import type { Bindings, Variables } from "../types"
 
-// Parse the ADMIN_EMAILS allowlist (comma- or whitespace-separated) into a
-// lowercased Set for case-insensitive comparison.
+export type AdminRole = "owner" | "admin" | "moderator" | "viewer"
+
+const ROLE_RANK: Record<AdminRole, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 }
+const VALID_ROLES = new Set<AdminRole>(["owner", "admin", "moderator", "viewer"])
+
+export function normalizeAdminRole(role: unknown): AdminRole {
+  const v = String(role ?? "admin").toLowerCase() as AdminRole
+  return VALID_ROLES.has(v) ? v : "admin"
+}
+
+// Parse the ADMIN_EMAILS bootstrap allowlist. Env admins are owners because they
+// are the recovery path if the DB allowlist is misconfigured.
 export function adminEmailSet(env: Bindings): Set<string> {
   return new Set(
     (env.ADMIN_EMAILS ?? "")
@@ -13,43 +23,74 @@ export function adminEmailSet(env: Bindings): Set<string> {
   )
 }
 
-// True when the given email is on the ENV allowlist only (sync; no DB).
+export async function effectiveAdmins(
+  env: Bindings,
+  db: ReturnType<typeof getDb>,
+): Promise<Map<string, AdminRole>> {
+  const map = new Map<string, AdminRole>()
+  for (const email of adminEmailSet(env)) map.set(email, "owner")
+  try {
+    const rows = await db.select().from(schema.adminEmails).all()
+    for (const r of rows) {
+      const email = r.email?.toLowerCase()
+      if (email && !map.has(email)) map.set(email, normalizeAdminRole(r.role))
+    }
+  } catch {}
+  return map
+}
+
+export async function effectiveAdminSet(env: Bindings, db: ReturnType<typeof getDb>): Promise<Set<string>> {
+  return new Set((await effectiveAdmins(env, db)).keys())
+}
+
+export async function adminRole(
+  env: Bindings,
+  db: ReturnType<typeof getDb>,
+  email: string | null | undefined,
+): Promise<AdminRole | null> {
+  if (!email) return null
+  return (await effectiveAdmins(env, db)).get(email.toLowerCase()) ?? null
+}
+
 export function isAdminEmail(env: Bindings, email: string | null | undefined): boolean {
   if (!email) return false
   return adminEmailSet(env).has(email.toLowerCase())
 }
 
-// The EFFECTIVE admin set: env allowlist UNION the DB-managed admin_emails table.
-export async function effectiveAdminSet(
-  env: Bindings,
-  db: ReturnType<typeof getDb>,
-): Promise<Set<string>> {
-  const set = adminEmailSet(env)
-  try {
-    const rows = await db.select().from(schema.adminEmails).all()
-    for (const r of rows) if (r.email) set.add(r.email.toLowerCase())
-  } catch {}
-  return set
-}
-
-// True when the email is an admin via either the env allowlist or the DB table.
 export async function isAdminEmailDb(
   env: Bindings,
   db: ReturnType<typeof getDb>,
   email: string | null | undefined,
 ): Promise<boolean> {
-  if (!email) return false
-  return (await effectiveAdminSet(env, db)).has(email.toLowerCase())
+  return (await adminRole(env, db, email)) != null
 }
 
-// Gate routes to admins only. MUST run AFTER requireAuth, which sets userEmail.
-// Returns 403 for authenticated users who are not admins.
+export async function hasRole(
+  env: Bindings,
+  db: ReturnType<typeof getDb>,
+  email: string | null | undefined,
+  minimum: AdminRole,
+): Promise<boolean> {
+  const role = await adminRole(env, db, email)
+  return role != null && ROLE_RANK[role] >= ROLE_RANK[minimum]
+}
+
 export const requireAdmin = createMiddleware<{ Bindings: Bindings; Variables: Variables }>(
   async (c, next) => {
     const db = getDb(c.env.DB)
-    if (!(await isAdminEmailDb(c.env, db, c.get("userEmail")))) {
+    if (!(await hasRole(c.env, db, c.get("userEmail"), "viewer"))) {
       return c.json({ error: "forbidden" }, 403)
     }
     await next()
   },
 )
+
+export function requireAdminRole(minimum: AdminRole) {
+  return createMiddleware<{ Bindings: Bindings; Variables: Variables }>(async (c, next) => {
+    const db = getDb(c.env.DB)
+    if (!(await hasRole(c.env, db, c.get("userEmail"), minimum))) {
+      return c.json({ error: "forbidden" }, 403)
+    }
+    await next()
+  })
+}
