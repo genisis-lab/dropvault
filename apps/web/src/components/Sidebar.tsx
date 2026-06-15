@@ -52,7 +52,7 @@ export default function Sidebar(props: SidebarProps) {
       <AnimatePresence>
         {mobileOpen && (
           <div className="fixed inset-0 z-50 md:hidden">
-            <motion.button initial={overlayInitial} animate={overlayAnimate} exit={overlayInitial} aria-label="Close menu" onClick={onCloseMobile} className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+            <motion.button initial={overlayInitial} animate={overlayAnimate} exit={overlayInitial} aria-label="Close menu" onClick={onCloseMobile} className="absolute inset-0 bg-slate-900/40" />
             <motion.aside initial={drawerInitial} animate={drawerAnimate} exit={drawerInitial} transition={drawerTransition} className="absolute inset-y-0 left-0 flex w-72 max-w-[80vw] flex-col border-r border-slate-200 bg-white px-3 py-4">
               <SidebarContent {...props} pendingLimitRequests={pendingLimitRequests} onClose={onCloseMobile} />
             </motion.aside>
@@ -66,7 +66,7 @@ export default function Sidebar(props: SidebarProps) {
 function SidebarContent({ onNew, onNewFolder, totalBytes, fileCount, sharedCount, filter, setFilter, isAdmin, onOpenAdmin, onSignOut, onClose, onRequestMore, quotaBytes, pendingLimitRequests = 0 }: SidebarProps & { onClose?: () => void; pendingLimitRequests?: number }) {
   const pct = quotaBytes != null && quotaBytes > 0 ? Math.min((totalBytes / quotaBytes) * 100, 100) : 0
   const barAnimate = { width: `${pct}%` }
-  const run = (fn?: () => void) => () => { fn?.(); onClose?.() }
+  const run = (fn?: () => void) => () => { if (onClose) { onClose(); if (fn) window.setTimeout(fn, 180) } else fn?.() }
   return (
     <>
       <div className="flex items-center justify-between px-2">
