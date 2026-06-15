@@ -6,7 +6,11 @@ import type { Bindings } from "../types"
 export async function sweepExpired(env: Bindings, batchSize = 200): Promise<number> {
   const db = getDb(env.DB)
   const cutoff = nowSeconds()
-  const trashCutoff = cutoff - 30 * 86400
+  // Trash retention is admin-configurable (app_settings.trashRetentionDays).
+  // Falls back to 30 days when unset or invalid.
+  const trashSetting = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, "trashRetentionDays")).get().catch(() => null)
+  const trashDays = Number(trashSetting?.value) > 0 ? Number(trashSetting?.value) : 30
+  const trashCutoff = cutoff - trashDays * 86400
   const pendingCutoff = cutoff - 24 * 3600
 
   const expired = await db.select({ id: schema.files.id, r2Key: schema.files.r2Key }).from(schema.files).where(and(lte(schema.files.expiresAt, cutoff), isNull(schema.files.deletedAt))).limit(batchSize).all()
