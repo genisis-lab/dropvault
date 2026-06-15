@@ -80,7 +80,6 @@ export async function createShare(id: string, options?: ShareOptions): Promise<S
 }
 export async function revokeShare(id: string) { return j<{ ok: true }>(await fetch(`${API}/api/files/${id}/share`, { method: "DELETE", credentials: "include" })) }
 export function shareUrl(token: string) { const base = API || (typeof window !== "undefined" ? window.location.origin : ""); return `${base}/api/share/${token}` }
-
 export async function listFolders(): Promise<Folder[]> { return (await j<{ folders: Folder[] }>(await fetch(`${API}/api/folders`, { credentials: "include" }))).folders }
 export async function createFolder(name: string) { return j<{ id: string; name: string }>(await fetch(`${API}/api/folders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })) }
 export async function renameFolder(id: string, name: string) { return j<{ ok: true; name: string }>(await fetch(`${API}/api/folders/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })) }
@@ -170,3 +169,9 @@ export async function createUploadRequest(input: Partial<UploadRequest> & { pass
 export async function revokeUploadRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/upload-requests/${id}`, { method: "DELETE", credentials: "include" })) }
 export async function publicUploadRequest(token: string): Promise<UploadRequest> { return (await j<{ request: UploadRequest }>(await fetch(`${API}/api/upload-requests/public/${token}`))).request }
 export async function submitPublicUpload(token: string, form: FormData): Promise<{ ok: true; fileId: string }> { return j(await fetch(`${API}/api/upload-requests/public/${token}`, { method: "POST", body: form })) }
+
+export type LimitRequest = { id: string; userId: string; userEmail?: string | null; requestedBytes: number; reason: string | null; status: string; approvedBy: string | null; approvedAt: number | null; createdAt: number }
+export async function listLimitRequests(): Promise<LimitRequest[]> { return (await j<{ requests: LimitRequest[] }>(await fetch(`${API}/api/admin/limit-requests`, { credentials: "include" }))).requests }
+export async function createLimitRequest(requestedBytes: number, reason?: string): Promise<{ ok: true; id: string }> { return j(await fetch(`${API}/api/admin/limit-requests`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestedBytes, reason }) })) }
+export async function approveLimitRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/admin/limit-requests/${id}/approve`, { method: "POST", credentials: "include" })) }
+export async function rejectLimitRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/admin/limit-requests/${id}/reject`, { method: "POST", credentials: "include" })) }
