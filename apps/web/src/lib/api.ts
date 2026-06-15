@@ -320,7 +320,7 @@ export async function uploadLargeFile(id: string, file: File, onProgress: (pct: 
   }
 }
 
-// --- Admin (gated by the ADMIN_EMAILS allowlist) ---------------------------
+// --- Admin (gated by the effective admin allowlist) ------------------------
 export type AdminTypeBreakdown = { category: string; count: number; bytes: number }
 
 export type AdminTopUser = {
@@ -331,6 +331,9 @@ export type AdminTopUser = {
   fileCount: number
 }
 
+// One day of workspace growth (used by the Overview chart).
+export type AdminGrowthPoint = { date: string; users: number; files: number; bytes: number }
+
 export type AdminStats = {
   userCount: number
   fileCount: number
@@ -340,8 +343,11 @@ export type AdminStats = {
   sharedFileCount: number
   sharedFolderCount: number
   expiringSoonCount: number
+  flagCount: number
+  adminCount: number
   typeBreakdown: AdminTypeBreakdown[]
   topUsers: AdminTopUser[]
+  growth: AdminGrowthPoint[]
 }
 
 export type AdminUser = {
@@ -352,6 +358,7 @@ export type AdminUser = {
   createdAt: number
   fileCount: number
   totalBytes: number
+  quotaBytes: number | null
   isAdmin: boolean
 }
 
@@ -362,11 +369,45 @@ export type AdminFile = {
   contentType: string | null
   status: string
   shared: boolean
+  shareToken: string | null
   createdAt: number
   expiresAt: number
   ownerId: string
   ownerEmail: string | null
   ownerName: string | null
+}
+
+export type AdminUserDetail = { user: AdminUser; files: AdminFile[] }
+
+export type AdminFlag = {
+  id: string
+  fileId: string | null
+  token: string | null
+  reason: string | null
+  reporterEmail: string | null
+  status: string
+  createdAt: number
+  resolvedAt: number | null
+  filename: string | null
+  ownerEmail: string | null
+  fileExists: boolean
+}
+
+export type AdminAuditEntry = {
+  id: string
+  actorEmail: string | null
+  action: string
+  targetType: string | null
+  targetId: string | null
+  detail: string | null
+  createdAt: number
+}
+
+export type AdminEntry = {
+  email: string
+  source: "env" | "db"
+  addedBy: string | null
+  createdAt: number | null
 }
 
 // Whether the signed-in user is an admin (used to gate the admin UI). Any
@@ -384,6 +425,23 @@ export async function adminStats(): Promise<AdminStats> {
 export async function adminUsers(): Promise<AdminUser[]> {
   const res = await fetch(`${API}/api/admin/users`, { credentials: "include" })
   return (await j<{ users: AdminUser[] }>(res)).users
+}
+
+// Admin: one user with their files (drill-down).
+export async function adminUser(id: string): Promise<AdminUserDetail> {
+  const res = await fetch(`${API}/api/admin/users/${id}`, { credentials: "include" })
+  return j<AdminUserDetail>(res)
+}
+
+// Admin: set or clear a user's storage quota (bytes; null clears it).
+export async function adminSetQuota(id: string, bytes: number | null): Promise<{ ok: true; quotaBytes: number | null }> {
+  const res = await fetch(`${API}/api/admin/users/${id}/quota`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bytes }),
+  })
+  return j<{ ok: true; quotaBytes: number | null }>(res)
 }
 
 export async function adminFiles(): Promise<AdminFile[]> {
@@ -408,8 +466,74 @@ export async function adminExtendFile(id: string, days: number): Promise<{ ok: t
   return j<{ ok: true; expiresAt: number }>(res)
 }
 
+// Admin: force-expire any file now (the sweep reclaims the bytes).
+export async function adminExpireFile(id: string): Promise<{ ok: true; expiresAt: number }> {
+  const res = await fetch(`${API}/api/admin/files/${id}/expire`, { method: "POST", credentials: "include" })
+  return j<{ ok: true; expiresAt: number }>(res)
+}
+
 // Admin: delete any file (R2 object + DB row).
 export async function adminDeleteFile(id: string): Promise<{ ok: true }> {
   const res = await fetch(`${API}/api/admin/files/${id}`, { method: "DELETE", credentials: "include" })
   return j<{ ok: true }>(res)
+}
+
+// Admin: run one action over many files at once.
+export async function adminBulkFiles(
+  action: "revoke" | "delete" | "expire" | "extend",
+  ids: string[],
+  days?: number,
+): Promise<{ ok: true; count: number }> {
+  const res = await fetch(`${API}/api/admin/files/bulk`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ids, days }),
+  })
+  return j<{ ok: true; count: number }>(res)
+}
+
+// Admin: list abuse flags, optionally filtered by status (open | resolved).
+export async function adminFlags(status?: string): Promise<AdminFlag[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ""
+  const res = await fetch(`${API}/api/admin/flags${qs}`, { credentials: "include" })
+  return (await j<{ flags: AdminFlag[] }>(res)).flags
+}
+
+export async function adminResolveFlag(id: string): Promise<{ ok: true }> {
+  const res = await fetch(`${API}/api/admin/flags/${id}/resolve`, { method: "POST", credentials: "include" })
+  return j<{ ok: true }>(res)
+}
+
+export async function adminDeleteFlag(id: string): Promise<{ ok: true }> {
+  const res = await fetch(`${API}/api/admin/flags/${id}`, { method: "DELETE", credentials: "include" })
+  return j<{ ok: true }>(res)
+}
+
+// Admin: list the effective admin allowlist (env + DB-managed).
+export async function adminAdmins(): Promise<AdminEntry[]> {
+  const res = await fetch(`${API}/api/admin/admins`, { credentials: "include" })
+  return (await j<{ admins: AdminEntry[] }>(res)).admins
+}
+
+export async function adminAddAdmin(email: string): Promise<{ ok: true }> {
+  const res = await fetch(`${API}/api/admin/admins`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  })
+  return j<{ ok: true }>(res)
+}
+
+export async function adminRemoveAdmin(email: string): Promise<{ ok: true }> {
+  const res = await fetch(`${API}/api/admin/admins/${encodeURIComponent(email)}`, { method: "DELETE", credentials: "include" })
+  return j<{ ok: true }>(res)
+}
+
+// Admin: recent audit-log entries (most recent first).
+export async function adminAudit(limit?: number): Promise<AdminAuditEntry[]> {
+  const qs = limit ? `?limit=${limit}` : ""
+  const res = await fetch(`${API}/api/admin/audit${qs}`, { credentials: "include" })
+  return (await j<{ entries: AdminAuditEntry[] }>(res)).entries
 }
