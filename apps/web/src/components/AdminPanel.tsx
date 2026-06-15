@@ -108,8 +108,10 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
     { id: "files", label: "Files" },
   ]
 
-  const maxTypeBytes = Math.max(1, ...(statsQ.data?.typeBreakdown ?? []).map((t) => t.bytes))
-  const maxUserBytes = Math.max(1, ...(statsQ.data?.topUsers ?? []).map((u) => u.totalBytes))
+  const typeBreakdown = statsQ.data?.typeBreakdown ?? []
+  const topUsers = statsQ.data?.topUsers ?? []
+  const maxTypeBytes = Math.max(1, ...typeBreakdown.map((t) => t.bytes))
+  const maxUserBytes = Math.max(1, ...topUsers.map((u) => u.totalBytes))
 
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 backdrop-blur-sm sm:p-8">
@@ -181,11 +183,11 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
                 <div className="grid gap-6 sm:grid-cols-2">
                   <div>
                     <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Storage by type</h3>
-                    {statsQ.data.typeBreakdown.length === 0 ? (
+                    {typeBreakdown.length === 0 ? (
                       <Empty label="No stored files yet." />
                     ) : (
                       <div className="space-y-2.5">
-                        {statsQ.data.typeBreakdown.map((t) => (
+                        {typeBreakdown.map((t) => (
                           <div key={t.category}>
                             <div className="mb-1 flex items-center justify-between text-xs">
                               <span className="font-medium text-slate-600">{cap(t.category)}</span>
@@ -202,11 +204,11 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
 
                   <div>
                     <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Top users by storage</h3>
-                    {statsQ.data.topUsers.length === 0 ? (
+                    {topUsers.length === 0 ? (
                       <Empty label="No users with files yet." />
                     ) : (
                       <div className="space-y-2.5">
-                        {statsQ.data.topUsers.map((u) => (
+                        {topUsers.map((u) => (
                           <div key={u.id}>
                             <div className="mb-1 flex items-center justify-between text-xs">
                               <span className="truncate font-medium text-slate-600">{u.email ?? u.name}</span>
