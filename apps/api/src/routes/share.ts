@@ -308,12 +308,12 @@ share.get("/folder/:token/:fileId", async (c) => {
   const object = await c.env.FILES.get(row.r2Key)
   if (!object) return c.json({ error: "not found" }, 404)
 
-  // Count actual downloads toward the folder link's limit (previews via ?raw=1 do not).
-  if (wantDownload) {
-    await db.update(schema.folders)
-      .set({ shareDownloadCount: sql`${schema.folders.shareDownloadCount} + 1` })
-      .where(eq(schema.folders.id, folder.id)).run()
-  }
+  // Count every served file access (download OR ?raw=1 preview) toward the
+  // folder link's limit. Previews stream the same bytes, so leaving them
+  // uncounted let anyone bypass the limit entirely.
+  await db.update(schema.folders)
+    .set({ shareDownloadCount: sql`${schema.folders.shareDownloadCount} + 1` })
+    .where(eq(schema.folders.id, folder.id)).run()
   return streamObject(object, row.filename, wantDownload)
 })
 
@@ -412,11 +412,12 @@ share.get("/:token", async (c) => {
   if (wantsBytes) {
     const object = await c.env.FILES.get(row.r2Key)
     if (!object) return c.json({ error: "not found" }, 404)
-    if (wantDownload) {
-      await db.update(schema.files)
-        .set({ shareDownloadCount: sql`${schema.files.shareDownloadCount} + 1` })
-        .where(eq(schema.files.id, row.id)).run()
-    }
+    // Count every served access (download OR ?raw=1 preview) toward the link's
+    // limit. Previews stream the same bytes, so leaving them uncounted let
+    // anyone bypass the download cap.
+    await db.update(schema.files)
+      .set({ shareDownloadCount: sql`${schema.files.shareDownloadCount} + 1` })
+      .where(eq(schema.files.id, row.id)).run()
     return streamObject(object, row.filename, wantDownload)
   }
 
