@@ -7,6 +7,8 @@ export type Bindings = {
   PUBLIC_APP_URL: string
   DEFAULT_EXPIRY_DAYS: string
   MAX_EXPIRY_DAYS: string
+  // Comma/space-separated list of admin emails (see wrangler.toml [vars]).
+  ADMIN_EMAILS: string
   // secrets
   BETTER_AUTH_SECRET: string
   GOOGLE_CLIENT_ID: string
