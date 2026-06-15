@@ -320,7 +320,17 @@ export async function uploadLargeFile(id: string, file: File, onProgress: (pct: 
   }
 }
 
-// --- Admin (read-only; gated by the ADMIN_EMAILS allowlist) ----------------
+// --- Admin (gated by the ADMIN_EMAILS allowlist) ---------------------------
+export type AdminTypeBreakdown = { category: string; count: number; bytes: number }
+
+export type AdminTopUser = {
+  id: string
+  name: string
+  email: string | null
+  totalBytes: number
+  fileCount: number
+}
+
 export type AdminStats = {
   userCount: number
   fileCount: number
@@ -330,6 +340,8 @@ export type AdminStats = {
   sharedFileCount: number
   sharedFolderCount: number
   expiringSoonCount: number
+  typeBreakdown: AdminTypeBreakdown[]
+  topUsers: AdminTopUser[]
 }
 
 export type AdminUser = {
@@ -377,4 +389,27 @@ export async function adminUsers(): Promise<AdminUser[]> {
 export async function adminFiles(): Promise<AdminFile[]> {
   const res = await fetch(`${API}/api/admin/files`, { credentials: "include" })
   return (await j<{ files: AdminFile[] }>(res)).files
+}
+
+// Admin: revoke any file's public share link.
+export async function adminRevokeFile(id: string): Promise<{ ok: true }> {
+  const res = await fetch(`${API}/api/admin/files/${id}/revoke`, { method: "POST", credentials: "include" })
+  return j<{ ok: true }>(res)
+}
+
+// Admin: extend any file's expiry by N days (clamped to the max lifetime).
+export async function adminExtendFile(id: string, days: number): Promise<{ ok: true; expiresAt: number }> {
+  const res = await fetch(`${API}/api/admin/files/${id}/extend`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ days }),
+  })
+  return j<{ ok: true; expiresAt: number }>(res)
+}
+
+// Admin: delete any file (R2 object + DB row).
+export async function adminDeleteFile(id: string): Promise<{ ok: true }> {
+  const res = await fetch(`${API}/api/admin/files/${id}`, { method: "DELETE", credentials: "include" })
+  return j<{ ok: true }>(res)
 }
