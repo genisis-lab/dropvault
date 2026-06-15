@@ -3,9 +3,11 @@ import { motion } from "framer-motion"
 import { Lock, Mail, User as UserIcon } from "lucide-react"
 import { signIn, signUp } from "../lib/auth-client"
 import Logo from "./Logo"
+import Turnstile from "./Turnstile"
 
 const cardInitial = { opacity: 0, y: 16, scale: 0.98 }
 const cardAnimate = { opacity: 1, y: 0, scale: 1 }
+const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
 
 export default function AuthScreen() {
   const [mode, setMode] = useState<"in" | "up">("in")
@@ -14,21 +16,35 @@ export default function AuthScreen() {
   const [password, setPassword] = useState("")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [resetSignal, setResetSignal] = useState(0)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setErrorMsg(null)
+    if (siteKey && !captchaToken) {
+      setErrorMsg("Please complete the verification challenge.")
+      return
+    }
     setLoading(true)
+    const fetchOptions = captchaToken
+      ? { headers: { "x-captcha-response": captchaToken } }
+      : undefined
     try {
       const res =
         mode === "in"
-          ? await signIn.email({ email, password })
-          : await signUp.email({ email, password, name: name || email.split("@")[0] })
+          ? await signIn.email({ email, password }, fetchOptions)
+          : await signUp.email({ email, password, name: name || email.split("@")[0] }, fetchOptions)
       if (res.error) setErrorMsg(res.error.message ?? "Authentication failed")
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Something went wrong")
     } finally {
       setLoading(false)
+      // Turnstile tokens are single-use; clear and re-render after each attempt.
+      if (siteKey) {
+        setCaptchaToken(null)
+        setResetSignal((n) => n + 1)
+      }
     }
   }
 
@@ -93,11 +109,22 @@ export default function AuthScreen() {
             />
           </Field>
 
+          {siteKey && (
+            <div className="pt-1">
+              <Turnstile
+                siteKey={siteKey}
+                onToken={setCaptchaToken}
+                onExpire={() => setCaptchaToken(null)}
+                resetSignal={resetSignal}
+              />
+            </div>
+          )}
+
           {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (Boolean(siteKey) && !captchaToken)}
             className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95 disabled:opacity-60"
           >
             {loading ? "Please wait…" : mode === "in" ? "Sign in" : "Create account"}
