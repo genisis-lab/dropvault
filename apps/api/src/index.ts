@@ -4,6 +4,7 @@ import { createAuth } from "./auth"
 import filesRoute from "./routes/files"
 import foldersRoute from "./routes/folders"
 import shareRoute from "./routes/share"
+import adminRoute from "./routes/admin"
 import { sweepExpired } from "./lib/sweep"
 import type { Bindings, Variables } from "./types"
 
@@ -34,6 +35,9 @@ app.route("/api/share", shareRoute)
 // Authenticated file + folder operations
 app.route("/api/files", filesRoute)
 app.route("/api/folders", foldersRoute)
+
+// Admin (read-only; gated by the ADMIN_EMAILS allowlist)
+app.route("/api/admin", adminRoute)
 
 export default {
   fetch: app.fetch,
