@@ -36,7 +36,12 @@ export async function downloadFilesAsZip(
   const data: Uint8Array = await new Promise((resolve, reject) => {
     zip(entries, { level: 0 }, (err, out) => (err ? reject(err) : resolve(out)))
   })
-  const blob = new Blob([data], { type: "application/zip" })
+  // Copy into a fresh ArrayBuffer-backed view so the Blob part type is exactly
+  // Uint8Array<ArrayBuffer> (fflate's output is typed over ArrayBufferLike,
+  // which TS will not accept as a BlobPart under strict lib typings).
+  const bytes = new Uint8Array(data.byteLength)
+  bytes.set(data)
+  const blob = new Blob([bytes], { type: "application/zip" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
