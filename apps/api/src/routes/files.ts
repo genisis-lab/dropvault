@@ -4,6 +4,7 @@ import { getDb, schema } from "../db"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS } from "../lib/expiry"
 import { hashSecret } from "../lib/hash"
 import { requireAuth } from "../middleware/auth"
+import { adminRole } from "../middleware/admin"
 import type { Bindings, Variables } from "../types"
 
 type ShareBody = { password?: string | null; downloadLimit?: number | null; expiresInDays?: number | null }
@@ -75,7 +76,8 @@ files.post("/presign", async (c) => {
     folderId = body.folderId
   }
   const account = await db.select().from(schema.user).where(eq(schema.user.id, userId)).get()
-  const quotaLimit = account?.quotaBytes ?? policy.defaultQuotaBytes
+  const role = await adminRole(c.env, db, account?.email ?? "")
+  const quotaLimit = role != null ? null : (account?.quotaBytes ?? policy.defaultQuotaBytes)
   if (quotaLimit != null && quotaLimit > 0) {
     const owned = await db.select().from(schema.files).where(and(eq(schema.files.ownerId, userId), isNull(schema.files.deletedAt))).all()
     const used = owned.reduce((s, f) => s + (f.status === "ready" ? f.sizeBytes || 0 : 0), 0)
@@ -99,7 +101,8 @@ async function loadPendingOwned(c: any, id: string) {
 async function markReady(c: any, db: ReturnType<typeof getDb>, row: any, id: string) {
   const policy = await settings(db)
   const account = await db.select().from(schema.user).where(eq(schema.user.id, row.ownerId)).get()
-  const quotaLimit = account?.quotaBytes ?? policy.defaultQuotaBytes
+  const role = await adminRole(c.env, db, account?.email ?? "")
+  const quotaLimit = role != null ? null : (account?.quotaBytes ?? policy.defaultQuotaBytes)
   if (quotaLimit != null && quotaLimit > 0) {
     const owned = await db.select().from(schema.files).where(and(eq(schema.files.ownerId, row.ownerId), isNull(schema.files.deletedAt))).all()
     const used = owned.reduce((s, f) => s + ((f.status === "ready" || f.id === id) ? f.sizeBytes || 0 : 0), 0)
