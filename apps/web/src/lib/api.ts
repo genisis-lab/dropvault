@@ -319,3 +319,62 @@ export async function uploadLargeFile(id: string, file: File, onProgress: (pct: 
     throw e
   }
 }
+
+// --- Admin (read-only; gated by the ADMIN_EMAILS allowlist) ----------------
+export type AdminStats = {
+  userCount: number
+  fileCount: number
+  readyFileCount: number
+  folderCount: number
+  totalBytes: number
+  sharedFileCount: number
+  sharedFolderCount: number
+  expiringSoonCount: number
+}
+
+export type AdminUser = {
+  id: string
+  name: string
+  email: string
+  image: string | null
+  createdAt: number
+  fileCount: number
+  totalBytes: number
+  isAdmin: boolean
+}
+
+export type AdminFile = {
+  id: string
+  filename: string
+  sizeBytes: number
+  contentType: string | null
+  status: string
+  shared: boolean
+  createdAt: number
+  expiresAt: number
+  ownerId: string
+  ownerEmail: string | null
+  ownerName: string | null
+}
+
+// Whether the signed-in user is an admin (used to gate the admin UI). Any
+// authenticated user may call this; non-admins simply get { isAdmin: false }.
+export async function adminAccess(): Promise<{ isAdmin: boolean }> {
+  const res = await fetch(`${API}/api/admin/access`, { credentials: "include" })
+  return j<{ isAdmin: boolean }>(res)
+}
+
+export async function adminStats(): Promise<AdminStats> {
+  const res = await fetch(`${API}/api/admin/stats`, { credentials: "include" })
+  return j<AdminStats>(res)
+}
+
+export async function adminUsers(): Promise<AdminUser[]> {
+  const res = await fetch(`${API}/api/admin/users`, { credentials: "include" })
+  return (await j<{ users: AdminUser[] }>(res)).users
+}
+
+export async function adminFiles(): Promise<AdminFile[]> {
+  const res = await fetch(`${API}/api/admin/files`, { credentials: "include" })
+  return (await j<{ files: AdminFile[] }>(res)).files
+}

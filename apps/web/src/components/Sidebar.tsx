@@ -1,5 +1,5 @@
 import { motion } from "framer-motion"
-import { Clock, FolderOpen, FolderPlus, HardDrive, Plus, Share2, type LucideIcon } from "lucide-react"
+import { Clock, FolderOpen, FolderPlus, HardDrive, Plus, Share2, Shield, type LucideIcon } from "lucide-react"
 import Logo from "./Logo"
 import { formatBytes } from "../lib/format"
 
@@ -22,6 +22,8 @@ export default function Sidebar({
   sharedCount,
   filter,
   setFilter,
+  isAdmin,
+  onOpenAdmin,
 }: {
   onNew: () => void
   onNewFolder: () => void
@@ -30,6 +32,8 @@ export default function Sidebar({
   sharedCount: number
   filter: Filter
   setFilter: (f: Filter) => void
+  isAdmin?: boolean
+  onOpenAdmin?: () => void
 }) {
   const pct = Math.min((totalBytes / (1024 * 1024 * 1024)) * 100, 100)
   const barAnimate = { width: `${pct}%` }
@@ -80,6 +84,15 @@ export default function Sidebar({
             </button>
           )
         })}
+        {isAdmin && (
+          <button
+            onClick={onOpenAdmin}
+            className="flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+          >
+            <Shield size={18} />
+            <span>Admin</span>
+          </button>
+        )}
       </nav>
 
       <div className="mt-auto rounded-2xl border border-slate-200 p-4">
@@ -94,7 +107,7 @@ export default function Sidebar({
           />
         </div>
         <p className="mt-2 text-xs text-slate-500">
-          {formatBytes(totalBytes)} used · {fileCount} file{fileCount === 1 ? "" : "s"}
+          {formatBytes(totalBytes)} used \u00b7 {fileCount} file{fileCount === 1 ? "" : "s"}
         </p>
         <p className="mt-0.5 text-[11px] text-slate-400">Files auto-expire to free up space</p>
       </div>
