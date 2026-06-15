@@ -69,7 +69,7 @@ const STYLE =
   `.btn.ghost{background:#fff;border-color:#e2e8f0;color:#475569}` +
   `.btn.ghost:hover{background:#f8fafc}` +
   `.pwform{display:flex;flex-direction:column;gap:12px;max-width:320px;margin:22px auto 0}` +
-  `.pwin{padding:12px 14px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;outline:none;width:100%}` +
+  `.pwin{padding:12px 14px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;outline:none;width:100%;font-family:inherit}` +
   `.pwin:focus{border-color:#a78bfa}` +
   `.badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:0 0 6px}` +
   `.badge{display:inline-block;padding:4px 11px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:12px;font-weight:600}` +
@@ -98,8 +98,34 @@ function filePage(name: string, meta: string, token: string, notes: string): str
     `<div class=\"btns\">` +
     `<a class=\"btn primary\" href=\"/api/share/${token}?dl=1\">\u2193 Download</a>` +
     `<a class=\"btn ghost\" href=\"/api/share/${token}?raw=1\" target=\"_blank\" rel=\"noopener\">Preview</a>` +
+    `<a class=\"btn ghost\" href=\"/api/share/${token}/report\">Report</a>` +
     `</div></div>`
   return pageShell(name, inner)
+}
+
+// Public abuse/takedown report page for a single-file share link. Shown via GET
+// (the form) and again after a successful POST (the thank-you state).
+function reportPage(token: string, done: boolean): string {
+  if (done) {
+    const inner =
+      `<div class=\"card\">` +
+      `<div class=\"fic\">\u2713</div>` +
+      `<h1>Report received</h1>` +
+      `<p class=\"muted\">Thanks \u2014 our admins will review this file shortly. You can close this page.</p>` +
+      `</div>`
+    return pageShell("Report received", inner)
+  }
+  const inner =
+    `<div class=\"card\">` +
+    `<div class=\"fic\">\u2691</div>` +
+    `<h1>Report this file</h1>` +
+    `<p class=\"muted\">Tell us why this file should be reviewed. Your report goes to the workspace admins.</p>` +
+    `<form method=\"post\" action=\"/api/share/${token}/flag\" class=\"pwform\">` +
+    `<textarea class=\"pwin\" name=\"reason\" rows=\"4\" placeholder=\"What\u2019s wrong with this file?\" required></textarea>` +
+    `<input class=\"pwin\" type=\"email\" name=\"email\" placeholder=\"Your email (optional)\"/>` +
+    `<button type=\"submit\" class=\"btn primary\" style=\"justify-content:center\">Submit report</button>` +
+    `</form></div>`
+  return pageShell("Report this file", inner)
 }
 
 // Password gate page. Takes the unlock action path so both file and folder links
@@ -309,6 +335,32 @@ share.post("/:token/unlock", async (c) => {
     maxAge: 86400,
   })
   return c.redirect(`/api/share/${token}`, 302)
+})
+
+// --- Single-file share: public abuse/takedown report ------------------------
+// Two-segment paths (/:token/report, /:token/flag) never collide with the
+// one-segment landing route (/:token).
+share.get("/:token/report", (c) => c.html(reportPage(c.req.param("token"), false)))
+
+share.post("/:token/flag", async (c) => {
+  const token = c.req.param("token")
+  const db = getDb(c.env.DB)
+  const row = await db.select().from(schema.files).where(eq(schema.files.shareToken, token)).get()
+  const form = await c.req.parseBody()
+  const reason = String(form?.reason ?? "").trim().slice(0, 2000)
+  const email = String(form?.email ?? "").trim().slice(0, 320) || null
+  if (!reason) return c.html(reportPage(token, false), 400)
+  await db.insert(schema.fileFlags).values({
+    id: crypto.randomUUID(),
+    fileId: row?.id ?? null,
+    token,
+    reason,
+    reporterEmail: email,
+    status: "open",
+    createdAt: nowSeconds(),
+    resolvedAt: null,
+  }).run()
+  return c.html(reportPage(token, true))
 })
 
 // --- Single-file share: landing page (default) + download / preview ---------
