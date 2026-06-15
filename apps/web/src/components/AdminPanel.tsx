@@ -190,7 +190,7 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
                             <div className="mb-1 flex items-center justify-between text-xs">
                               <span className="font-medium text-slate-600">{cap(t.category)}</span>
                               <span className="text-slate-400">
-                                {formatBytes(t.bytes)} \u00b7 {t.count}
+                                {formatBytes(t.bytes)} · {t.count}
                               </span>
                             </div>
                             <Bar pct={(t.bytes / maxTypeBytes) * 100} className={CATEGORY_COLOR[t.category] ?? "bg-slate-400"} />
@@ -211,7 +211,7 @@ export default function AdminPanel({ open, onClose }: { open: boolean; onClose: 
                             <div className="mb-1 flex items-center justify-between text-xs">
                               <span className="truncate font-medium text-slate-600">{u.email ?? u.name}</span>
                               <span className="shrink-0 text-slate-400">
-                                {formatBytes(u.totalBytes)} \u00b7 {u.fileCount}
+                                {formatBytes(u.totalBytes)} · {u.fileCount}
                               </span>
                             </div>
                             <Bar pct={(u.totalBytes / maxUserBytes) * 100} className="bg-drift-400" />
@@ -353,7 +353,7 @@ function FileRow({
         </div>
         <div className="flex items-center gap-1.5 text-xs text-slate-400">
           {file.status}
-          {file.shared && <span className="text-drift-600">\u00b7 shared</span>}
+          {file.shared && <span className="text-drift-600">· shared</span>}
         </div>
       </td>
       <td className="px-3 py-2.5 text-slate-500">{file.ownerEmail ?? file.ownerId}</td>
