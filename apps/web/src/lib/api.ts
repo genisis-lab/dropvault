@@ -172,6 +172,7 @@ export async function submitPublicUpload(token: string, form: FormData): Promise
 
 export type LimitRequest = { id: string; userId: string; userEmail?: string | null; requestedBytes: number; reason: string | null; status: string; approvedBy: string | null; approvedAt: number | null; createdAt: number }
 export async function listLimitRequests(): Promise<LimitRequest[]> { return (await j<{ requests: LimitRequest[] }>(await fetch(`${API}/api/admin/limit-requests`, { credentials: "include" }))).requests }
+export async function listMyLimitRequests(): Promise<LimitRequest[]> { return (await j<{ requests: LimitRequest[] }>(await fetch(`${API}/api/admin/limit-requests/mine`, { credentials: "include" }))).requests }
 export async function createLimitRequest(requestedBytes: number, reason?: string): Promise<{ ok: true; id: string }> { return j(await fetch(`${API}/api/admin/limit-requests`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestedBytes, reason }) })) }
 export async function approveLimitRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/admin/limit-requests/${id}/approve`, { method: "POST", credentials: "include" })) }
 export async function rejectLimitRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/admin/limit-requests/${id}/reject`, { method: "POST", credentials: "include" })) }
