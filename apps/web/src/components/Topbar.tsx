@@ -1,4 +1,4 @@
-import { LayoutGrid, List, LogOut, Plus, Search } from "lucide-react"
+import { LayoutGrid, List, LogOut, Menu, Plus, Search } from "lucide-react"
 import { ThemeToggle } from "../lib/theme"
 
 export type ViewMode = "grid" | "list"
@@ -11,6 +11,7 @@ export default function Topbar({
   userEmail,
   onNew,
   onSignOut,
+  onOpenMenu,
 }: {
   search: string
   setSearch: (s: string) => void
@@ -19,12 +20,21 @@ export default function Topbar({
   userEmail?: string
   onNew: () => void
   onSignOut: () => void
+  onOpenMenu?: () => void
 }) {
   const initial = (userEmail?.[0] ?? "U").toUpperCase()
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/70 backdrop-blur-xl">
       <div className="flex items-center gap-2.5 px-4 py-3 sm:gap-3">
+        <button
+          onClick={onOpenMenu}
+          aria-label="Open menu"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 md:hidden"
+        >
+          <Menu size={22} />
+        </button>
+
         <button
           onClick={onNew}
           aria-label="New upload"

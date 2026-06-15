@@ -89,6 +89,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [shareFolderTarget, setShareFolderTarget] = useState<Folder | null>(null)
   const [previewFile, setPreviewFile] = useState<DriftFile | null>(null)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: listFiles })
@@ -354,6 +355,9 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
         setFilter={setFilter}
         isAdmin={isAdmin}
         onOpenAdmin={() => setAdminOpen(true)}
+        onSignOut={() => signOut()}
+        mobileOpen={menuOpen}
+        onCloseMobile={() => setMenuOpen(false)}
       />
 
       <div className="md:pl-60">
@@ -365,6 +369,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
           userEmail={userEmail}
           onNew={() => uploadInputRef.current?.click()}
           onSignOut={() => signOut()}
+          onOpenMenu={() => setMenuOpen(true)}
         />
 
         <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
