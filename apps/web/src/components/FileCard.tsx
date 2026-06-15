@@ -117,6 +117,10 @@ export default function FileCard({
     e.dataTransfer.effectAllowed = "move"
   }
 
+  // motion.div reserves onDragStart for its pan gesture; this alias lets us
+  // attach the native HTML5 drag handler without a type clash.
+  const nativeDragStart = handleDragStart as unknown as React.ComponentProps<typeof motion.div>["onDragStart"]
+
   function handleContextMenu(e: React.MouseEvent) {
     if (!onToggleSelect) return
     e.preventDefault()
@@ -320,7 +324,7 @@ export default function FileCard({
       <motion.div
         layout
         draggable
-        onDragStart={handleDragStart}
+        onDragStart={nativeDragStart}
         onContextMenu={handleContextMenu}
         initial={cardInitial}
         animate={cardAnimate}
@@ -378,7 +382,7 @@ export default function FileCard({
     <motion.div
       layout
       draggable
-      onDragStart={handleDragStart}
+      onDragStart={nativeDragStart}
       onContextMenu={handleContextMenu}
       initial={cardInitial}
       animate={cardAnimate}
