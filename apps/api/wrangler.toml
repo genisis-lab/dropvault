@@ -30,3 +30,4 @@ R2_ACCOUNT_ID = "3ece4993f323ece88322161931be6e72"
 R2_BUCKET_NAME = "dropvault-files"
 DEFAULT_EXPIRY_DAYS = "7"
 MAX_EXPIRY_DAYS = "30"
+# Comma-separated list of emails treated as admins (env-based allowlist).
