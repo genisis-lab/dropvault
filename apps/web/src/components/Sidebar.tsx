@@ -66,7 +66,7 @@ export default function Sidebar(props: SidebarProps) {
 function SidebarContent({ onNew, onNewFolder, totalBytes, fileCount, sharedCount, filter, setFilter, isAdmin, onOpenAdmin, onSignOut, onClose, onRequestMore, quotaBytes, pendingLimitRequests = 0 }: SidebarProps & { onClose?: () => void; pendingLimitRequests?: number }) {
   const pct = quotaBytes != null && quotaBytes > 0 ? Math.min((totalBytes / quotaBytes) * 100, 100) : 0
   const barAnimate = { width: `${pct}%` }
-  const run = (fn?: () => void) => () => { if (onClose) { onClose(); if (fn) window.setTimeout(fn, 180) } else fn?.() }
+  const run = (fn?: () => void) => () => { fn?.(); onClose?.() }
   return (
     <>
       <div className="flex items-center justify-between px-2">
