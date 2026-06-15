@@ -65,7 +65,7 @@ html.dark .text-drift-600, html.sunset .text-drift-600 { color: #818cf8 !importa
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .canvas-glow { display: none !important; }
   .backdrop-blur-xl, .backdrop-blur-sm, [class*="backdrop-blur"] { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-  [style*="transform"] { transform: none !important; }
-  [style*="opacity"] { opacity: 1 !important; }
-  [style*="filter"] { filter: none !important; }
+  main [style*="transform"] { transform: none !important; }
+  main [style*="opacity"] { opacity: 1 !important; }
+  main [style*="filter"] { filter: none !important; }
 }
