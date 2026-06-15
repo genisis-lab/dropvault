@@ -3,7 +3,8 @@ import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"
 import { getCookie, setCookie } from "hono/cookie"
 import { getDb, schema } from "../db"
 import { isExpired, nowSeconds } from "../lib/expiry"
-import { sha256Hex, timingSafeEqualHex } from "../lib/hash"
+import { verifySecret } from "../lib/hash"
+import { checkRateLimit, clientIp } from "../lib/rateLimit"
 import type { Bindings, Variables } from "../types"
 
 type FileRow = typeof schema.files.$inferSelect
@@ -261,9 +262,12 @@ share.post("/folder/:token/unlock", async (c) => {
   if (!folder) return c.html(infoPage("Link unavailable", "This shared folder link is invalid or has been revoked."), 404)
   if (!folder.sharePassword) return c.redirect(`/api/share/folder/${token}`, 302)
 
+  const rl = await checkRateLimit(db, `pwf:${token}:${clientIp(c)}`, 10, 600)
+  if (!rl.allowed) return c.html(infoPage("Too many attempts", "Too many password attempts. Please wait a few minutes and try again."), 429)
+
   const form = await c.req.parseBody()
   const submitted = String(form?.password ?? "")
-  const ok = await timingSafeEqualHex(await sha256Hex(submitted), folder.sharePassword)
+  const ok = await verifySecret(submitted, folder.sharePassword)
   if (!ok) return c.html(passwordPage(`/api/share/folder/${token}/unlock`, true), 401)
 
   setCookie(c, pwfCookieName(token), folder.sharePassword, {
@@ -323,9 +327,12 @@ share.post("/:token/unlock", async (c) => {
   }
   if (!row.sharePassword) return c.redirect(`/api/share/${token}`, 302)
 
+  const rl = await checkRateLimit(db, `pw:${token}:${clientIp(c)}`, 10, 600)
+  if (!rl.allowed) return c.html(infoPage("Too many attempts", "Too many password attempts. Please wait a few minutes and try again."), 429)
+
   const form = await c.req.parseBody()
   const submitted = String(form?.password ?? "")
-  const ok = await timingSafeEqualHex(await sha256Hex(submitted), row.sharePassword)
+  const ok = await verifySecret(submitted, row.sharePassword)
   if (!ok) return c.html(passwordPage(`/api/share/${token}/unlock`, true), 401)
 
   setCookie(c, pwCookieName(token), row.sharePassword, {
@@ -346,6 +353,8 @@ share.get("/:token/report", (c) => c.html(reportPage(c.req.param("token"), false
 share.post("/:token/flag", async (c) => {
   const token = c.req.param("token")
   const db = getDb(c.env.DB)
+  const rl = await checkRateLimit(db, `flag:${token}:${clientIp(c)}`, 5, 3600)
+  if (!rl.allowed) return c.html(infoPage("Too many reports", "You have submitted several reports already. Please wait a while before sending more."), 429)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt))).get()
   if (!row || row.status !== "ready") {
     return c.html(infoPage("Link unavailable", "This share link is invalid or has been revoked."), 404)

@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { and, desc, eq } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { DAY_SECONDS, nowSeconds } from "../lib/expiry"
-import { sha256Hex, timingSafeEqualHex } from "../lib/hash"
+import { hashSecret, verifySecret } from "../lib/hash"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
@@ -43,7 +43,7 @@ uploadRequests.post("/", requireAuth, async (c) => {
   const createdAt = nowSeconds()
   const expiresInDays = Number(body.expiresInDays ?? 0)
   const expiresAt = expiresInDays > 0 ? createdAt + Math.round(expiresInDays * DAY_SECONDS) : null
-  await db.insert(schema.uploadRequests).values({ id, ownerId: userId, folderId, token, title: (body.title || "Upload files").trim().slice(0, 120), instructions: body.instructions?.slice(0, 1000) ?? null, password: body.password ? await sha256Hex(String(body.password)) : null, maxFileSize: body.maxFileSize && body.maxFileSize > 0 ? Math.floor(body.maxFileSize) : null, allowedTypes: body.allowedTypes?.slice(0, 500) ?? null, uploadLimit: body.uploadLimit && body.uploadLimit > 0 ? Math.floor(body.uploadLimit) : null, requireEmail: !!body.requireEmail, expiresAt, createdAt }).run()
+  await db.insert(schema.uploadRequests).values({ id, ownerId: userId, folderId, token, title: (body.title || "Upload files").trim().slice(0, 120), instructions: body.instructions?.slice(0, 1000) ?? null, password: body.password ? await hashSecret(String(body.password)) : null, maxFileSize: body.maxFileSize && body.maxFileSize > 0 ? Math.floor(body.maxFileSize) : null, allowedTypes: body.allowedTypes?.slice(0, 500) ?? null, uploadLimit: body.uploadLimit && body.uploadLimit > 0 ? Math.floor(body.uploadLimit) : null, requireEmail: !!body.requireEmail, expiresAt, createdAt }).run()
   const row = await db.select().from(schema.uploadRequests).where(eq(schema.uploadRequests.id, id)).get()
   return c.json({ request: safeRequest(row, c.env.PUBLIC_APP_URL) })
 })
@@ -74,7 +74,7 @@ uploadRequests.post("/public/:token", async (c) => {
   if (row.uploadLimit && row.uploadCount >= row.uploadLimit) return c.json({ error: "upload limit reached" }, 410)
   const form = await c.req.formData()
   const password = String(form.get("password") || "")
-  if (row.password) { const digest = await sha256Hex(password); if (!(await timingSafeEqualHex(digest, row.password))) return c.json({ error: "password required" }, 401) }
+  if (row.password) { if (!(await verifySecret(password, row.password))) return c.json({ error: "password required" }, 401) }
   const uploaderEmail = String(form.get("email") || "").trim().slice(0, 255) || null
   const uploaderName = String(form.get("name") || "").trim().slice(0, 120) || null
   if (row.requireEmail && !uploaderEmail) return c.json({ error: "email required" }, 400)

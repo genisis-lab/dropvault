@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { and, desc, eq, gt, isNull } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS } from "../lib/expiry"
-import { sha256Hex } from "../lib/hash"
+import { hashSecret } from "../lib/hash"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
@@ -195,7 +195,7 @@ files.get("/:id/download", async (c) => {
   const object = await c.env.FILES.get(row.r2Key)
   if (!object) return c.json({ error: "not found" }, 404)
   await logActivity(c, db, "file.download", id, row.filename)
-  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `attachment; filename="${row.filename.replace(/["\\]/g, "_")}"`); headers.set("X-Content-Type-Options", "nosniff")
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `attachment; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("X-Content-Type-Options", "nosniff")
   return new Response(object.body, { headers })
 })
 files.get("/:id/inline", async (c) => {
@@ -206,7 +206,7 @@ files.get("/:id/inline", async (c) => {
   if (isExpired(row.expiresAt)) { try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); return c.json({ error: "expired" }, 410) }
   const object = await c.env.FILES.get(row.r2Key)
   if (!object) return c.json({ error: "not found" }, 404)
-  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `inline; filename="${row.filename.replace(/["\\]/g, "_")}"`); headers.set("Cache-Control", "private, max-age=60"); addInlineSecurityHeaders(headers)
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `inline; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("Cache-Control", "private, max-age=60"); addInlineSecurityHeaders(headers)
   return new Response(object.body, { headers })
 })
 files.post("/:id/share", async (c) => {
@@ -222,7 +222,7 @@ files.post("/:id/share", async (c) => {
   const token = row.shareToken ?? crypto.randomUUID().replace(/-/g, "")
   const update: Record<string, unknown> = { shareToken: token }
   const hasOptions = "password" in body || "downloadLimit" in body || "expiresInDays" in body
-  if (hasOptions) { update.sharePassword = body.password ? await sha256Hex(String(body.password)) : null; update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null; update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null; update.shareDownloadCount = 0 }
+  if (hasOptions) { update.sharePassword = body.password ? await hashSecret(String(body.password)) : null; update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null; update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null; update.shareDownloadCount = 0 }
   await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
   await logActivity(c, db, "file.share", id, row.filename)
   return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}`, hasPassword: hasOptions ? !!body.password : !!row.sharePassword, downloadLimit: hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null, shareExpiresAt: hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null })

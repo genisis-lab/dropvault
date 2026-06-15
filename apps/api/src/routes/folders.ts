@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { and, desc, eq, gt, isNull } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { DAY_SECONDS, nowSeconds } from "../lib/expiry"
-import { sha256Hex } from "../lib/hash"
+import { hashSecret } from "../lib/hash"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
@@ -59,7 +59,7 @@ folders.post("/:id/share", async (c) => {
   const token = row.shareToken ?? crypto.randomUUID().replace(/-/g, "")
   const update: Record<string, unknown> = { shareToken: token }
   const hasOptions = "password" in body || "downloadLimit" in body || "expiresInDays" in body
-  if (hasOptions) { update.sharePassword = body.password ? await sha256Hex(String(body.password)) : null; update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null; update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null; update.shareDownloadCount = 0 }
+  if (hasOptions) { update.sharePassword = body.password ? await hashSecret(String(body.password)) : null; update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null; update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null; update.shareDownloadCount = 0 }
   await db.update(schema.folders).set(update).where(eq(schema.folders.id, id)).run()
   return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/folder/${token}`, hasPassword: hasOptions ? !!body.password : !!row.sharePassword, downloadLimit: hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null, shareExpiresAt: hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null })
 })
