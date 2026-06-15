@@ -177,7 +177,7 @@ function Stat({ icon, label, value }: { icon?: ReactNode; label: string; value: 
 function Loading() {
   return (
     <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-400">
-      <Loader2 size={16} className="animate-spin" /> Loading\u2026
+      <Loader2 size={16} className="animate-spin" /> Loading…
     </div>
   )
 }
