@@ -17,6 +17,7 @@ import {
   shareFolder,
   revokeFolderShare,
   downloadUrl,
+  adminAccess,
   type DriftFile,
   type Folder,
 } from "../lib/api"
@@ -30,6 +31,7 @@ import NameDialog from "./NameDialog"
 import ShareDialog from "./ShareDialog"
 import FolderShareDialog from "./FolderShareDialog"
 import PreviewModal from "./PreviewModal"
+import AdminPanel from "./AdminPanel"
 import { useToast } from "./Toast"
 
 const EXPIRY_OPTIONS = [1, 2, 7, 14, 30]
@@ -86,10 +88,13 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
   const [shareFile, setShareFile] = useState<DriftFile | null>(null)
   const [shareFolderTarget, setShareFolderTarget] = useState<Folder | null>(null)
   const [previewFile, setPreviewFile] = useState<DriftFile | null>(null)
+  const [adminOpen, setAdminOpen] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: listFiles })
   const foldersQuery = useQuery({ queryKey: ["folders"], queryFn: listFolders })
+  const accessQuery = useQuery({ queryKey: ["admin-access"], queryFn: adminAccess })
+  const isAdmin = accessQuery.data?.isAdmin ?? false
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["files"] })
@@ -347,6 +352,8 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
         sharedCount={sharedCount}
         filter={filter}
         setFilter={setFilter}
+        isAdmin={isAdmin}
+        onOpenAdmin={() => setAdminOpen(true)}
       />
 
       <div className="md:pl-60">
@@ -600,6 +607,7 @@ export default function Dashboard({ userName, userEmail }: { userName?: string; 
         onChanged={invalidate}
       />
       <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
 
       <NameDialog
         open={dialog !== null}
