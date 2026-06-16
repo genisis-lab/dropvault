@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AnimatePresence, motion } from "framer-motion"
 import { Plus, Trash2, Users, X } from "lucide-react"
-import { addTeamMember, createTeam, deleteTeam, listTeams, loadTeam, removeTeamMember, type Team, type TeamMember } from "../lib/api"
+import { addTeamMember, createTeam, deleteTeam, listTeams, loadTeam, removeTeamMember, type Team, type TeamMember } from "../lib/teams"
 import { useToast } from "./Toast"
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } }
