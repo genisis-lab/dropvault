@@ -13,6 +13,7 @@ export const user = sqliteTable("user", {
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
   quotaBytes: integer("quota_bytes"),
   brandedPortalApproved: integer("branded_portal_approved", { mode: "boolean" }).default(false),
+  twoFactorEnabled: integer("twoFactorEnabled", { mode: "boolean" }).default(false),
 })
 
 export const session = sqliteTable("session", {
@@ -50,6 +51,16 @@ export const verification = sqliteTable("verification", {
   createdAt: integer("createdAt", { mode: "timestamp" }),
   updatedAt: integer("updatedAt", { mode: "timestamp" }),
 })
+
+export const twoFactor = sqliteTable("twoFactor", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+  secret: text("secret").notNull(),
+  backupCodes: text("backupCodes").notNull(),
+  verified: integer("verified", { mode: "boolean" }).default(false),
+}, (t) => ({ userIdx: index("idx_two_factor_user").on(t.userId) }))
+
+export type TwoFactorRow = typeof twoFactor.$inferSelect
 
 export const folders = sqliteTable("folders", {
   id: text("id").primaryKey(),

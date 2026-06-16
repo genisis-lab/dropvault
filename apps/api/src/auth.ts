@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
-import { captcha } from "better-auth/plugins"
+import { captcha, twoFactor } from "better-auth/plugins"
 import { eq } from "drizzle-orm"
 import { getDb, schema } from "./db"
 import { adminEmailSet } from "./middleware/admin"
@@ -47,10 +47,17 @@ export function createAuth(env: Bindings) {
   // reads the `x-captcha-response` header and verifies it server-side. It is
   // only enabled when a secret is configured, so local dev still works without
   // a key (and Google OAuth is never gated by it).
-  const plugins = env.TURNSTILE_SECRET_KEY
-    ? [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY })]
-    : []
+  const plugins = [
+    twoFactor({
+      issuer: "Dropvault",
+      allowPasswordless: true,
+    }),
+    ...(env.TURNSTILE_SECRET_KEY
+      ? [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY })]
+      : []),
+  ]
   return betterAuth({
+    appName: "Dropvault",
     // The web app proxies /api/* to this Worker (see functions/api/[[path]].ts),
     // so from the browser everything is same-origin on PUBLIC_APP_URL. Using it
     // as baseURL keeps the Google OAuth callback and the session cookie
@@ -65,6 +72,7 @@ export function createAuth(env: Bindings) {
         session: schema.session,
         account: schema.account,
         verification: schema.verification,
+        twoFactor: schema.twoFactor,
       },
     }),
     // Email + password for simple friend signup...
