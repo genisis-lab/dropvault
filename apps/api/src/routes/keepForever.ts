@@ -10,11 +10,39 @@ import type { Bindings, Variables } from "../types"
 const keepForever = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 keepForever.use("*", requireAuth)
 
+let schemaReady = false
+
+async function ignoreDuplicateOrExists(promise: Promise<unknown>) {
+  try { await promise } catch (err) {
+    const message = String((err as Error)?.message ?? err).toLowerCase()
+    if (!message.includes("duplicate column") && !message.includes("already exists")) throw err
+  }
+}
+
+async function ensureKeepForeverSchema(env: Bindings) {
+  if (schemaReady) return
+  await ignoreDuplicateOrExists(env.DB.prepare("ALTER TABLE user ADD COLUMN keep_files_forever integer DEFAULT false").run())
+  await ignoreDuplicateOrExists(env.DB.prepare("ALTER TABLE files ADD COLUMN keep_forever integer DEFAULT false").run())
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS keep_forever_requests (
+    id text PRIMARY KEY NOT NULL,
+    user_id text NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    reason text,
+    status text NOT NULL DEFAULT 'pending',
+    reviewed_by text,
+    reviewed_at integer,
+    created_at integer NOT NULL
+  )`).run()
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_keep_forever_requests_user ON keep_forever_requests(user_id, created_at)").run()
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_keep_forever_requests_status ON keep_forever_requests(status, created_at)").run()
+  schemaReady = true
+}
+
 function roleGetsForever(role: string | null): boolean {
   return role === "owner" || role === "admin" || role === "moderator"
 }
 
 async function statusFor(env: Bindings, db: ReturnType<typeof getDb>, userId: string, email: string | null | undefined) {
+  await ensureKeepForeverSchema(env)
   const role = await adminRole(env, db, email)
   const user = await db.select().from(schema.user).where(eq(schema.user.id, userId)).get().catch(() => null)
   const canKeepFilesForever = roleGetsForever(role) || !!user?.keepFilesForever
@@ -44,6 +72,7 @@ keepForever.post("/request", async (c) => {
 })
 
 keepForever.get("/requests", requireAdminRole("admin"), async (c) => {
+  await ensureKeepForeverSchema(c.env)
   const status = c.req.query("status")
   const db = getDb(c.env.DB)
   const [rows, users] = await Promise.all([
@@ -56,6 +85,7 @@ keepForever.get("/requests", requireAdminRole("admin"), async (c) => {
 })
 
 keepForever.post("/requests/:id/approve", requireAdminRole("admin"), async (c) => {
+  await ensureKeepForeverSchema(c.env)
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const req = await db.select().from(schema.keepForeverRequests).where(eq(schema.keepForeverRequests.id, id)).get()
@@ -67,6 +97,7 @@ keepForever.post("/requests/:id/approve", requireAdminRole("admin"), async (c) =
 })
 
 keepForever.post("/requests/:id/reject", requireAdminRole("admin"), async (c) => {
+  await ensureKeepForeverSchema(c.env)
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const req = await db.select().from(schema.keepForeverRequests).where(eq(schema.keepForeverRequests.id, id)).get()
@@ -77,6 +108,7 @@ keepForever.post("/requests/:id/reject", requireAdminRole("admin"), async (c) =>
 })
 
 keepForever.post("/users/:id", requireAdminRole("moderator"), async (c) => {
+  await ensureKeepForeverSchema(c.env)
   const id = c.req.param("id")
   const body = await c.req.json<{ allowed?: boolean }>().catch(() => ({} as { allowed?: boolean }))
   const db = getDb(c.env.DB)

@@ -11,12 +11,9 @@ type AdminUser = {
   keepFilesForeverGranted?: boolean
 }
 
-type UsersResponse = { users: AdminUser[] }
+type UserDetailResponse = { user: AdminUser }
 
-let userCache: AdminUser[] | null = null
-let userCacheAt = 0
 let busy = false
-const CACHE_MS = 15_000
 const ROLE_DEFAULTS = new Set(["owner", "admin", "moderator"])
 
 function canRun() {
@@ -28,32 +25,35 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
-async function loadUsers(force = false): Promise<AdminUser[]> {
-  const now = Date.now()
-  if (!force && userCache && now - userCacheAt < CACHE_MS) return userCache
-  const data = await json<UsersResponse>(await fetch(`${API}/api/admin/users`, { credentials: "include" }))
-  userCache = data.users ?? []
-  userCacheAt = now
-  return userCache
-}
-
 function text(el: Element | null | undefined) {
   return (el?.textContent ?? "").trim()
 }
 
-function findProfileEmail(): string | null {
+function profileRoot(): HTMLElement | null {
   const backButton = Array.from(document.querySelectorAll("button")).find((button) => text(button).toLowerCase().includes("back to users"))
   if (!backButton) return null
-  const scope = backButton.closest("div") ?? document.body
-  const emailRe = /[^\s@]+@[^\s@]+\.[^\s@]+/
-  const candidates = Array.from(scope.querySelectorAll("p,span,div,td"))
-    .map((el) => text(el).match(emailRe)?.[0] ?? null)
-    .filter((value): value is string => !!value)
-  return candidates[0] ?? null
+  return (backButton.closest(".space-y-5") as HTMLElement | null) ?? (backButton.parentElement?.parentElement as HTMLElement | null) ?? document.body
 }
 
-function findStorageCard(): HTMLElement | null {
-  const heading = Array.from(document.querySelectorAll("h4")).find((el) => text(el).toLowerCase() === "storage quota")
+function findProfileEmail(root: HTMLElement): string | null {
+  const emailRe = /[^\s@]+@[^\s@]+\.[^\s@]+/
+  const direct = Array.from(root.querySelectorAll("p,span,div,td,h3"))
+    .map((el) => text(el).match(emailRe)?.[0] ?? null)
+    .filter((value): value is string => !!value)
+  return direct[0] ?? text(root).match(emailRe)?.[0] ?? null
+}
+
+function findUserIdFromRequest(): string | null {
+  const values = new Set<string>()
+  for (const entry of performance.getEntriesByType("resource") as PerformanceResourceTiming[]) {
+    const match = entry.name.match(/\/api\/admin\/users\/([^/?#]+)/)
+    if (match?.[1] && match[1] !== "bulk") values.add(decodeURIComponent(match[1]))
+  }
+  return Array.from(values).pop() ?? null
+}
+
+function findStorageCard(root: HTMLElement): HTMLElement | null {
+  const heading = Array.from(root.querySelectorAll("h4")).find((el) => text(el).toLowerCase() === "storage quota")
   return (heading?.closest(".rounded-xl") as HTMLElement | null) ?? null
 }
 
@@ -68,6 +68,17 @@ function pillClasses(enabled: boolean) {
 function roleLabel(role: AdminRole) {
   const value = String(role ?? "user")
   return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+async function loadProfileUser(root: HTMLElement): Promise<AdminUser | null> {
+  const id = findUserIdFromRequest()
+  if (id) {
+    try { return (await json<UserDetailResponse>(await fetch(`${API}/api/admin/users/${encodeURIComponent(id)}`, { credentials: "include" }))).user } catch {}
+  }
+  const email = findProfileEmail(root)
+  if (!email) return null
+  const users = (await json<{ users: AdminUser[] }>(await fetch(`${API}/api/admin/users`, { credentials: "include" }))).users ?? []
+  return users.find((row) => row.email.toLowerCase() === email.toLowerCase()) ?? null
 }
 
 function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
@@ -97,12 +108,10 @@ function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ allowed: nextAllowed }),
       }))
-      const users = await loadUsers(true)
-      const updated = users.find((row) => row.id === user.id) ?? { ...user, keepFilesForever: nextAllowed, keepFilesForeverGranted: nextAllowed }
+      const updated = (await json<UserDetailResponse>(await fetch(`${API}/api/admin/users/${encodeURIComponent(user.id)}`, { credentials: "include" }))).user
       renderPanel(panel, updated)
     } catch (err) {
       renderPanel(panel, user)
-      window.dispatchEvent(new CustomEvent("dropvault:toast", { detail: { type: "error", message: (err as Error)?.message || "Couldn't update keep-forever permission" } }))
       alert((err as Error)?.message || "Couldn't update keep-forever permission")
     }
   })
@@ -110,19 +119,19 @@ function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
 
 async function enhance() {
   if (!canRun() || busy) return
-  const email = findProfileEmail()
-  const storageCard = findStorageCard()
-  if (!email || !storageCard) return
-  const existing = document.querySelector<HTMLElement>("[data-admin-keep-forever-profile]")
-  if (existing?.dataset.email === email) return
+  const root = profileRoot()
+  if (!root) return
+  const storageCard = findStorageCard(root)
+  if (!storageCard) return
+  const existing = root.querySelector<HTMLElement>("[data-admin-keep-forever-profile]")
   busy = true
   try {
-    const users = await loadUsers()
-    const user = users.find((row) => row.email.toLowerCase() === email.toLowerCase())
+    const user = await loadProfileUser(root)
     if (!user) return
+    if (existing?.dataset.userId === user.id) return
     const panel = existing ?? document.createElement("div")
     panel.dataset.adminKeepForeverProfile = "true"
-    panel.dataset.email = email
+    panel.dataset.userId = user.id
     panel.className = "rounded-xl border border-slate-200 p-4"
     renderPanel(panel, user)
     storageCard.insertAdjacentElement("afterend", panel)
@@ -137,7 +146,7 @@ if (canRun()) {
   const observer = new MutationObserver(() => { void enhance() })
   observer.observe(document.body, { childList: true, subtree: true })
   window.addEventListener("focus", () => { void enhance() })
-  window.setInterval(() => { void enhance() }, 1500)
+  window.setInterval(() => { void enhance() }, 1000)
   void enhance()
 }
 
