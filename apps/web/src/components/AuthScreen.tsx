@@ -9,6 +9,20 @@ const cardInitial = { opacity: 0, y: 16, scale: 0.98 }
 const cardAnimate = { opacity: 1, y: 0, scale: 1 }
 const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
 
+function authErrorMessage(res: any, fallback: string) {
+  const err = res?.error
+  if (!err) return fallback
+  if (typeof err === "string") return err
+  return err.message || err.statusText || err.code || err.status || fallback
+}
+
+function needsTwoFactor(res: any) {
+  const data = res?.data ?? {}
+  const err = res?.error ?? {}
+  const code = String(err?.code || err?.status || err?.message || "").toLowerCase()
+  return Boolean(data.twoFactorRedirect || data.two_factor_redirect || data.twoFactorRequired || code.includes("two_factor") || code.includes("2fa"))
+}
+
 export default function AuthScreen() {
   const [mode, setMode] = useState<"in" | "up">("in")
   const [name, setName] = useState("")
@@ -31,20 +45,18 @@ export default function AuthScreen() {
       return
     }
     setLoading(true)
-    const fetchOptions = captchaToken
-      ? { headers: { "x-captcha-response": captchaToken } }
-      : undefined
+    const fetchOptions = captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined
     try {
-      const res =
-        mode === "in"
-          ? await signIn.email({ email, password }, fetchOptions)
-          : await signUp.email({ email, password, name: name || email.split("@")[0] }, fetchOptions)
-      if ((res.data as any)?.twoFactorRedirect) {
+      const res = mode === "in"
+        ? await (signIn.email as any)({ email, password, ...(fetchOptions ? { fetchOptions } : {}) })
+        : await (signUp.email as any)({ email, password, name: name || email.split("@")[0], ...(fetchOptions ? { fetchOptions } : {}) })
+      if (needsTwoFactor(res)) {
         setTwoFactor(true)
         setCode("")
+        setUseBackup(false)
         return
       }
-      if (res.error) setErrorMsg(res.error.message ?? "Authentication failed")
+      if (res?.error) setErrorMsg(authErrorMessage(res, "Authentication failed"))
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Something went wrong")
     } finally {
@@ -66,7 +78,7 @@ export default function AuthScreen() {
       const res = useBackup
         ? await api.verifyBackupCode({ code: code.trim(), disableSession: false, trustDevice })
         : await api.verifyTotp({ code: code.trim(), trustDevice })
-      if (res?.error) setErrorMsg(res.error.message ?? "Invalid verification code")
+      if (res?.error) setErrorMsg(authErrorMessage(res, "Invalid verification code"))
       else window.location.reload()
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Invalid verification code")
@@ -88,13 +100,13 @@ export default function AuthScreen() {
           <div className="mt-6 flex items-center gap-2.5"><div className="grid h-10 w-10 place-items-center rounded-xl bg-drift-50 text-drift-600"><KeyRound size={18} /></div><div><h1 className="text-2xl font-bold text-slate-800">Two-factor code</h1><p className="text-sm text-slate-500">Enter your authenticator code to finish signing in.</p></div></div>
           <form onSubmit={verifyTwoFactor} className="mt-6 space-y-3">
             <Field icon={<KeyRound size={16} />}>
-              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder={useBackup ? "Backup code" : "6-digit code"} inputMode="numeric" autoFocus className="w-full bg-transparent outline-none placeholder:text-slate-400" />
+              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder={useBackup ? "Backup code" : "6-digit code"} inputMode={useBackup ? "text" : "numeric"} autoComplete="one-time-code" autoFocus className="w-full bg-transparent outline-none placeholder:text-slate-400" />
             </Field>
             <label className="flex items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={trustDevice} onChange={(e) => setTrustDevice(e.target.checked)} className="rounded border-slate-300" /> Trust this device for 30 days</label>
             {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
-            <button type="submit" disabled={loading || !code.trim()} className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95 disabled:opacity-60">{loading ? "Verifying…" : "Verify"}</button>
+            <button type="submit" disabled={loading || !code.trim()} className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95 disabled:opacity-60">{loading ? "Verifying…" : "Verify and sign in"}</button>
           </form>
-          <div className="mt-4 flex items-center justify-between text-sm"><button onClick={() => setUseBackup((v) => !v)} className="font-semibold text-drift-600 hover:underline">{useBackup ? "Use authenticator code" : "Use backup code"}</button><button onClick={() => { setTwoFactor(false); setCode("") }} className="text-slate-500 hover:text-slate-700">Back</button></div>
+          <div className="mt-4 flex items-center justify-between text-sm"><button onClick={() => { setUseBackup((v) => !v); setCode(""); setErrorMsg(null) }} className="font-semibold text-drift-600 hover:underline">{useBackup ? "Use authenticator code" : "Use backup code"}</button><button onClick={() => { setTwoFactor(false); setCode(""); setErrorMsg(null) }} className="text-slate-500 hover:text-slate-700">Back</button></div>
         </motion.div>
       </div>
     )
