@@ -12,6 +12,7 @@ export const user = sqliteTable("user", {
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
   quotaBytes: integer("quota_bytes"),
+  brandedPortalApproved: integer("branded_portal_approved", { mode: "boolean" }).default(false),
 })
 
 export const session = sqliteTable("session", {
@@ -268,6 +269,19 @@ export const teamMembers = sqliteTable("team_members", {
 }, (t) => ({ uniqueMember: uniqueIndex("idx_team_members_unique").on(t.teamId, t.userId) }))
 
 export type TeamMemberRow = typeof teamMembers.$inferSelect
+
+export const brandedPortalRequests = sqliteTable("branded_portal_requests", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  requestedBrand: text("requested_brand"),
+  reason: text("reason"),
+  status: text("status").notNull().default("pending"),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: integer("reviewed_at"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ userIdx: index("idx_branded_portal_requests_user").on(t.userId), statusIdx: index("idx_branded_portal_requests_status").on(t.status) }))
+
+export type BrandedPortalRequestRow = typeof brandedPortalRequests.$inferSelect
 
 export const rateLimits = sqliteTable("rate_limits", {
   key: text("key").primaryKey(),
