@@ -4,6 +4,7 @@ import { nowSeconds } from "./expiry"
 import { normalizeIp } from "./ipAccess"
 
 export type RateLimitResult = { allowed: boolean; retryAfter: number }
+export type ClientIpInfo = { primary: string; ipv4: string | null; ipv6: string | null; all: string[] }
 
 // Fixed-window rate limiter backed by the rate_limits D1 table. Best-effort:
 // on any DB error it fails OPEN so a transient issue never locks legitimate
@@ -40,21 +41,40 @@ function forwardedForCandidates(header: string | undefined): string[] {
   return out
 }
 
-// Best-effort client IP for rate-limit keys and admin/audit capture.
-// Cloudflare sets CF-Connecting-IP for both IPv4 and IPv6. The fallbacks cover
-// common proxy headers and normalize IPv4, IPv6, IPv4-with-port, bracketed IPv6,
-// and IPv4-mapped IPv6 into one comparable value.
-export function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  const candidates = [
+function headerCandidates(c: { req: { header: (name: string) => string | undefined } }): string[] {
+  return [
     c.req.header("CF-Connecting-IP"),
     c.req.header("True-Client-IP"),
     c.req.header("X-Real-IP"),
     ...(c.req.header("X-Forwarded-For") ?? "").split(","),
     ...forwardedForCandidates(c.req.header("Forwarded")),
-  ]
-  for (const candidate of candidates) {
+  ].filter((x): x is string => !!x && !!x.trim())
+}
+
+// Captures every normalized address exposed by Cloudflare/proxy headers. A
+// single request usually has either IPv4 OR IPv6, but when a proxy exposes both
+// in X-Forwarded-For / Forwarded, we retain both so admin/audit storage can show
+// dual-stack clients instead of losing one family.
+export function clientIpInfo(c: { req: { header: (name: string) => string | undefined } }): ClientIpInfo {
+  const seen = new Set<string>()
+  const all: string[] = []
+  let ipv4: string | null = null
+  let ipv6: string | null = null
+  for (const candidate of headerCandidates(c)) {
     const ip = normalizeIp(candidate)
-    if (ip) return ip
+    if (!ip || seen.has(ip)) continue
+    seen.add(ip)
+    all.push(ip)
+    if (ip.includes(".")) ipv4 ??= ip
+    else if (ip.includes(":")) ipv6 ??= ip
   }
-  return "unknown"
+  // Prefer IPv4 as the display/rate-limit key when both are available, but keep
+  // IPv6 in the observation columns. If only IPv6 is present, use it.
+  return { primary: ipv4 ?? ipv6 ?? "unknown", ipv4, ipv6, all }
+}
+
+// Best-effort client IP for rate-limit keys and legacy single-IP columns.
+// Use clientIpInfo when the caller needs both IPv4 and IPv6.
+export function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  return clientIpInfo(c).primary
 }
