@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { and, desc, eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { nowSeconds } from "../lib/expiry"
 import { notifyAdmins, notifyUser } from "../lib/notifications"
@@ -76,7 +76,7 @@ keepForever.post("/requests/:id/reject", requireAdminRole("admin"), async (c) =>
   return c.json({ ok: true })
 })
 
-keepForever.post("/users/:id", requireAdminRole("admin"), async (c) => {
+keepForever.post("/users/:id", requireAdminRole("moderator"), async (c) => {
   const id = c.req.param("id")
   const body = await c.req.json<{ allowed?: boolean }>().catch(() => ({} as { allowed?: boolean }))
   const db = getDb(c.env.DB)
