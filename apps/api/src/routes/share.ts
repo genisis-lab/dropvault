@@ -5,6 +5,7 @@ import { getDb, schema } from "../db"
 import { isExpired, nowSeconds } from "../lib/expiry"
 import { verifySecret } from "../lib/hash"
 import { notifyAdmins } from "../lib/notifications"
+import { ipMatchesAllowlist } from "../lib/ipAccess"
 import { checkRateLimit, clientIp } from "../lib/rateLimit"
 import { makeZip, zipResponse } from "../lib/zip"
 import type { Bindings, Variables } from "../types"
@@ -27,7 +28,7 @@ function shareGate(c: any, row: FileRow | FolderRow): { ok: true } | { ok: false
   const ips = list((row as any).shareIpAllowlist ?? null)
   const countries = list((row as any).shareCountryAllowlist ?? null).map((x) => x.toUpperCase())
   const emails = list((row as any).shareAllowlist ?? null)
-  if (!allowedByList(clientIp(c), ips)) return { ok: false, message: "Your IP address is not allowed to use this link." }
+  if (!ipMatchesAllowlist(clientIp(c), ips)) return { ok: false, message: "Your IP address is not allowed to use this link." }
   if (!allowedByList(country(c), countries)) return { ok: false, message: "Your country is not allowed to use this link." }
   if (emails.length && !allowedByList(clientEmail(c), emails)) return { ok: false, message: "This link requires an allowed email. Add ?email=you@example.com to the URL, or ask the owner for access." }
   return { ok: true }
