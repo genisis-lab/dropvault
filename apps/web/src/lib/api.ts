@@ -125,7 +125,7 @@ export type AdminTypeBreakdown = { category: string; count: number; bytes: numbe
 export type AdminTopUser = { id: string; name: string; email: string | null; totalBytes: number; fileCount: number }
 export type AdminGrowthPoint = { date: string; users: number; files: number; bytes: number }
 export type AdminStats = { userCount: number; fileCount: number; readyFileCount: number; pendingFileCount?: number; deletedFileCount?: number; folderCount: number; totalBytes: number; sharedFileCount: number; sharedFolderCount: number; expiringSoonCount: number; flagCount: number; adminCount: number; suspendedUserCount?: number; pendingApprovalCount?: number; alerts?: AdminAlert[]; typeBreakdown: AdminTypeBreakdown[]; topUsers: AdminTopUser[]; growth: AdminGrowthPoint[] }
-export type AdminUser = { id: string; name: string; email: string; image: string | null; createdAt: number; fileCount: number; totalBytes: number; quotaBytes: number | null; isAdmin: boolean; role?: AdminRole | null; suspended?: boolean; suspensionReason?: string | null; pendingApproval?: boolean }
+export type AdminUser = { id: string; name: string; email: string; image: string | null; createdAt: number; fileCount: number; totalBytes: number; quotaBytes: number | null; isAdmin: boolean; role?: AdminRole | null; suspended?: boolean; suspensionReason?: string | null; pendingApproval?: boolean; lastIp?: string | null; recentIps?: string[] }
 export type AdminFile = DriftFile & { shared: boolean; ownerId: string; ownerEmail: string | null; ownerName: string | null }
 export type ActivityEntry = { id: string; userId?: string | null; actorEmail: string | null; action: string; targetType: string | null; targetId: string | null; detail: string | null; ip?: string | null; userAgent?: string | null; createdAt: number }
 export type AdminUserDetail = { user: AdminUser; files: AdminFile[]; activity?: ActivityEntry[] }
@@ -133,6 +133,7 @@ export type AdminFlag = { id: string; fileId: string | null; token: string | nul
 export type AdminAuditEntry = { id: string; actorEmail: string | null; action: string; targetType: string | null; targetId: string | null; detail: string | null; createdAt: number }
 export type AdminEntry = { email: string; role?: AdminRole; source: "env" | "db"; addedBy: string | null; createdAt: number | null }
 export type AdminSettings = Record<string, string>
+export type IpBanEntry = { ip: string; note: string | null; createdAt: number; createdBy: string | null }
 export type FileVersion = { id: string; fileId: string; versionGroupId: string; versionNumber: number; r2Key: string; sizeBytes: number; createdAt: number }
 
 export async function adminAccess(): Promise<{ isAdmin: boolean; role: AdminRole | null }> { return j(await fetch(`${API}/api/admin/access`, { credentials: "include" })) }
@@ -159,6 +160,9 @@ export async function adminDeleteFlag(id: string): Promise<{ ok: true }> { retur
 export async function adminAdmins(): Promise<AdminEntry[]> { return (await j<{ admins: AdminEntry[] }>(await fetch(`${API}/api/admin/admins`, { credentials: "include" }))).admins }
 export async function adminAddAdmin(email: string, role: AdminRole = "admin"): Promise<{ ok: true }> { return j(await fetch(`${API}/api/admin/admins`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, role }) })) }
 export async function adminRemoveAdmin(email: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/admin/admins/${encodeURIComponent(email)}`, { method: "DELETE", credentials: "include" })) }
+export async function adminIpBans(): Promise<IpBanEntry[]> { return (await j<{ bans: IpBanEntry[] }>(await fetch(`${API}/api/admin/ip-bans`, { credentials: "include" }))).bans }
+export async function adminBanIp(ip: string, note?: string | null): Promise<{ ok: true; bans: IpBanEntry[] }> { return j(await fetch(`${API}/api/admin/ip-bans`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ip, note }) })) }
+export async function adminUnbanIp(ip: string): Promise<{ ok: true; bans: IpBanEntry[] }> { return j(await fetch(`${API}/api/admin/ip-bans/${encodeURIComponent(ip)}`, { method: "DELETE", credentials: "include" })) }
 export async function adminAudit(limit?: number): Promise<AdminAuditEntry[]> { const qs = limit ? `?limit=${limit}` : ""; return (await j<{ entries: AdminAuditEntry[] }>(await fetch(`${API}/api/admin/audit${qs}`, { credentials: "include" }))).entries }
 export async function adminActivity(limit?: number): Promise<ActivityEntry[]> { const qs = limit ? `?limit=${limit}` : ""; return (await j<{ entries: ActivityEntry[] }>(await fetch(`${API}/api/admin/activity${qs}`, { credentials: "include" }))).entries }
 export async function adminSettings(): Promise<AdminSettings> { return (await j<{ settings: AdminSettings }>(await fetch(`${API}/api/admin/settings`, { credentials: "include" }))).settings }
