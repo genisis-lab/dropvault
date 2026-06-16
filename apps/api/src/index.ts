@@ -12,6 +12,7 @@ import notificationsRoute from "./routes/notifications"
 import sessionsRoute from "./routes/sessions"
 import teamsRoute from "./routes/teams"
 import portalRequestsRoute from "./routes/portalRequests"
+import keepForeverRoute from "./routes/keepForever"
 import { isIpBanned } from "./lib/ipAccess"
 import { clientIp } from "./lib/rateLimit"
 import { sweepExpired } from "./lib/sweep"
@@ -62,6 +63,7 @@ app.route("/api/notifications", notificationsRoute)
 app.route("/api/sessions", sessionsRoute)
 app.route("/api/teams", teamsRoute)
 app.route("/api/portal-requests", portalRequestsRoute)
+app.route("/api/keep-forever", keepForeverRoute)
 app.route("/api/account", accountRoute)
 app.route("/api/admin", adminRoute)
 
