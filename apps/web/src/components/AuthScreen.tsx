@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { KeyRound, Lock, Mail, User as UserIcon } from "lucide-react"
 import { authClient, signIn, signUp } from "../lib/auth-client"
@@ -17,7 +17,7 @@ function authErrorMessage(res: any, fallback: string) {
 }
 
 function needsTwoFactor(res: any) {
-  const data = res?.data ?? {}
+  const data = res?.data ?? res ?? {}
   const err = res?.error ?? {}
   const code = String(err?.code || err?.status || err?.message || "").toLowerCase()
   return Boolean(data.twoFactorRedirect || data.two_factor_redirect || data.twoFactorRequired || code.includes("two_factor") || code.includes("2fa"))
@@ -37,6 +37,20 @@ export default function AuthScreen() {
   const [trustDevice, setTrustDevice] = useState(true)
   const [useBackup, setUseBackup] = useState(false)
 
+  function showTwoFactor() {
+    setTwoFactor(true)
+    setCode("")
+    setUseBackup(false)
+    setErrorMsg(null)
+  }
+
+  useEffect(() => {
+    const handler = () => showTwoFactor()
+    window.addEventListener("dropvault:two-factor-required", handler)
+    if (sessionStorage.getItem("dropvault:two-factor-required") === "1") showTwoFactor()
+    return () => window.removeEventListener("dropvault:two-factor-required", handler)
+  }, [])
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     setErrorMsg(null)
@@ -45,20 +59,30 @@ export default function AuthScreen() {
       return
     }
     setLoading(true)
-    const fetchOptions = captchaToken ? { headers: { "x-captcha-response": captchaToken } } : undefined
+    let promptedFor2FA = false
+    const authOptions: any = {
+      onSuccess(context: any) {
+        if (needsTwoFactor(context?.data)) {
+          promptedFor2FA = true
+          try { sessionStorage.setItem("dropvault:two-factor-required", "1") } catch {}
+          showTwoFactor()
+        }
+      },
+    }
+    if (captchaToken) authOptions.fetchOptions = { headers: { "x-captcha-response": captchaToken } }
     try {
       const res = mode === "in"
-        ? await (signIn.email as any)({ email, password, ...(fetchOptions ? { fetchOptions } : {}) })
-        : await (signUp.email as any)({ email, password, name: name || email.split("@")[0], ...(fetchOptions ? { fetchOptions } : {}) })
-      if (needsTwoFactor(res)) {
-        setTwoFactor(true)
-        setCode("")
-        setUseBackup(false)
+        ? await (signIn.email as any)({ email, password }, authOptions)
+        : await (signUp.email as any)({ email, password, name: name || email.split("@")[0] }, authOptions)
+      if (promptedFor2FA || needsTwoFactor(res)) {
+        showTwoFactor()
+        try { sessionStorage.setItem("dropvault:two-factor-required", "1") } catch {}
         return
       }
       if (res?.error) setErrorMsg(authErrorMessage(res, "Authentication failed"))
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Something went wrong")
+      if (promptedFor2FA) showTwoFactor()
+      else setErrorMsg(err instanceof Error ? err.message : "Something went wrong")
     } finally {
       setLoading(false)
       // Turnstile tokens are single-use; clear and re-render after each attempt.
@@ -79,7 +103,10 @@ export default function AuthScreen() {
         ? await api.verifyBackupCode({ code: code.trim(), disableSession: false, trustDevice })
         : await api.verifyTotp({ code: code.trim(), trustDevice })
       if (res?.error) setErrorMsg(authErrorMessage(res, "Invalid verification code"))
-      else window.location.reload()
+      else {
+        try { sessionStorage.removeItem("dropvault:two-factor-required") } catch {}
+        window.location.reload()
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Invalid verification code")
     } finally {
@@ -106,7 +133,7 @@ export default function AuthScreen() {
             {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
             <button type="submit" disabled={loading || !code.trim()} className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95 disabled:opacity-60">{loading ? "Verifying…" : "Verify and sign in"}</button>
           </form>
-          <div className="mt-4 flex items-center justify-between text-sm"><button onClick={() => { setUseBackup((v) => !v); setCode(""); setErrorMsg(null) }} className="font-semibold text-drift-600 hover:underline">{useBackup ? "Use authenticator code" : "Use backup code"}</button><button onClick={() => { setTwoFactor(false); setCode(""); setErrorMsg(null) }} className="text-slate-500 hover:text-slate-700">Back</button></div>
+          <div className="mt-4 flex items-center justify-between text-sm"><button onClick={() => { setUseBackup((v) => !v); setCode(""); setErrorMsg(null) }} className="font-semibold text-drift-600 hover:underline">{useBackup ? "Use authenticator code" : "Use backup code"}</button><button onClick={() => { setTwoFactor(false); setCode(""); setErrorMsg(null); try { sessionStorage.removeItem("dropvault:two-factor-required") } catch {} }} className="text-slate-500 hover:text-slate-700">Back</button></div>
         </motion.div>
       </div>
     )
