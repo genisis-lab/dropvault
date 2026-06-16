@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { AlertCircle, CheckCircle2, FolderUp, Infinity, UploadCloud } from "lucide-react"
 import { complete, MULTIPART_THRESHOLD, presign, uploadLargeFile, uploadToR2, uploadUrlFor } from "../lib/api"
+import { accountStatus } from "../lib/account"
 import { formatBytes } from "../lib/format"
 
 type Job = { name: string; size: number; pct: number; state: "uploading" | "done" | "error" }
@@ -64,10 +65,29 @@ export default function UploadZone({
 }) {
   const [dragging, setDragging] = useState(false)
   const [jobs, setJobs] = useState<Record<string, Job>>({})
+  const [canKeepForever, setCanKeepForever] = useState(false)
+  const [keepForeverChoice, setKeepForeverChoice] = useState(keepForever)
   const localRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const ref = inputRef ?? localRef
-  const expiryText = keepForever ? "Keep forever" : `Auto-expires in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`
+
+  useEffect(() => {
+    let alive = true
+    accountStatus()
+      .then((status) => {
+        if (!alive) return
+        const allowed = !!status.canKeepFilesForever
+        setCanKeepForever(allowed)
+        if (!allowed) setKeepForeverChoice(false)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => { if (keepForever) setKeepForeverChoice(true) }, [keepForever])
+
+  const effectiveKeepForever = canKeepForever && keepForeverChoice
+  const expiryText = effectiveKeepForever ? "Keep forever" : `Auto-expires in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`
 
   const handleFiles = useCallback(
     async (incoming: FileList | File[] | null) => {
@@ -78,7 +98,7 @@ export default function UploadZone({
         setJobs((j) => ({ ...j, [key]: { name: file.name, size: file.size, pct: 0, state: "uploading" } }))
         const setPct = (pct: number) => setJobs((j) => (j[key] ? { ...j, [key]: { ...j[key], pct } } : j))
         try {
-          const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId, keepForever })
+          const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId, keepForever: effectiveKeepForever })
           if (file.size > MULTIPART_THRESHOLD) {
             await uploadLargeFile(id, file, setPct)
           } else {
@@ -93,7 +113,7 @@ export default function UploadZone({
         }
       }
     },
-    [expiryDays, keepForever, onUploaded, folderId],
+    [expiryDays, effectiveKeepForever, onUploaded, folderId],
   )
 
   return (
@@ -110,7 +130,7 @@ export default function UploadZone({
           animate={dragging ? iconUp : iconDown}
           className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-drift-500 via-glow-500 to-blush-500 text-white shadow-lg shadow-glow-500/25 sm:h-16 sm:w-16"
         >
-          {keepForever ? <Infinity size={28} /> : <UploadCloud size={28} />}
+          {effectiveKeepForever ? <Infinity size={28} /> : <UploadCloud size={28} />}
         </motion.div>
         <div>
           <p className="font-semibold text-slate-700">
@@ -120,6 +140,12 @@ export default function UploadZone({
             {expiryText} · extend or delete anytime
           </p>
         </div>
+        {canKeepForever && (
+          <label onClick={(e) => e.stopPropagation()} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-drift-200 bg-drift-50 px-3 py-1.5 text-xs font-medium text-drift-700">
+            <input type="checkbox" checked={keepForeverChoice} onChange={(e) => setKeepForeverChoice(e.target.checked)} />
+            Keep these uploads forever
+          </label>
+        )}
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click() }}
