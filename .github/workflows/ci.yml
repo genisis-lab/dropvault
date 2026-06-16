@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: ci-$ github.ref 
   cancel-in-progress: true
@@ -15,13 +18,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
+
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm --filter @dropvault/web typecheck
       - run: pnpm --filter @dropvault/api typecheck
@@ -35,13 +41,16 @@ jobs:
     needs: verify
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
+
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm --filter @dropvault/web exec playwright install --with-deps chromium
       - run: pnpm --filter @dropvault/web test:e2e
