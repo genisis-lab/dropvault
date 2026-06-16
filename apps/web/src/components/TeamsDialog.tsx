@@ -11,6 +11,8 @@ const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } }
 const panelInitial = { opacity: 0, scale: 0.96, y: 10 }
 const panelAnimate = { opacity: 1, scale: 1, y: 0 }
 const panelExit = { opacity: 0, scale: 0.96, y: 10 }
+const previewInitial = { opacity: 0 }
+const previewAnimate = { opacity: 1 }
 function when(ts: number) { return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) }
 function itemKey(type: "file" | "folder", id: string) { return `${type}:${id}` }
 function isImage(type?: string | null) { return !!type && type.startsWith("image/") }
@@ -86,7 +88,7 @@ export default function TeamsDialog({ open, onClose }: { open: boolean; onClose:
         </div> : <p className="py-12 text-center text-sm text-slate-400">Team not found.</p>}</section>
       </div>
     </motion.div>
-    {previewFile && <motion.div initial= opacity: 0  animate= opacity: 1  exit= opacity: 0  onClick={(e) => { e.stopPropagation(); setPreviewFile(null) }} className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/80 p-3 backdrop-blur-sm">
+    {previewFile && <motion.div initial={previewInitial} animate={previewAnimate} exit={previewInitial} onClick={(e) => { e.stopPropagation(); setPreviewFile(null) }} className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/80 p-3 backdrop-blur-sm">
       <div onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
         <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-white"><div className="min-w-0"><p className="truncate text-sm font-semibold">{previewFile.filename}</p><p className="text-xs text-white/50">{mediaLabel(previewFile.contentType)} · {previewFile.sizeBytes ? formatBytes(previewFile.sizeBytes) : "Shared file"}</p></div><div className="flex items-center gap-2"><a href={downloadPreviewUrl} className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white hover:bg-white/20" title="Download"><Download size={16} /></a><button onClick={() => setPreviewFile(null)} className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white hover:bg-white/20"><X size={16} /></button></div></div>
         <div className="grid min-h-0 flex-1 place-items-center bg-black">{isVideo(previewFile.contentType) ? <video src={previewUrl} controls autoPlay className="max-h-[78vh] w-full bg-black" /> : <img src={previewUrl} alt={previewFile.filename} className="max-h-[78vh] max-w-full object-contain" />}</div>
