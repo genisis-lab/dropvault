@@ -116,8 +116,9 @@ export async function revokeShare(id: string) { return j<{ ok: true }>(await fet
 export async function fileShareEvents(id: string) { return j<{ events: ShareEvent[]; summary: Record<string, number> }>(await fetch(`${API}/api/files/${id}/share/events`, { credentials: "include" })) }
 export function shareUrl(token: string) { const base = API || (typeof window !== "undefined" ? window.location.origin : ""); return `${base}/api/share/${token}` }
 
-export async function listFolders(opts?: { parentId?: string | null }): Promise<Folder[]> {
-  const qs = opts && "parentId" in opts ? `?parentId=${encodeURIComponent(opts.parentId ?? "")}` : ""
+export async function listFolders(opts?: unknown): Promise<Folder[]> {
+  const parentId = opts && typeof opts === "object" && "parentId" in opts ? (opts as { parentId?: string | null }).parentId : undefined
+  const qs = parentId !== undefined ? `?parentId=${encodeURIComponent(parentId ?? "")}` : ""
   return (await j<{ folders: Folder[] }>(await fetch(`${API}/api/folders${qs}`, { credentials: "include" }))).folders
 }
 export async function createFolder(name: string, input?: { parentId?: string | null; color?: string | null }) { return j<{ id: string; name: string; parentId?: string | null }>(await fetch(`${API}/api/folders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...input }) })) }
