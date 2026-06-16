@@ -10,6 +10,8 @@ export type DriftFile = {
   status: string
   shareToken: string | null
   folderId: string | null
+  teamId?: string | null
+  contentHash?: string | null
   createdAt: number
   expiresAt: number
   favorite?: boolean
@@ -20,6 +22,11 @@ export type DriftFile = {
   shareDownloadLimit?: number | null
   shareDownloadCount?: number
   shareExpiresAt?: number | null
+  shareAccessMode?: "download" | "preview" | "disabled"
+  shareOneTime?: boolean
+  shareAllowlist?: string | null
+  shareIpAllowlist?: string | null
+  shareCountryAllowlist?: string | null
 }
 
 export type Folder = {
@@ -28,10 +35,18 @@ export type Folder = {
   shareToken: string | null
   createdAt: number
   fileCount: number
+  parentId?: string | null
+  color?: string | null
+  teamId?: string | null
   shareHasPassword?: boolean
   shareDownloadLimit?: number | null
   shareDownloadCount?: number
   shareExpiresAt?: number | null
+  shareAccessMode?: "download" | "preview" | "disabled"
+  shareOneTime?: boolean
+  shareAllowlist?: string | null
+  shareIpAllowlist?: string | null
+  shareCountryAllowlist?: string | null
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -39,20 +54,27 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function sha256Hex(file: File): Promise<string | null> {
+  if (!crypto?.subtle || file.size > 512 * 1024 * 1024) return null
+  const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("")
+}
+export async function fileContentHash(file: File) { return sha256Hex(file) }
+
 export async function listFiles(opts?: { trash?: boolean }): Promise<DriftFile[]> {
   const qs = opts?.trash ? "?trash=true" : ""
   const res = await fetch(`${API}/api/files${qs}`, { credentials: "include" })
   return (await j<{ files: DriftFile[] }>(res)).files
 }
 
-export async function presign(input: { filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null }) {
+export async function presign(input: { filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null; contentHash?: string | null }) {
   const res = await fetch(`${API}/api/files/presign`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   })
-  return j<{ id: string; uploadUrl: string; expiresAt: number }>(res)
+  return j<{ id: string; uploadUrl: string; expiresAt: number; duplicateOf?: string | null }>(res)
 }
 
 export function uploadUrlFor(id: string) { return `${API}/api/files/${id}/upload` }
@@ -71,25 +93,45 @@ export async function permanentDeleteFile(id: string) { return j<{ ok: true }>(a
 export async function fileVersions(id: string) { return (await j<{ versions: FileVersion[] }>(await fetch(`${API}/api/files/${id}/versions`, { credentials: "include" }))).versions }
 export function downloadUrl(id: string) { return `${API}/api/files/${id}/download` }
 export function inlineUrl(id: string) { return `${API}/api/files/${id}/inline` }
+export function versionDownloadUrl(id: string, versionId: string) { return `${API}/api/files/${id}/versions/${versionId}/download` }
+export async function restoreFileVersion(id: string, versionId: string) { return j<{ ok: true; versionNumber: number }>(await fetch(`${API}/api/files/${id}/versions/${versionId}/restore`, { method: "POST", credentials: "include" })) }
 
-export type ShareOptions = { password?: string | null; downloadLimit?: number | null; expiresInDays?: number | null }
-export type ShareResult = { token: string; url: string; hasPassword?: boolean; downloadLimit?: number | null; shareExpiresAt?: number | null }
+export type ShareOptions = {
+  password?: string | null
+  downloadLimit?: number | null
+  expiresInDays?: number | null
+  accessMode?: "download" | "preview" | "disabled"
+  oneTime?: boolean
+  allowlist?: string[] | string | null
+  ipAllowlist?: string[] | string | null
+  countryAllowlist?: string[] | string | null
+}
+export type ShareResult = { token: string; url: string; hasPassword?: boolean; downloadLimit?: number | null; shareExpiresAt?: number | null; accessMode?: string; oneTime?: boolean }
+export type ShareEvent = { id: string; token: string; fileId?: string | null; folderId?: string | null; event: string; ip?: string | null; country?: string | null; userAgent?: string | null; referer?: string | null; createdAt: number }
 export async function createShare(id: string, options?: ShareOptions): Promise<ShareResult> {
   const res = await fetch(`${API}/api/files/${id}/share`, { method: "POST", credentials: "include", headers: options ? { "Content-Type": "application/json" } : undefined, body: options ? JSON.stringify(options) : undefined })
   return j<ShareResult>(res)
 }
 export async function revokeShare(id: string) { return j<{ ok: true }>(await fetch(`${API}/api/files/${id}/share`, { method: "DELETE", credentials: "include" })) }
+export async function fileShareEvents(id: string) { return j<{ events: ShareEvent[]; summary: Record<string, number> }>(await fetch(`${API}/api/files/${id}/share/events`, { credentials: "include" })) }
 export function shareUrl(token: string) { const base = API || (typeof window !== "undefined" ? window.location.origin : ""); return `${base}/api/share/${token}` }
-export async function listFolders(): Promise<Folder[]> { return (await j<{ folders: Folder[] }>(await fetch(`${API}/api/folders`, { credentials: "include" }))).folders }
-export async function createFolder(name: string) { return j<{ id: string; name: string }>(await fetch(`${API}/api/folders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })) }
-export async function renameFolder(id: string, name: string) { return j<{ ok: true; name: string }>(await fetch(`${API}/api/folders/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })) }
+
+export async function listFolders(opts?: { parentId?: string | null }): Promise<Folder[]> {
+  const qs = opts && "parentId" in opts ? `?parentId=${encodeURIComponent(opts.parentId ?? "")}` : ""
+  return (await j<{ folders: Folder[] }>(await fetch(`${API}/api/folders${qs}`, { credentials: "include" }))).folders
+}
+export async function createFolder(name: string, input?: { parentId?: string | null; color?: string | null }) { return j<{ id: string; name: string; parentId?: string | null }>(await fetch(`${API}/api/folders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...input }) })) }
+export async function renameFolder(id: string, name: string) { return updateFolder(id, { name }) as Promise<{ ok: true; name: string }> }
+export async function updateFolder(id: string, input: { name?: string; parentId?: string | null; color?: string | null }) { return j<{ ok: true } & Partial<Folder>>(await fetch(`${API}/api/folders/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) })) }
 export async function deleteFolder(id: string) { return j<{ ok: true }>(await fetch(`${API}/api/folders/${id}`, { method: "DELETE", credentials: "include" })) }
 export async function shareFolder(id: string, options?: ShareOptions): Promise<ShareResult> {
   const res = await fetch(`${API}/api/folders/${id}/share`, { method: "POST", credentials: "include", headers: options ? { "Content-Type": "application/json" } : undefined, body: options ? JSON.stringify(options) : undefined })
   return j<ShareResult>(res)
 }
 export async function revokeFolderShare(id: string) { return j<{ ok: true }>(await fetch(`${API}/api/folders/${id}/share`, { method: "DELETE", credentials: "include" })) }
+export async function folderShareEvents(id: string) { return j<{ events: ShareEvent[]; summary: Record<string, number> }>(await fetch(`${API}/api/folders/${id}/share/events`, { credentials: "include" })) }
 export function folderShareUrl(token: string) { const base = API || (typeof window !== "undefined" ? window.location.origin : ""); return `${base}/api/share/folder/${token}` }
+export function folderZipUrl(id: string) { return `${API}/api/folders/${id}/download-zip` }
 
 export function uploadToR2(uploadUrl: string, file: File, onProgress: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -168,12 +210,39 @@ export async function adminActivity(limit?: number): Promise<ActivityEntry[]> { 
 export async function adminSettings(): Promise<AdminSettings> { return (await j<{ settings: AdminSettings }>(await fetch(`${API}/api/admin/settings`, { credentials: "include" }))).settings }
 export async function adminSaveSettings(settings: AdminSettings): Promise<{ ok: true; settings: AdminSettings }> { return j(await fetch(`${API}/api/admin/settings`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) })) }
 
-export type UploadRequest = { id: string; ownerId: string; folderId: string | null; token: string; title: string; instructions: string | null; maxFileSize: number | null; allowedTypes: string | null; uploadLimit: number | null; uploadCount: number; requireEmail: boolean; expiresAt: number | null; createdAt: number; revokedAt: number | null; hasPassword: boolean; url: string }
+export type UploadRequest = { id: string; ownerId: string; folderId: string | null; token: string; title: string; instructions: string | null; maxFileSize: number | null; totalMaxBytes?: number | null; allowedTypes: string | null; uploadLimit: number | null; uploadCount: number; requireEmail: boolean; expiresAt: number | null; createdAt: number; revokedAt: number | null; hasPassword: boolean; url: string; status?: "open" | "closed"; moderationMode?: "auto" | "manual"; thankYouMessage?: string | null; closeAfterFirstUpload?: boolean; submissionCount?: number; pendingCount?: number; totalUploadedBytes?: number }
+export type PublicUpload = { id: string; requestId: string; fileId: string | null; uploaderEmail: string | null; uploaderName: string | null; status: "pending" | "approved" | "rejected"; filename?: string | null; sizeBytes?: number | null; contentType?: string | null; reviewedBy?: string | null; reviewedAt?: number | null; createdAt: number }
 export async function listUploadRequests(): Promise<UploadRequest[]> { return (await j<{ requests: UploadRequest[] }>(await fetch(`${API}/api/upload-requests`, { credentials: "include" }))).requests }
 export async function createUploadRequest(input: Partial<UploadRequest> & { password?: string | null; expiresInDays?: number | null }): Promise<UploadRequest> { return (await j<{ request: UploadRequest }>(await fetch(`${API}/api/upload-requests`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }))).request }
+export async function updateUploadRequest(id: string, input: Partial<UploadRequest> & { password?: string | null; expiresInDays?: number | null }): Promise<UploadRequest> { return (await j<{ request: UploadRequest }>(await fetch(`${API}/api/upload-requests/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }))).request }
+export async function closeUploadRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/upload-requests/${id}/close`, { method: "POST", credentials: "include" })) }
+export async function reopenUploadRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/upload-requests/${id}/reopen`, { method: "POST", credentials: "include" })) }
 export async function revokeUploadRequest(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/upload-requests/${id}`, { method: "DELETE", credentials: "include" })) }
+export async function uploadRequestSubmissions(id: string): Promise<PublicUpload[]> { return (await j<{ uploads: PublicUpload[] }>(await fetch(`${API}/api/upload-requests/${id}/submissions`, { credentials: "include" }))).uploads }
+export async function approvePublicUpload(requestId: string, uploadId: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/upload-requests/${requestId}/submissions/${uploadId}/approve`, { method: "POST", credentials: "include" })) }
+export async function rejectPublicUpload(requestId: string, uploadId: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/upload-requests/${requestId}/submissions/${uploadId}/reject`, { method: "POST", credentials: "include" })) }
 export async function publicUploadRequest(token: string): Promise<UploadRequest> { return (await j<{ request: UploadRequest }>(await fetch(`${API}/api/upload-requests/public/${token}`))).request }
-export async function submitPublicUpload(token: string, form: FormData): Promise<{ ok: true; fileId: string }> { return j(await fetch(`${API}/api/upload-requests/public/${token}`, { method: "POST", body: form })) }
+export async function submitPublicUpload(token: string, form: FormData): Promise<{ ok: true; fileIds: string[]; fileId?: string; pending?: boolean; message?: string | null }> { return j(await fetch(`${API}/api/upload-requests/public/${token}`, { method: "POST", body: form })) }
+
+export type NotificationItem = { id: string; userId: string; type: string; title: string; message: string | null; targetType: string | null; targetId: string | null; readAt: number | null; createdAt: number }
+export async function listNotifications(): Promise<NotificationItem[]> { return (await j<{ notifications: NotificationItem[] }>(await fetch(`${API}/api/notifications`, { credentials: "include" }))).notifications }
+export async function markNotificationRead(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/notifications/${id}/read`, { method: "POST", credentials: "include" })) }
+export async function markAllNotificationsRead(): Promise<{ ok: true }> { return j(await fetch(`${API}/api/notifications/read`, { method: "POST", credentials: "include" })) }
+export async function deleteNotification(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/notifications/${id}`, { method: "DELETE", credentials: "include" })) }
+
+export type SessionItem = { id: string; userId: string; token: string; ipAddress?: string | null; userAgent?: string | null; expiresAt: Date | string; createdAt: Date | string; updatedAt: Date | string; current?: boolean }
+export async function listSessions(): Promise<SessionItem[]> { return (await j<{ sessions: SessionItem[] }>(await fetch(`${API}/api/sessions`, { credentials: "include" }))).sessions }
+export async function revokeSession(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/sessions/${id}`, { method: "DELETE", credentials: "include" })) }
+export async function revokeOtherSessions(): Promise<{ ok: true; count: number }> { return j(await fetch(`${API}/api/sessions/revoke-others`, { method: "POST", credentials: "include" })) }
+
+export type Team = { id: string; name: string; ownerId: string; createdAt: number; members?: TeamMember[]; memberCount?: number }
+export type TeamMember = { id: string; teamId: string; userId: string; role: "owner" | "admin" | "member" | string; createdAt: number; userEmail?: string | null; userName?: string | null }
+export async function listTeams(): Promise<Team[]> { return (await j<{ teams: Team[] }>(await fetch(`${API}/api/teams`, { credentials: "include" }))).teams }
+export async function createTeam(name: string): Promise<Team> { return (await j<{ team: Team }>(await fetch(`${API}/api/teams`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }))).team }
+export async function loadTeam(id: string): Promise<Team> { return (await j<{ team: Team }>(await fetch(`${API}/api/teams/${id}`, { credentials: "include" }))).team }
+export async function addTeamMember(id: string, email: string, role = "member"): Promise<{ ok: true }> { return j(await fetch(`${API}/api/teams/${id}/members`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, role }) })) }
+export async function removeTeamMember(id: string, userId: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/teams/${id}/members/${userId}`, { method: "DELETE", credentials: "include" })) }
+export async function deleteTeam(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/teams/${id}`, { method: "DELETE", credentials: "include" })) }
 
 export type LimitRequest = { id: string; userId: string; userEmail?: string | null; requestedBytes: number; reason: string | null; status: string; approvedBy: string | null; approvedAt: number | null; createdAt: number }
 export async function listLimitRequests(): Promise<LimitRequest[]> { return (await j<{ requests: LimitRequest[] }>(await fetch(`${API}/api/admin/limit-requests`, { credentials: "include" }))).requests }
