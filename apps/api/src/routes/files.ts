@@ -324,6 +324,25 @@ files.post("/:id/versions/:versionId/restore", async (c) => {
   await logActivity(c, db, "file.version.restore", row.id, `restored v${version.versionNumber}`)
   return c.json({ ok: true, versionNumber: nextVersion })
 })
+files.post("/bulk-keep-forever", async (c) => {
+  const userId = c.get("userId")
+  const body = await c.req.json<{ ids?: string[]; keepForever?: boolean }>().catch(() => ({} as { ids?: string[]; keepForever?: boolean }))
+  const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string").slice(0, 500) : []
+  if (ids.length === 0) return c.json({ error: "no files selected" }, 400)
+  const enable = body.keepForever !== false
+  const db = getDb(c.env.DB)
+  if (enable && !(await canKeepForever(c, db, userId, c.get("userEmail")))) return c.json({ error: "keep-forever permission required" }, 403)
+  let count = 0
+  for (const id of ids) {
+    const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId), isNull(schema.files.deletedAt))).get().catch(() => null)
+    if (!row) continue
+    const expiresAt = enable ? FOREVER_EXPIRES_AT : computeExpiresAt(c.env, row.createdAt)
+    await db.update(schema.files).set({ keepForever: enable, expiresAt }).where(eq(schema.files.id, id)).run()
+    count++
+  }
+  await logActivity(c, db, enable ? "file.keepForever.bulk" : "file.unkeepForever.bulk", ids[0], `${count} file${count === 1 ? "" : "s"}`)
+  return c.json({ ok: true, count })
+})
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
@@ -336,6 +355,10 @@ files.patch("/:id", async (c) => {
     if (!(await canKeepForever(c, db, userId, c.get("userEmail")))) return c.json({ error: "keep-forever permission required" }, 403)
     update.expiresAt = FOREVER_EXPIRES_AT
     update.keepForever = true
+  }
+  if (body.keepForever === false) {
+    update.keepForever = false
+    update.expiresAt = computeExpiresAt(c.env, row.createdAt)
   }
   const addDays = Math.max(body.extendDays ?? body.expiryDays ?? 0, 0)
   if (addDays > 0 && !update.keepForever) { update.expiresAt = clampExtension(c.env, row.createdAt, Math.max(row.expiresAt, nowSeconds()) + Math.round(addDays * DAY_SECONDS)); update.keepForever = false }
