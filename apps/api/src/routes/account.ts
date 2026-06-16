@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { eq } from "drizzle-orm"
 import { createAuth } from "../auth"
 import { getDb, schema } from "../db"
+import { clientIp } from "../lib/rateLimit"
 import { adminRole } from "../middleware/admin"
 import type { Bindings, Variables } from "../types"
 
@@ -10,11 +11,25 @@ import type { Bindings, Variables } from "../types"
 // everything else with a 403).
 const account = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
+async function recordSessionIp(c: any, db: ReturnType<typeof getDb>, session: any) {
+  const sessionId = String(session?.session?.id ?? "")
+  if (!sessionId) return
+  const ip = clientIp(c)
+  if (ip === "unknown") return
+  await db
+    .update(schema.session)
+    .set({ ipAddress: ip, userAgent: c.req.header("User-Agent") ?? null })
+    .where(eq(schema.session.id, sessionId))
+    .run()
+    .catch(() => {})
+}
+
 account.get("/me", async (c) => {
   const auth = createAuth(c.env)
   const session = await auth.api.getSession({ headers: c.req.raw.headers })
   if (!session?.user) return c.json({ error: "unauthorized" }, 401)
   const db = getDb(c.env.DB)
+  await recordSessionIp(c, db, session)
   const suspension = await db
     .select()
     .from(schema.userSuspensions)

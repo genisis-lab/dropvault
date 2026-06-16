@@ -2,7 +2,21 @@ import { createMiddleware } from "hono/factory"
 import { eq } from "drizzle-orm"
 import { createAuth } from "../auth"
 import { getDb, schema } from "../db"
+import { clientIp } from "../lib/rateLimit"
 import type { Bindings, Variables } from "../types"
+
+async function recordSessionIp(c: any, db: ReturnType<typeof getDb>, session: any) {
+  const sessionId = String(session?.session?.id ?? "")
+  if (!sessionId) return
+  const ip = clientIp(c)
+  if (ip === "unknown") return
+  await db
+    .update(schema.session)
+    .set({ ipAddress: ip, userAgent: c.req.header("User-Agent") ?? null })
+    .where(eq(schema.session.id, sessionId))
+    .run()
+    .catch(() => {})
+}
 
 // Validates the better-auth session and attaches userId/userEmail.
 // Returns 401 if there is no valid session, or 403 if the account is suspended.
@@ -16,6 +30,7 @@ export const requireAuth = createMiddleware<{ Bindings: Bindings; Variables: Var
     // Suspended accounts keep a (briefly) valid session so the UI can explain the
     // block and offer sign-out, but they cannot perform ANY authenticated action.
     const db = getDb(c.env.DB)
+    await recordSessionIp(c, db, session)
     const suspension = await db
       .select()
       .from(schema.userSuspensions)
