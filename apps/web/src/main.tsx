@@ -5,6 +5,7 @@ import App from "./App"
 import { ToastProvider } from "./components/Toast"
 import { ThemeProvider } from "./lib/theme"
 import { LayoutProvider } from "./lib/layout"
+import "./lib/adminKeepForeverEnhancer"
 import "./index.css"
 
 const queryClient = new QueryClient()
