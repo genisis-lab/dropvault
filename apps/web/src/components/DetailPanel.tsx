@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Archive, Check, Clock, Download, FileText, Film, Image as ImageIcon, Link2, Music, Star, Tags, Trash2, X } from "lucide-react"
+import { Archive, Check, Clock, Download, FileText, Film, Image as ImageIcon, Infinity as InfinityIcon, Link2, Music, Star, Tags, Trash2, X } from "lucide-react"
 import type { DriftFile } from "../lib/api"
 import { downloadUrl, inlineUrl, shareUrl } from "../lib/api"
 import { formatBytes, timeLeft } from "../lib/format"
@@ -34,6 +34,9 @@ type Props = {
   onEditTags: (id: string) => void
   onExtend: (id: string, days: number) => void
   onDelete: (id: string) => void
+  canKeepForever?: boolean
+  onKeepForever?: (id: string) => void
+  onUnkeepForever?: (id: string) => void
 }
 
 const panelInitial = { x: "100%" }
@@ -73,7 +76,7 @@ export default function DetailPanel(props: Props) {
   )
 }
 
-function DetailBody({ file, onClose, onShare, onRevoke, onPreview, onToggleFavorite, onEditTags, onExtend, onDelete }: Props & { file: DriftFile }) {
+function DetailBody({ file, onClose, onShare, onRevoke, onPreview, onToggleFavorite, onEditTags, onExtend, onDelete, canKeepForever = false, onKeepForever, onUnkeepForever }: Props & { file: DriftFile }) {
   const { Icon, tint } = kindOf(file.contentType)
   const tone = TINT[tint]
   const isImage = (file.contentType || "").startsWith("image/")
@@ -133,8 +136,8 @@ function DetailBody({ file, onClose, onShare, onRevoke, onPreview, onToggleFavor
           </div>
           <div className="flex items-center justify-between">
             <dt className="text-slate-400">Expiry</dt>
-            <dd className={left.urgent ? "font-medium text-red-600" : "text-slate-600"}>
-              <span className="inline-flex items-center gap-1"><Clock size={12} /> {file.deletedAt ? "In Trash" : left.label}</span>
+            <dd className={file.keepForever && !file.deletedAt ? "font-medium text-drift-600" : left.urgent ? "font-medium text-red-600" : "text-slate-600"}>
+              <span className="inline-flex items-center gap-1">{file.keepForever && !file.deletedAt ? <InfinityIcon size={12} /> : <Clock size={12} />} {file.deletedAt ? "In Trash" : file.keepForever ? "Forever" : left.label}</span>
             </dd>
           </div>
           <div className="flex items-center justify-between">
@@ -168,13 +171,24 @@ function DetailBody({ file, onClose, onShare, onRevoke, onPreview, onToggleFavor
         <button onClick={() => onEditTags(file.id)} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-600 transition hover:bg-slate-50">
           <Tags size={16} /> Tags
         </button>
-        <button onClick={() => onExtend(file.id, 7)} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-600 transition hover:bg-slate-50">
-          <Clock size={16} /> +7 days
-        </button>
+        {!file.keepForever && (
+          <button onClick={() => onExtend(file.id, 7)} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-600 transition hover:bg-slate-50">
+            <Clock size={16} /> +7 days
+          </button>
+        )}
         <button onClick={() => { onDelete(file.id); onClose() }} className="flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 font-medium text-red-600 transition hover:bg-red-50">
           <Trash2 size={16} /> Trash
         </button>
       </div>
+      {!file.deletedAt && (file.keepForever ? (
+        <button onClick={() => onUnkeepForever?.(file.id)} className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+          <Clock size={16} /> Stop keeping forever
+        </button>
+      ) : canKeepForever ? (
+        <button onClick={() => onKeepForever?.(file.id)} className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-xl border border-drift-200 bg-drift-50 px-3 py-2 text-sm font-medium text-drift-600 transition hover:bg-drift-100">
+          <InfinityIcon size={16} /> Keep forever
+        </button>
+      ) : null)}
       {file.shareToken && (
         <button onClick={() => onRevoke(file.id)} className="mx-4 mb-4 flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
           <X size={16} /> Revoke share link
