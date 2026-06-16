@@ -14,6 +14,7 @@ export type DriftFile = {
   contentHash?: string | null
   createdAt: number
   expiresAt: number
+  keepForever?: boolean
   favorite?: boolean
   tags?: string[]
   deletedAt?: number | null
@@ -67,19 +68,20 @@ export async function listFiles(opts?: { trash?: boolean }): Promise<DriftFile[]
   return (await j<{ files: DriftFile[] }>(res)).files
 }
 
-export async function presign(input: { filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null; contentHash?: string | null }) {
+export async function presign(input: { filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; keepForever?: boolean; folderId?: string | null; contentHash?: string | null }) {
   const res = await fetch(`${API}/api/files/presign`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   })
-  return j<{ id: string; uploadUrl: string; expiresAt: number; duplicateOf?: string | null }>(res)
+  return j<{ id: string; uploadUrl: string; expiresAt: number; keepForever?: boolean; duplicateOf?: string | null }>(res)
 }
 
 export function uploadUrlFor(id: string) { return `${API}/api/files/${id}/upload` }
 export async function complete(id: string) { return j<{ ok: true }>(await fetch(`${API}/api/files/${id}/complete`, { method: "POST", credentials: "include" })) }
 export async function extendFile(id: string, days: number) { return patchFile(id, { extendDays: days }) as Promise<{ ok: true; expiresAt: number }> }
+export async function keepFileForever(id: string) { return patchFile(id, { keepForever: true }) as Promise<{ ok: true; expiresAt: number; file?: DriftFile | null }> }
 export async function renameFile(id: string, filename: string) { return patchFile(id, { filename }) as Promise<{ ok: true; filename: string }> }
 export async function moveFile(id: string, folderId: string | null) { return patchFile(id, { folderId }) as Promise<{ ok: true }> }
 export async function updateFileMeta(id: string, input: { favorite?: boolean; tags?: string[] }) { return patchFile(id, input) }
@@ -168,7 +170,7 @@ export type AdminTypeBreakdown = { category: string; count: number; bytes: numbe
 export type AdminTopUser = { id: string; name: string; email: string | null; totalBytes: number; fileCount: number }
 export type AdminGrowthPoint = { date: string; users: number; files: number; bytes: number }
 export type AdminStats = { userCount: number; fileCount: number; readyFileCount: number; pendingFileCount?: number; deletedFileCount?: number; folderCount: number; totalBytes: number; sharedFileCount: number; sharedFolderCount: number; expiringSoonCount: number; flagCount: number; adminCount: number; suspendedUserCount?: number; pendingApprovalCount?: number; alerts?: AdminAlert[]; typeBreakdown: AdminTypeBreakdown[]; topUsers: AdminTopUser[]; growth: AdminGrowthPoint[] }
-export type AdminUser = { id: string; name: string; email: string; image: string | null; createdAt: number; fileCount: number; totalBytes: number; quotaBytes: number | null; isAdmin: boolean; role?: AdminRole | null; suspended?: boolean; suspensionReason?: string | null; pendingApproval?: boolean; lastIp?: string | null; recentIps?: string[] }
+export type AdminUser = { id: string; name: string; email: string; image: string | null; createdAt: number; fileCount: number; totalBytes: number; quotaBytes: number | null; isAdmin: boolean; role?: AdminRole | null; keepFilesForever?: boolean; keepFilesForeverGranted?: boolean; suspended?: boolean; suspensionReason?: string | null; pendingApproval?: boolean; lastIp?: string | null; recentIps?: string[] }
 export type AdminFile = DriftFile & { shared: boolean; ownerId: string; ownerEmail: string | null; ownerName: string | null }
 export type ActivityEntry = { id: string; userId?: string | null; actorEmail: string | null; action: string; targetType: string | null; targetId: string | null; detail: string | null; ip?: string | null; userAgent?: string | null; createdAt: number }
 export type AdminUserDetail = { user: AdminUser; files: AdminFile[]; activity?: ActivityEntry[] }
@@ -231,7 +233,7 @@ export async function markNotificationRead(id: string): Promise<{ ok: true }> { 
 export async function markAllNotificationsRead(): Promise<{ ok: true }> { return j(await fetch(`${API}/api/notifications/read`, { method: "POST", credentials: "include" })) }
 export async function deleteNotification(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/notifications/${id}`, { method: "DELETE", credentials: "include" })) }
 
-export type SessionItem = { id: string; userId: string; token: string; ipAddress?: string | null; userAgent?: string | null; expiresAt: Date | string; createdAt: Date | string; updatedAt: Date | string; current?: boolean }
+export type SessionItem = { id: string; userId: string; token: string; ipAddress?: string | null; userAgent?: string | null; expiresAt: Date | string | number; createdAt: Date | string | number; updatedAt: Date | string | number; current?: boolean }
 export async function listSessions(): Promise<SessionItem[]> { return (await j<{ sessions: SessionItem[] }>(await fetch(`${API}/api/sessions`, { credentials: "include" }))).sessions }
 export async function revokeSession(id: string): Promise<{ ok: true }> { return j(await fetch(`${API}/api/sessions/${id}`, { method: "DELETE", credentials: "include" })) }
 export async function revokeOtherSessions(): Promise<{ ok: true; count: number }> { return j(await fetch(`${API}/api/sessions/revoke-others`, { method: "POST", credentials: "include" })) }
