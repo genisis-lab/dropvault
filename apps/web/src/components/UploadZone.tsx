@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type RefObject } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { AlertCircle, CheckCircle2, FolderUp, UploadCloud } from "lucide-react"
+import { AlertCircle, CheckCircle2, FolderUp, Infinity, UploadCloud } from "lucide-react"
 import { complete, MULTIPART_THRESHOLD, presign, uploadLargeFile, uploadToR2, uploadUrlFor } from "../lib/api"
 import { formatBytes } from "../lib/format"
 
@@ -14,8 +14,6 @@ const rowInitial = { opacity: 0, height: 0 }
 const rowAnimate = { opacity: 1, height: "auto" }
 const rowExit = { opacity: 0, height: 0 }
 
-// Recursively reads a dropped file-system entry (file or directory) into a flat
-// list of File objects, so dropping a folder uploads everything inside it.
 function readEntry(entry: any, out: File[]): Promise<void> {
   return new Promise((resolve) => {
     if (!entry) return resolve()
@@ -51,12 +49,14 @@ async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
 
 export default function UploadZone({
   expiryDays,
+  keepForever = false,
   onUploaded,
   inputRef,
   folderId = null,
   folderName,
 }: {
   expiryDays: number
+  keepForever?: boolean
   onUploaded: () => void
   inputRef?: RefObject<HTMLInputElement>
   folderId?: string | null
@@ -67,6 +67,7 @@ export default function UploadZone({
   const localRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const ref = inputRef ?? localRef
+  const expiryText = keepForever ? "Keep forever" : `Auto-expires in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`
 
   const handleFiles = useCallback(
     async (incoming: FileList | File[] | null) => {
@@ -77,7 +78,7 @@ export default function UploadZone({
         setJobs((j) => ({ ...j, [key]: { name: file.name, size: file.size, pct: 0, state: "uploading" } }))
         const setPct = (pct: number) => setJobs((j) => (j[key] ? { ...j, [key]: { ...j[key], pct } } : j))
         try {
-          const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId })
+          const { id } = await presign({ filename: file.name, contentType: file.type, sizeBytes: file.size, expiryDays, folderId, keepForever })
           if (file.size > MULTIPART_THRESHOLD) {
             await uploadLargeFile(id, file, setPct)
           } else {
@@ -92,7 +93,7 @@ export default function UploadZone({
         }
       }
     },
-    [expiryDays, onUploaded, folderId],
+    [expiryDays, keepForever, onUploaded, folderId],
   )
 
   return (
@@ -109,14 +110,14 @@ export default function UploadZone({
           animate={dragging ? iconUp : iconDown}
           className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-drift-500 via-glow-500 to-blush-500 text-white shadow-lg shadow-glow-500/25 sm:h-16 sm:w-16"
         >
-          <UploadCloud size={28} />
+          {keepForever ? <Infinity size={28} /> : <UploadCloud size={28} />}
         </motion.div>
         <div>
           <p className="font-semibold text-slate-700">
             {folderName ? `Drop files or folders into “${folderName}”` : "Drop files or folders here, or click to browse"}
           </p>
           <p className="mt-0.5 text-sm text-slate-400">
-            Auto-expires in {expiryDays} day{expiryDays === 1 ? "" : "s"} · extend or delete anytime
+            {expiryText} · extend or delete anytime
           </p>
         </div>
         <button
