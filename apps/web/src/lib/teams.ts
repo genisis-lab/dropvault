@@ -63,6 +63,9 @@ export async function loadTeam(id: string): Promise<Team> {
   return { ...res.team, members: res.members ?? res.team.members ?? [], files: res.files ?? res.team.files ?? [], folders: res.folders ?? res.team.folders ?? [], memberCount: res.members?.length ?? res.team.memberCount, fileCount: res.files?.length ?? res.team.fileCount, folderCount: res.folders?.length ?? res.team.folderCount }
 }
 
+export function teamFileInlineUrl(teamId: string, fileId: string) { return `${API}/api/teams/${teamId}/files/${fileId}/inline` }
+export function teamFileDownloadUrl(teamId: string, fileId: string) { return `${API}/api/teams/${teamId}/files/${fileId}/download` }
+
 export async function addTeamItems(id: string, input: { fileIds?: string[]; folderIds?: string[] }): Promise<{ ok: true }> {
   return j(await fetch(`${API}/api/teams/${id}/items`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }))
 }
