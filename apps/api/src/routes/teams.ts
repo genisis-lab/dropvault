@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { and, desc, eq, inArray } from "drizzle-orm"
 import { getDb, schema } from "../db"
-import { nowSeconds } from "../lib/expiry"
+import { isExpired, nowSeconds } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
@@ -14,6 +14,12 @@ teams.use("*", requireAuth)
 
 function ids(input: unknown[] | undefined): string[] { return Array.isArray(input) ? Array.from(new Set(input.filter((x): x is string => typeof x === "string" && x.trim().length > 0))) : [] }
 function canManage(role: string) { return role === "owner" || role === "admin" }
+function isInlineTeamMedia(type: string | null): boolean { return !!type && (type.startsWith("image/") || type.startsWith("video/")) }
+function addInlineHeaders(headers: Headers) {
+  headers.set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; sandbox")
+  headers.set("X-Content-Type-Options", "nosniff")
+  headers.set("Referrer-Policy", "no-referrer")
+}
 async function membership(db: ReturnType<typeof getDb>, teamId: string, userId: string) {
   const team = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId)).get().catch(() => null)
   if (!team) return null
@@ -24,6 +30,9 @@ async function membership(db: ReturnType<typeof getDb>, teamId: string, userId: 
 async function teamOwnerIds(db: ReturnType<typeof getDb>, teamId: string, ownerId: string): Promise<string[]> {
   const members = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.teamId, teamId)).all().catch(() => [])
   return Array.from(new Set([ownerId, ...members.map((m) => m.userId)]))
+}
+async function sharedTeamFile(db: ReturnType<typeof getDb>, teamId: string, fileId: string) {
+  return db.select().from(schema.files).where(and(eq(schema.files.id, fileId), eq(schema.files.teamId, teamId))).get().catch(() => null)
 }
 
 teams.get("/", async (c) => {
@@ -73,6 +82,42 @@ teams.get("/:id", async (c) => {
     folders: folders.map((f) => ({ ...f, ownerEmail: ownerEmailById.get(f.ownerId) ?? null })),
     files: files.map((f) => ({ ...f, ownerEmail: ownerEmailById.get(f.ownerId) ?? null })),
   })
+})
+
+teams.get("/:id/files/:fileId/inline", async (c) => {
+  const db = getDb(c.env.DB)
+  const access = await membership(db, c.req.param("id"), c.get("userId"))
+  if (!access) return c.json({ error: "not found" }, 404)
+  const file = await sharedTeamFile(db, access.team.id, c.req.param("fileId"))
+  if (!file || file.status !== "ready" || file.deletedAt) return c.json({ error: "not found" }, 404)
+  if (!isInlineTeamMedia(file.contentType)) return c.json({ error: "inline preview not allowed" }, 415)
+  if (isExpired(file.expiresAt)) return c.json({ error: "expired" }, 410)
+  const object = await c.env.FILES.get(file.r2Key)
+  if (!object) return c.json({ error: "not found" }, 404)
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set("Content-Length", String(object.size))
+  headers.set("Content-Disposition", `inline; filename=\"${file.filename.replace(/[\"\\]/g, "_")}\"`)
+  headers.set("Cache-Control", "private, max-age=60")
+  addInlineHeaders(headers)
+  return new Response(object.body, { headers })
+})
+
+teams.get("/:id/files/:fileId/download", async (c) => {
+  const db = getDb(c.env.DB)
+  const access = await membership(db, c.req.param("id"), c.get("userId"))
+  if (!access) return c.json({ error: "not found" }, 404)
+  const file = await sharedTeamFile(db, access.team.id, c.req.param("fileId"))
+  if (!file || file.status !== "ready" || file.deletedAt) return c.json({ error: "not found" }, 404)
+  if (isExpired(file.expiresAt)) return c.json({ error: "expired" }, 410)
+  const object = await c.env.FILES.get(file.r2Key)
+  if (!object) return c.json({ error: "not found" }, 404)
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set("Content-Length", String(object.size))
+  headers.set("Content-Disposition", `attachment; filename=\"${file.filename.replace(/[\"\\]/g, "_")}\"`)
+  headers.set("X-Content-Type-Options", "nosniff")
+  return new Response(object.body, { headers })
 })
 
 teams.post("/:id/items", async (c) => {
