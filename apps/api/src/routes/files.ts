@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { and, desc, eq, gt, isNull } from "drizzle-orm"
 import { getDb, schema } from "../db"
-import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS } from "../lib/expiry"
+import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS, FOREVER_EXPIRES_AT } from "../lib/expiry"
 import { hashSecret } from "../lib/hash"
 import { clientIp } from "../lib/rateLimit"
 import { requireAuth } from "../middleware/auth"
@@ -43,6 +43,13 @@ async function settings(db: ReturnType<typeof getDb>) {
     defaultQuotaBytes: Number(map.get("defaultQuotaBytes") || 1073741824),
   }
 }
+function roleGetsForever(role: string | null): boolean { return role === "owner" || role === "admin" || role === "moderator" }
+async function canKeepForever(c: any, db: ReturnType<typeof getDb>, userId: string, email?: string | null): Promise<boolean> {
+  const role = await adminRole(c.env, db, email ?? "")
+  if (roleGetsForever(role)) return true
+  const u = await db.select().from(schema.user).where(eq(schema.user.id, userId)).get().catch(() => null)
+  return !!u?.keepFilesForever
+}
 function typeAllowed(type: string | null, allowed: string[]): boolean {
   if (!allowed.length) return true
   const t = (type || "").toLowerCase()
@@ -71,11 +78,11 @@ function serializeList(input: unknown): string | null {
   return values.length ? JSON.stringify(Array.from(new Set(values))) : null
 }
 function accessMode(input: unknown): string { return ["download", "preview", "disabled"].includes(String(input)) ? String(input) : "download" }
-function safeFile(row: any) { const { sharePassword, tags, ...r } = row; return { ...r, tags: parseTags(tags ?? null), shareHasPassword: !!sharePassword } }
+function safeFile(row: any) { const { sharePassword, tags, ...r } = row; return { ...r, tags: parseTags(tags ?? null), shareHasPassword: !!sharePassword, keepForever: !!row.keepForever } }
 
 files.post("/presign", async (c) => {
   const userId = c.get("userId")
-  const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null; contentHash?: string | null }>()
+  const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null; contentHash?: string | null; keepForever?: boolean }>()
   if (!body?.filename) return c.json({ error: "filename required" }, 400)
   const sizeBytes = normalizeUploadSize(body.sizeBytes)
   if (sizeBytes == null) return c.json({ error: "valid file size required" }, 400)
@@ -100,15 +107,17 @@ files.post("/presign", async (c) => {
     const used = owned.reduce((s, f) => s + (f.status === "ready" ? f.sizeBytes || 0 : 0), 0)
     if (used + sizeBytes > quotaLimit) return c.json({ error: "storage quota exceeded" }, 413)
   }
+  const wantsForever = !!body.keepForever
+  if (wantsForever && !(await canKeepForever(c, db, userId, account?.email))) return c.json({ error: "keep-forever permission required" }, 403)
   const contentHash = body.contentHash ? String(body.contentHash).trim().slice(0, 128) : null
   const duplicate = contentHash ? await db.select().from(schema.files).where(and(eq(schema.files.ownerId, userId), eq(schema.files.contentHash, contentHash), eq(schema.files.sizeBytes, sizeBytes), eq(schema.files.status, "ready"), isNull(schema.files.deletedAt))).get().catch(() => null) : null
   const id = crypto.randomUUID()
   const r2Key = `${userId}/${id}`
   const createdAt = nowSeconds()
-  const expiresAt = computeExpiresAt(c.env, createdAt, body.expiryDays)
-  await db.insert(schema.files).values({ id, ownerId: userId, filename: body.filename.trim().slice(0, 255), r2Key, sizeBytes, contentType, contentHash, status: "pending", folderId, versionGroupId: id, createdAt, expiresAt }).run()
-  await logActivity(c, db, duplicate ? "file.presign.duplicate" : "file.presign", id, body.filename)
-  return c.json({ id, uploadUrl: `/api/files/${id}/upload`, expiresAt, duplicateOf: duplicate?.id ?? null })
+  const expiresAt = wantsForever ? FOREVER_EXPIRES_AT : computeExpiresAt(c.env, createdAt, body.expiryDays)
+  await db.insert(schema.files).values({ id, ownerId: userId, filename: body.filename.trim().slice(0, 255), r2Key, sizeBytes, contentType, contentHash, status: "pending", folderId, versionGroupId: id, createdAt, expiresAt, keepForever: wantsForever }).run()
+  await logActivity(c, db, duplicate ? "file.presign.duplicate" : wantsForever ? "file.presign.forever" : "file.presign", id, body.filename)
+  return c.json({ id, uploadUrl: `/api/files/${id}/upload`, expiresAt, keepForever: wantsForever, duplicateOf: duplicate?.id ?? null })
 })
 
 async function loadPendingOwned(c: any, id: string) {
@@ -318,20 +327,25 @@ files.post("/:id/versions/:versionId/restore", async (c) => {
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
   const id = c.req.param("id")
-  const body = await c.req.json<{ extendDays?: number; expiryDays?: number; folderId?: string | null; filename?: string; favorite?: boolean; tags?: string[] }>()
+  const body = await c.req.json<{ extendDays?: number; expiryDays?: number; folderId?: string | null; filename?: string; favorite?: boolean; tags?: string[]; keepForever?: boolean }>()
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
   const update: Record<string, unknown> = {}
+  if (body.keepForever === true) {
+    if (!(await canKeepForever(c, db, userId, c.get("userEmail")))) return c.json({ error: "keep-forever permission required" }, 403)
+    update.expiresAt = FOREVER_EXPIRES_AT
+    update.keepForever = true
+  }
   const addDays = Math.max(body.extendDays ?? body.expiryDays ?? 0, 0)
-  if (addDays > 0) update.expiresAt = clampExtension(c.env, row.createdAt, Math.max(row.expiresAt, nowSeconds()) + Math.round(addDays * DAY_SECONDS))
+  if (addDays > 0 && !update.keepForever) { update.expiresAt = clampExtension(c.env, row.createdAt, Math.max(row.expiresAt, nowSeconds()) + Math.round(addDays * DAY_SECONDS)); update.keepForever = false }
   if ("folderId" in body) { const fid = body.folderId; if (fid) { const folder = await db.select().from(schema.folders).where(and(eq(schema.folders.id, fid), eq(schema.folders.ownerId, userId))).get(); if (!folder) return c.json({ error: "folder not found" }, 404); update.folderId = fid } else update.folderId = null }
   if (typeof body.filename === "string") { const name = body.filename.trim(); if (!name) return c.json({ error: "filename cannot be empty" }, 400); update.filename = name.slice(0, 255) }
   if (typeof body.favorite === "boolean") update.favorite = body.favorite
   if (Array.isArray(body.tags)) update.tags = serializeTags(body.tags)
   if (Object.keys(update).length === 0) return c.json({ error: "nothing to update" }, 400)
   await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
-  await logActivity(c, db, "file.update", id, row.filename)
+  await logActivity(c, db, update.keepForever ? "file.keepForever" : "file.update", id, row.filename)
   const next = await db.select().from(schema.files).where(eq(schema.files.id, id)).get()
   return c.json({ ok: true, file: next ? safeFile(next) : null, expiresAt: next?.expiresAt, folderId: next?.folderId ?? null, filename: next?.filename })
 })
