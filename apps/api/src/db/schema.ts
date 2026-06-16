@@ -14,6 +14,7 @@ export const user = sqliteTable("user", {
   quotaBytes: integer("quota_bytes"),
   brandedPortalApproved: integer("branded_portal_approved", { mode: "boolean" }).default(false),
   twoFactorEnabled: integer("twoFactorEnabled", { mode: "boolean" }).default(false),
+  keepFilesForever: integer("keep_files_forever", { mode: "boolean" }).default(false),
 })
 
 export const session = sqliteTable("session", {
@@ -22,6 +23,8 @@ export const session = sqliteTable("session", {
   token: text("token").notNull().unique(),
   expiresAt: integer("expiresAt", { mode: "timestamp" }).notNull(),
   ipAddress: text("ipAddress"),
+  ipV4: text("ip_v4"),
+  ipV6: text("ip_v6"),
   userAgent: text("userAgent"),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
@@ -107,6 +110,7 @@ export const files = sqliteTable("files", {
   shareCountryAllowlist: text("share_country_allowlist"),
   createdAt: integer("created_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
+  keepForever: integer("keep_forever", { mode: "boolean" }).default(false),
   favorite: integer("favorite", { mode: "boolean" }).notNull().default(false),
   tags: text("tags"),
   deletedAt: integer("deleted_at"),
@@ -293,6 +297,30 @@ export const brandedPortalRequests = sqliteTable("branded_portal_requests", {
 }, (t) => ({ userIdx: index("idx_branded_portal_requests_user").on(t.userId), statusIdx: index("idx_branded_portal_requests_status").on(t.status) }))
 
 export type BrandedPortalRequestRow = typeof brandedPortalRequests.$inferSelect
+
+export const keepForeverRequests = sqliteTable("keep_forever_requests", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  reason: text("reason"),
+  status: text("status").notNull().default("pending"),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: integer("reviewed_at"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ userIdx: index("idx_keep_forever_requests_user").on(t.userId, t.createdAt), statusIdx: index("idx_keep_forever_requests_status").on(t.status, t.createdAt) }))
+
+export type KeepForeverRequestRow = typeof keepForeverRequests.$inferSelect
+
+export const ipObservations = sqliteTable("ip_observations", {
+  id: text("id").primaryKey(),
+  userId: text("user_id"),
+  primaryIp: text("primary_ip"),
+  ipV4: text("ip_v4"),
+  ipV6: text("ip_v6"),
+  path: text("path"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ userIdx: index("idx_ip_observations_user").on(t.userId, t.createdAt), ipv4Idx: index("idx_ip_observations_ipv4").on(t.ipV4, t.createdAt), ipv6Idx: index("idx_ip_observations_ipv6").on(t.ipV6, t.createdAt) }))
+
+export type IpObservationRow = typeof ipObservations.$inferSelect
 
 export const rateLimits = sqliteTable("rate_limits", {
   key: text("key").primaryKey(),

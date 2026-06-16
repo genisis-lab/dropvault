@@ -10,6 +10,10 @@ import type { Bindings, Variables } from "../types"
 // everything else with a 403).
 const account = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
+function roleGetsForever(role: string | null): boolean {
+  return role === "owner" || role === "admin" || role === "moderator"
+}
+
 account.get("/me", async (c) => {
   const auth = createAuth(c.env)
   const session = await auth.api.getSession({ headers: c.req.raw.headers })
@@ -21,22 +25,26 @@ account.get("/me", async (c) => {
     .where(eq(schema.userSuspensions.userId, session.user.id))
     .get()
     .catch(() => null)
+  const u = await db.select().from(schema.user).where(eq(schema.user.id, session.user.id)).get().catch(() => null)
   // Admins and the owner have unlimited storage (no quota). Everyone else gets
   // their per-user quota, falling back to the workspace default.
   const role = await adminRole(c.env, db, session.user.email)
   let quotaBytes: number | null = null
   if (role == null) {
-    const u = await db.select().from(schema.user).where(eq(schema.user.id, session.user.id)).get().catch(() => null)
     const setting = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, "defaultQuotaBytes")).get().catch(() => null)
     const defaultQuota = Number(setting?.value) || 1073741824
     quotaBytes = u?.quotaBytes ?? defaultQuota
   }
+  const canKeepFilesForever = roleGetsForever(role) || !!u?.keepFilesForever
   return c.json({
     user: { id: session.user.id, name: session.user.name, email: session.user.email },
     suspended: !!suspension,
     suspensionReason: suspension?.reason ?? null,
     quotaBytes,
     isAdmin: role != null,
+    adminRole: role,
+    keepFilesForever: !!u?.keepFilesForever,
+    canKeepFilesForever,
   })
 })
 
