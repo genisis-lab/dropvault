@@ -82,6 +82,8 @@ export function uploadUrlFor(id: string) { return `${API}/api/files/${id}/upload
 export async function complete(id: string) { return j<{ ok: true }>(await fetch(`${API}/api/files/${id}/complete`, { method: "POST", credentials: "include" })) }
 export async function extendFile(id: string, days: number) { return patchFile(id, { extendDays: days }) as Promise<{ ok: true; expiresAt: number }> }
 export async function keepFileForever(id: string) { return patchFile(id, { keepForever: true }) as Promise<{ ok: true; expiresAt: number; file?: DriftFile | null }> }
+export async function unkeepFileForever(id: string) { return patchFile(id, { keepForever: false }) as Promise<{ ok: true; expiresAt: number; file?: DriftFile | null }> }
+export async function bulkKeepForever(ids: string[], keepForever: boolean) { return j<{ ok: true; count: number }>(await fetch(`${API}/api/files/bulk-keep-forever`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, keepForever }) })) }
 export async function renameFile(id: string, filename: string) { return patchFile(id, { filename }) as Promise<{ ok: true; filename: string }> }
 export async function moveFile(id: string, folderId: string | null) { return patchFile(id, { folderId }) as Promise<{ ok: true }> }
 export async function updateFileMeta(id: string, input: { favorite?: boolean; tags?: string[] }) { return patchFile(id, input) }
