@@ -21,6 +21,10 @@ async function membership(db: ReturnType<typeof getDb>, teamId: string, userId: 
   const member = await db.select().from(schema.teamMembers).where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.userId, userId))).get().catch(() => null)
   return member ? { team, role: member.role } : null
 }
+async function teamOwnerIds(db: ReturnType<typeof getDb>, teamId: string, ownerId: string): Promise<string[]> {
+  const members = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.teamId, teamId)).all().catch(() => [])
+  return Array.from(new Set([ownerId, ...members.map((m) => m.userId)]))
+}
 
 teams.get("/", async (c) => {
   const db = getDb(c.env.DB)
@@ -83,10 +87,11 @@ teams.post("/:id/items", async (c) => {
   const removeFileIds = ids(body.removeFileIds)
   const removeFolderIds = ids(body.removeFolderIds)
   if (!fileIds.length && !folderIds.length && !removeFileIds.length && !removeFolderIds.length) return c.json({ error: "no items selected" }, 400)
-  if (fileIds.length) await db.update(schema.files).set({ teamId: access.team.id }).where(and(inArray(schema.files.id, fileIds), eq(schema.files.ownerId, userId))).run()
-  if (folderIds.length) await db.update(schema.folders).set({ teamId: access.team.id }).where(and(inArray(schema.folders.id, folderIds), eq(schema.folders.ownerId, userId))).run()
-  if (removeFileIds.length) await db.update(schema.files).set({ teamId: null }).where(and(inArray(schema.files.id, removeFileIds), eq(schema.files.teamId, access.team.id), eq(schema.files.ownerId, userId))).run()
-  if (removeFolderIds.length) await db.update(schema.folders).set({ teamId: null }).where(and(inArray(schema.folders.id, removeFolderIds), eq(schema.folders.teamId, access.team.id), eq(schema.folders.ownerId, userId))).run()
+  const permittedOwners = await teamOwnerIds(db, access.team.id, access.team.ownerId)
+  if (fileIds.length) await db.update(schema.files).set({ teamId: access.team.id }).where(and(inArray(schema.files.id, fileIds), inArray(schema.files.ownerId, permittedOwners))).run()
+  if (folderIds.length) await db.update(schema.folders).set({ teamId: access.team.id }).where(and(inArray(schema.folders.id, folderIds), inArray(schema.folders.ownerId, permittedOwners))).run()
+  if (removeFileIds.length) await db.update(schema.files).set({ teamId: null }).where(and(inArray(schema.files.id, removeFileIds), eq(schema.files.teamId, access.team.id), inArray(schema.files.ownerId, permittedOwners))).run()
+  if (removeFolderIds.length) await db.update(schema.folders).set({ teamId: null }).where(and(inArray(schema.folders.id, removeFolderIds), eq(schema.folders.teamId, access.team.id), inArray(schema.folders.ownerId, permittedOwners))).run()
   return c.json({ ok: true })
 })
 
