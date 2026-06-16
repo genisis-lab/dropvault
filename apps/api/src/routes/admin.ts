@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import type { FileRow } from "../db/schema"
 import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry"
+import { addIpBan, getIpBans, normalizeIp, recentIpsFrom, removeIpBan } from "../lib/ipAccess"
 import { requireAuth } from "../middleware/auth"
 import { adminEmailSet, adminRole, effectiveAdmins, hasRole, normalizeAdminRole, requireAdmin, type AdminRole } from "../middleware/admin"
 import { isSafeWebhookUrl } from "../lib/url"
@@ -117,6 +118,23 @@ function dayKey(sec: number): string { return new Date(sec * 1000).toISOString()
 function parseTags(raw: string | null): string[] {
   try { const value = raw ? JSON.parse(raw) : []; return Array.isArray(value) ? value.filter((x: unknown): x is string => typeof x === "string") : [] } catch { return [] }
 }
+function buildRecentIpMap(sessions: Array<{ userId: string; ipAddress: string | null; createdAt: Date; updatedAt: Date }>, activity: Array<{ userId: string | null; ip: string | null; createdAt: number }>): Map<string, string[]> {
+  const events = new Map<string, Array<{ ip: string | null; createdAt: number }>>()
+  for (const session of sessions) {
+    const list = events.get(session.userId) ?? []
+    list.push({ ip: session.ipAddress, createdAt: Math.floor((session.updatedAt ?? session.createdAt).getTime() / 1000) })
+    events.set(session.userId, list)
+  }
+  for (const row of activity) {
+    if (!row.userId) continue
+    const list = events.get(row.userId) ?? []
+    list.push({ ip: row.ip, createdAt: row.createdAt })
+    events.set(row.userId, list)
+  }
+  const out = new Map<string, string[]>()
+  for (const [userId, rows] of events) out.set(userId, recentIpsFrom(rows, 5))
+  return out
+}
 async function logAction(c: any, db: ReturnType<typeof getDb>, action: string, targetType: string | null, targetId: string | null, detail: string | null) {
   try {
     await db.insert(schema.auditLog).values({ id: crypto.randomUUID(), actorId: c.get("userId") ?? null, actorEmail: c.get("userEmail") ?? null, action, targetType, targetId, detail, createdAt: nowSeconds() }).run()
@@ -203,25 +221,48 @@ admin.get("/stats", async (c) => {
 
 admin.get("/users", async (c) => {
   const db = getDb(c.env.DB)
-  const [users, files, admins, suspensions] = await Promise.all([db.select().from(schema.user).orderBy(desc(schema.user.createdAt)).all(), db.select().from(schema.files).all(), effectiveAdmins(c.env, db), db.select().from(schema.userSuspensions).all().catch(() => [])])
+  const viewerRole = await adminRole(c.env, db, c.get("userEmail"))
+  const canSeeIps = viewerRole === "owner"
+  const [users, files, admins, suspensions, sessions, activity] = await Promise.all([
+    db.select().from(schema.user).orderBy(desc(schema.user.createdAt)).all(),
+    db.select().from(schema.files).all(),
+    effectiveAdmins(c.env, db),
+    db.select().from(schema.userSuspensions).all().catch(() => []),
+    canSeeIps ? db.select().from(schema.session).all().catch(() => []) : Promise.resolve([]),
+    canSeeIps ? db.select().from(schema.activityLog).all().catch(() => []) : Promise.resolve([]),
+  ])
   const suspended = new Set(suspensions.map((s) => s.userId))
   const reasonByUser = new Map(suspensions.map((s) => [s.userId, s.reason] as const))
   const countByUser = new Map<string, number>(); const bytesByUser = new Map<string, number>()
   for (const f of files.filter((x) => !x.deletedAt)) { countByUser.set(f.ownerId, (countByUser.get(f.ownerId) ?? 0) + 1); if (f.status === "ready") bytesByUser.set(f.ownerId, (bytesByUser.get(f.ownerId) ?? 0) + (f.sizeBytes || 0)) }
   const settings = await settingsMap(db)
   const defaultQuota = Number(settings.defaultQuotaBytes) || 1073741824
-  return c.json({ users: users.map((u) => ({ id: u.id, name: u.name, email: u.email, image: u.image, createdAt: Math.floor(u.createdAt.getTime() / 1000), fileCount: countByUser.get(u.id) ?? 0, totalBytes: bytesByUser.get(u.id) ?? 0, quotaBytes: u.quotaBytes ?? defaultQuota, isAdmin: admins.has(u.email.toLowerCase()), role: admins.get(u.email.toLowerCase()) ?? null, suspended: suspended.has(u.id), pendingApproval: reasonByUser.get(u.id) === PENDING_APPROVAL_REASON })) })
+  const recentIpByUser = canSeeIps ? buildRecentIpMap(sessions as Array<{ userId: string; ipAddress: string | null; createdAt: Date; updatedAt: Date }>, activity as Array<{ userId: string | null; ip: string | null; createdAt: number }>) : new Map<string, string[]>()
+  return c.json({ users: users.map((u) => ({ id: u.id, name: u.name, email: u.email, image: u.image, createdAt: Math.floor(u.createdAt.getTime() / 1000), fileCount: countByUser.get(u.id) ?? 0, totalBytes: bytesByUser.get(u.id) ?? 0, quotaBytes: u.quotaBytes ?? defaultQuota, isAdmin: admins.has(u.email.toLowerCase()), role: admins.get(u.email.toLowerCase()) ?? null, suspended: suspended.has(u.id), pendingApproval: reasonByUser.get(u.id) === PENDING_APPROVAL_REASON, lastIp: canSeeIps ? (recentIpByUser.get(u.id)?.[0] ?? null) : null, recentIps: canSeeIps ? (recentIpByUser.get(u.id) ?? []) : [] })) })
 })
 admin.get("/users/:id", async (c) => {
   const id = c.req.param("id")
   const db = getDb(c.env.DB)
   const u = await db.select().from(schema.user).where(eq(schema.user.id, id)).get()
   if (!u) return c.json({ error: "not found" }, 404)
-  const [files, allUsers, admins, suspension, activity] = await Promise.all([db.select().from(schema.files).where(eq(schema.files.ownerId, id)).orderBy(desc(schema.files.createdAt)).all(), db.select().from(schema.user).all(), effectiveAdmins(c.env, db), db.select().from(schema.userSuspensions).where(eq(schema.userSuspensions.userId, id)).get().catch(() => null), db.select().from(schema.activityLog).where(eq(schema.activityLog.userId, id)).orderBy(desc(schema.activityLog.createdAt)).limit(50).all().catch(() => [])])
+  const viewerRole = await adminRole(c.env, db, c.get("userEmail"))
+  const canSeeIps = viewerRole === "owner"
+  const [files, allUsers, admins, suspension, activity, sessions] = await Promise.all([
+    db.select().from(schema.files).where(eq(schema.files.ownerId, id)).orderBy(desc(schema.files.createdAt)).all(),
+    db.select().from(schema.user).all(),
+    effectiveAdmins(c.env, db),
+    db.select().from(schema.userSuspensions).where(eq(schema.userSuspensions.userId, id)).get().catch(() => null),
+    db.select().from(schema.activityLog).where(eq(schema.activityLog.userId, id)).orderBy(desc(schema.activityLog.createdAt)).limit(50).all().catch(() => []),
+    canSeeIps ? db.select().from(schema.session).where(eq(schema.session.userId, id)).all().catch(() => []) : Promise.resolve([]),
+  ])
   const emailById = new Map(allUsers.map((x) => [x.id, x.email] as const)); const nameById = new Map(allUsers.map((x) => [x.id, x.name] as const)); const ready = files.filter((f) => f.status === "ready" && !f.deletedAt)
   const settings = await settingsMap(db)
   const defaultQuota = Number(settings.defaultQuotaBytes) || 1073741824
-  return c.json({ user: { id: u.id, name: u.name, email: u.email, image: u.image, createdAt: Math.floor(u.createdAt.getTime() / 1000), fileCount: files.filter((f) => !f.deletedAt).length, totalBytes: ready.reduce((s, f) => s + (f.sizeBytes || 0), 0), quotaBytes: u.quotaBytes ?? defaultQuota, isAdmin: admins.has(u.email.toLowerCase()), role: admins.get(u.email.toLowerCase()) ?? null, suspended: !!suspension, suspensionReason: suspension?.reason ?? null, pendingApproval: suspension?.reason === PENDING_APPROVAL_REASON }, files: files.map((f) => fileRow(f, emailById, nameById)), activity })
+  const recentIps = canSeeIps ? recentIpsFrom([
+    ...(activity as Array<{ ip: string | null; createdAt: number }>).map((row) => ({ ip: row.ip, createdAt: row.createdAt })),
+    ...(sessions as Array<{ ipAddress: string | null; createdAt: Date; updatedAt: Date }>).map((row) => ({ ip: row.ipAddress, createdAt: Math.floor((row.updatedAt ?? row.createdAt).getTime() / 1000) })),
+  ], 8) : []
+  return c.json({ user: { id: u.id, name: u.name, email: u.email, image: u.image, createdAt: Math.floor(u.createdAt.getTime() / 1000), fileCount: files.filter((f) => !f.deletedAt).length, totalBytes: ready.reduce((s, f) => s + (f.sizeBytes || 0), 0), quotaBytes: u.quotaBytes ?? defaultQuota, isAdmin: admins.has(u.email.toLowerCase()), role: admins.get(u.email.toLowerCase()) ?? null, suspended: !!suspension, suspensionReason: suspension?.reason ?? null, pendingApproval: suspension?.reason === PENDING_APPROVAL_REASON, lastIp: canSeeIps ? (recentIps[0] ?? null) : null, recentIps }, files: files.map((f) => fileRow(f, emailById, nameById)), activity: activity.map((row) => ({ ...row, ip: canSeeIps ? normalizeIp(row.ip) : null, userAgent: canSeeIps ? (row.userAgent ?? null) : null })) })
 })
 admin.post("/users/:id/quota", async (c) => {
   const denied = await forbidUnlessCan(c, "manageUsers"); if (denied) return denied
@@ -245,7 +286,14 @@ admin.post("/users/bulk", async (c) => {
 })
 
 admin.get("/files", async (c) => { const db = getDb(c.env.DB); const [files, users] = await Promise.all([db.select().from(schema.files).orderBy(desc(schema.files.createdAt)).all(), db.select().from(schema.user).all()]); const emailById = new Map(users.map((u) => [u.id, u.email] as const)); const nameById = new Map(users.map((u) => [u.id, u.name] as const)); return c.json({ files: files.map((f) => fileRow(f, emailById, nameById)) }) })
-admin.get("/activity", async (c) => { const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500); const db = getDb(c.env.DB); const rows = await db.select().from(schema.activityLog).orderBy(desc(schema.activityLog.createdAt)).limit(limit).all().catch(() => []); return c.json({ entries: rows }) })
+admin.get("/activity", async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500)
+  const db = getDb(c.env.DB)
+  const viewerRole = await adminRole(c.env, db, c.get("userEmail"))
+  const canSeeIps = viewerRole === "owner"
+  const rows = await db.select().from(schema.activityLog).orderBy(desc(schema.activityLog.createdAt)).limit(limit).all().catch(() => [])
+  return c.json({ entries: rows.map((row) => ({ ...row, ip: canSeeIps ? normalizeIp(row.ip) : null, userAgent: canSeeIps ? (row.userAgent ?? null) : null })) })
+})
 admin.post("/files/:id/revoke", async (c) => { const denied = await forbidUnlessCan(c, "manageFiles"); if (denied) return denied; const id = c.req.param("id"); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(eq(schema.files.id, id)).get(); if (!row) return c.json({ error: "not found" }, 404); await db.update(schema.files).set({ shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null }).where(eq(schema.files.id, id)).run(); await logAction(c, db, "file.revoke", "file", id, row.filename); return c.json({ ok: true }) })
 admin.post("/files/:id/extend", async (c) => { const denied = await forbidUnlessCan(c, "manageFiles"); if (denied) return denied; const id = c.req.param("id"); const body = await c.req.json<{ days?: number }>().catch(() => ({} as { days?: number })); const days = Math.max(Number(body.days) || 0, 0); if (days <= 0) return c.json({ error: "days must be positive" }, 400); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(eq(schema.files.id, id)).get(); if (!row) return c.json({ error: "not found" }, 404); const expiresAt = clampExtension(c.env, row.createdAt, Math.max(row.expiresAt, nowSeconds()) + Math.round(days * DAY_SECONDS)); await db.update(schema.files).set({ expiresAt }).where(eq(schema.files.id, id)).run(); await logAction(c, db, "file.extend", "file", id, `${row.filename} +${days}d`); return c.json({ ok: true, expiresAt }) })
 admin.post("/files/:id/expire", async (c) => { const denied = await forbidUnlessCan(c, "manageFiles"); if (denied) return denied; const id = c.req.param("id"); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(eq(schema.files.id, id)).get(); if (!row) return c.json({ error: "not found" }, 404); const expiresAt = nowSeconds(); await db.update(schema.files).set({ expiresAt }).where(eq(schema.files.id, id)).run(); await logAction(c, db, "file.expire", "file", id, row.filename); return c.json({ ok: true, expiresAt }) })
@@ -275,6 +323,29 @@ admin.delete("/flags/:id", async (c) => { const denied = await forbidUnlessCan(c
 admin.get("/admins", async (c) => { const db = getDb(c.env.DB); const envSet = adminEmailSet(c.env); const dbRows = await db.select().from(schema.adminEmails).all(); const admins = [...Array.from(envSet, (email) => ({ email, role: "owner" as const, source: "env" as const, addedBy: null as string | null, createdAt: null as number | null })), ...dbRows.filter((r) => !envSet.has(r.email.toLowerCase())).map((r) => ({ email: r.email, role: normalizeAdminRole(r.role), source: "db" as const, addedBy: r.addedBy ?? null, createdAt: r.createdAt as number | null }))]; return c.json({ admins }) })
 admin.post("/admins", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const body = await c.req.json<{ email?: string; role?: AdminRole }>().catch(() => ({} as { email?: string; role?: AdminRole })); const email = String(body.email ?? "").trim().toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: "invalid email" }, 400); const role = normalizeAdminRole(body.role); const db = getDb(c.env.DB); if (adminEmailSet(c.env).has(email)) return c.json({ error: "already configured via ADMIN_EMAILS" }, 400); await db.delete(schema.adminEmails).where(eq(schema.adminEmails.email, email)).run().catch(() => {}); await db.insert(schema.adminEmails).values({ email, role, addedBy: c.get("userEmail") ?? null, createdAt: nowSeconds() }).run(); await logAction(c, db, "admin.add", "admin", email, role); return c.json({ ok: true }) })
 admin.delete("/admins/:email", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const email = decodeURIComponent(c.req.param("email")).toLowerCase(); if (adminEmailSet(c.env).has(email)) return c.json({ error: "managed via ADMIN_EMAILS config" }, 400); const db = getDb(c.env.DB); await db.delete(schema.adminEmails).where(eq(schema.adminEmails.email, email)).run(); await logAction(c, db, "admin.remove", "admin", email, null); return c.json({ ok: true }) })
+admin.get("/ip-bans", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const db = getDb(c.env.DB); return c.json({ bans: await getIpBans(db) }) })
+admin.post("/ip-bans", async (c) => {
+  const denied = await forbidUnless(c, "owner")
+  if (denied) return denied
+  const body = await c.req.json<{ ip?: string; note?: string | null }>().catch(() => ({} as { ip?: string; note?: string | null }))
+  const db = getDb(c.env.DB)
+  const ip = normalizeIp(body.ip ?? null)
+  if (!ip) return c.json({ error: "invalid ip" }, 400)
+  const bans = await addIpBan(db, ip, body.note?.slice(0, 200) ?? null, c.get("userEmail") ?? null)
+  await logAction(c, db, "ip_ban.add", "ip", ip, body.note?.slice(0, 200) ?? null)
+  return c.json({ ok: true, bans })
+})
+admin.delete("/ip-bans/:ip", async (c) => {
+  const denied = await forbidUnless(c, "owner")
+  if (denied) return denied
+  const raw = decodeURIComponent(c.req.param("ip"))
+  const ip = normalizeIp(raw)
+  if (!ip) return c.json({ error: "invalid ip" }, 400)
+  const db = getDb(c.env.DB)
+  const bans = await removeIpBan(db, ip, c.get("userEmail") ?? null)
+  await logAction(c, db, "ip_ban.remove", "ip", ip, null)
+  return c.json({ ok: true, bans })
+})
 admin.get("/settings", async (c) => { const db = getDb(c.env.DB); return c.json({ settings: await settingsMap(db) }) })
 admin.post("/settings", async (c) => { const denied = await forbidUnless(c, "owner"); if (denied) return denied; const body = await c.req.json<SettingsBody>().catch(() => ({} as SettingsBody)); const db = getDb(c.env.DB); for (const key of settingsKeys) { if (!(key in body)) continue; let value = String(body[key] ?? ""); if (key === "signupMode") value = value === "approval" ? "approval" : "open"; await db.delete(schema.appSettings).where(eq(schema.appSettings.key, key)).run().catch(() => {}); await db.insert(schema.appSettings).values({ key, value, updatedBy: c.get("userEmail"), updatedAt: nowSeconds() }).run() } await logAction(c, db, "settings.update", "settings", null, settingsKeys.filter((key) => key in body).join(", ")); return c.json({ ok: true, settings: await settingsMap(db) }) })
 admin.get("/audit", async (c) => { const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500); const actor = c.req.query("actor")?.toLowerCase(); const action = c.req.query("action"); const targetType = c.req.query("targetType"); const db = getDb(c.env.DB); let rows = await db.select().from(schema.auditLog).orderBy(desc(schema.auditLog.createdAt)).limit(limit).all(); if (actor) rows = rows.filter((r) => (r.actorEmail ?? "").toLowerCase().includes(actor)); if (action) rows = rows.filter((r) => r.action === action); if (targetType) rows = rows.filter((r) => r.targetType === targetType); return c.json({ entries: rows.map((r) => ({ id: r.id, actorEmail: r.actorEmail, action: r.action, targetType: r.targetType, targetId: r.targetId, detail: r.detail, createdAt: r.createdAt })) }) })
