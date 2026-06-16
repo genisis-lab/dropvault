@@ -5,6 +5,9 @@ import { nowSeconds } from "../lib/expiry"
 import { requireAuth } from "../middleware/auth"
 import type { Bindings, Variables } from "../types"
 
+type TeamRole = "owner" | "admin" | "member" | "viewer" | string
+type TeamListItem = typeof schema.teams.$inferSelect & { role: TeamRole }
+
 const teams = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 teams.use("*", requireAuth)
 
@@ -21,10 +24,10 @@ teams.get("/", async (c) => {
   const userId = c.get("userId")
   const owned = await db.select().from(schema.teams).where(eq(schema.teams.ownerId, userId)).orderBy(desc(schema.teams.createdAt)).all().catch(() => [])
   const memberships = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, userId)).all().catch(() => [])
-  const allTeams = [...owned.map((t) => ({ ...t, role: "owner" } as const))]
+  const allTeams: TeamListItem[] = owned.map((t) => ({ ...t, role: "owner" }))
   for (const m of memberships) {
     const team = await db.select().from(schema.teams).where(eq(schema.teams.id, m.teamId)).get().catch(() => null)
-    if (team && team.ownerId !== userId) allTeams.push({ ...team, role: m.role } as const)
+    if (team && team.ownerId !== userId) allTeams.push({ ...team, role: m.role })
   }
   return c.json({ teams: allTeams })
 })

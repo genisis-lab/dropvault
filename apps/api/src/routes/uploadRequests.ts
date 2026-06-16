@@ -41,9 +41,14 @@ function isUploadFileLike(value: unknown): value is UploadFileLike {
   return typeof v.name === "string" && typeof v.size === "number" && typeof v.stream === "function"
 }
 function uploadFilesFrom(form: FormData): UploadFileLike[] {
-  const values = [...form.getAll("files"), ...form.getAll("file")]
+  const out: UploadFileLike[] = []
   const seen = new Set<unknown>()
-  return values.filter((v) => { if (seen.has(v)) return false; seen.add(v); return true }).filter(isUploadFileLike)
+  for (const value of [...form.getAll("files"), ...form.getAll("file")]) {
+    if (seen.has(value)) continue
+    seen.add(value)
+    if (isUploadFileLike(value)) out.push(value)
+  }
+  return out
 }
 async function workspacePolicy(db: ReturnType<typeof getDb>) {
   const rows = await db.select().from(schema.appSettings).all().catch(() => [])
