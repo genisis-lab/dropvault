@@ -11,6 +11,7 @@ import uploadRequestsRoute from "./routes/uploadRequests"
 import notificationsRoute from "./routes/notifications"
 import sessionsRoute from "./routes/sessions"
 import teamsRoute from "./routes/teams"
+import portalRequestsRoute from "./routes/portalRequests"
 import { isIpBanned } from "./lib/ipAccess"
 import { clientIp } from "./lib/rateLimit"
 import { sweepExpired } from "./lib/sweep"
@@ -28,9 +29,6 @@ app.use("*", async (c, next) => {
   return handler(c, next)
 })
 
-// Owner-managed IP bans apply globally (including sign-in and public links), but
-// we keep health checks reachable so deployment verification and uptime probes
-// still work from anywhere.
 app.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname
   if (path === "/health" || path === "/api/health") return next()
@@ -63,6 +61,7 @@ app.route("/api/upload-requests", uploadRequestsRoute)
 app.route("/api/notifications", notificationsRoute)
 app.route("/api/sessions", sessionsRoute)
 app.route("/api/teams", teamsRoute)
+app.route("/api/portal-requests", portalRequestsRoute)
 app.route("/api/account", accountRoute)
 app.route("/api/admin", adminRoute)
 
