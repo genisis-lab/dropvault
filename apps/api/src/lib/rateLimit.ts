@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { nowSeconds } from "./expiry"
+import { normalizeIp } from "./ipAccess"
 
 export type RateLimitResult = { allowed: boolean; retryAfter: number }
 
@@ -30,11 +31,30 @@ export async function checkRateLimit(
   }
 }
 
-// Best-effort client IP for rate-limit keys. Cloudflare sets CF-Connecting-IP.
+function forwardedForCandidates(header: string | undefined): string[] {
+  if (!header) return []
+  const out: string[] = []
+  for (const match of header.matchAll(/for=("?\[[^\]]+]"?|"?[^;,\s"]+"?)/gi)) {
+    out.push(match[1].replace(/^"|"$/g, ""))
+  }
+  return out
+}
+
+// Best-effort client IP for rate-limit keys and admin/audit capture.
+// Cloudflare sets CF-Connecting-IP for both IPv4 and IPv6. The fallbacks cover
+// common proxy headers and normalize IPv4, IPv6, IPv4-with-port, bracketed IPv6,
+// and IPv4-mapped IPv6 into one comparable value.
 export function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  const cf = c.req.header("CF-Connecting-IP")
-  if (cf) return cf
-  const xff = c.req.header("X-Forwarded-For")
-  if (xff) return xff.split(",")[0]?.trim() || "unknown"
+  const candidates = [
+    c.req.header("CF-Connecting-IP"),
+    c.req.header("True-Client-IP"),
+    c.req.header("X-Real-IP"),
+    ...(c.req.header("X-Forwarded-For") ?? "").split(","),
+    ...forwardedForCandidates(c.req.header("Forwarded")),
+  ]
+  for (const candidate of candidates) {
+    const ip = normalizeIp(candidate)
+    if (ip) return ip
+  }
   return "unknown"
 }
