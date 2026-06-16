@@ -1,6 +1,7 @@
 import type { Bindings } from "../types"
 
 export const DAY_SECONDS = 60 * 60 * 24
+export const FOREVER_EXPIRES_AT = 253402300799 // 9999-12-31T23:59:59Z
 
 export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
