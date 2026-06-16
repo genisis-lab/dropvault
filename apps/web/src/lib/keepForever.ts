@@ -1,7 +1,18 @@
 const API = import.meta.env.VITE_API_URL ?? ""
 
 async function j<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+  if (!res.ok) {
+    let detail = ""
+    try {
+      detail = ((await res.json()) as { error?: string }).error ?? ""
+    } catch {
+      detail = ""
+    }
+    // Cloudflare serves over HTTP/2 where statusText is always empty, and Hono's
+    // default 404/500 pages are plain text (no JSON .error). Fall back to the
+    // status code so failures are diagnosable instead of showing a blank error.
+    throw new Error(detail || `Request failed (HTTP ${res.status})`)
+  }
   return res.json() as Promise<T>
 }
 
