@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 // ---------------------------------------------------------------------------
 // better-auth core tables (user / session / account / verification).
@@ -54,13 +54,21 @@ export const folders = sqliteTable("folders", {
   id: text("id").primaryKey(),
   ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  parentId: text("parent_id"),
+  color: text("color"),
+  teamId: text("team_id"),
   shareToken: text("share_token"),
   sharePassword: text("share_password"),
   shareDownloadLimit: integer("share_download_limit"),
   shareDownloadCount: integer("share_download_count").notNull().default(0),
   shareExpiresAt: integer("share_expires_at"),
+  shareAccessMode: text("share_access_mode").default("download"),
+  shareOneTime: integer("share_one_time", { mode: "boolean" }).default(false),
+  shareAllowlist: text("share_allowlist"),
+  shareIpAllowlist: text("share_ip_allowlist"),
+  shareCountryAllowlist: text("share_country_allowlist"),
   createdAt: integer("created_at").notNull(),
-})
+}, (t) => ({ parentIdx: index("idx_folders_parent").on(t.parentId), teamIdx: index("idx_folders_team").on(t.teamId) }))
 
 export type FolderRow = typeof folders.$inferSelect
 
@@ -71,20 +79,27 @@ export const files = sqliteTable("files", {
   r2Key: text("r2_key").notNull(),
   sizeBytes: integer("size_bytes").notNull().default(0),
   contentType: text("content_type"),
+  contentHash: text("content_hash"),
   status: text("status").notNull().default("pending"),
   shareToken: text("share_token"),
   folderId: text("folder_id"),
+  teamId: text("team_id"),
   sharePassword: text("share_password"),
   shareDownloadLimit: integer("share_download_limit"),
   shareDownloadCount: integer("share_download_count").notNull().default(0),
   shareExpiresAt: integer("share_expires_at"),
+  shareAccessMode: text("share_access_mode").default("download"),
+  shareOneTime: integer("share_one_time", { mode: "boolean" }).default(false),
+  shareAllowlist: text("share_allowlist"),
+  shareIpAllowlist: text("share_ip_allowlist"),
+  shareCountryAllowlist: text("share_country_allowlist"),
   createdAt: integer("created_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
   favorite: integer("favorite", { mode: "boolean" }).notNull().default(false),
   tags: text("tags"),
   deletedAt: integer("deleted_at"),
   versionGroupId: text("version_group_id"),
-})
+}, (t) => ({ hashIdx: index("idx_files_content_hash").on(t.ownerId, t.contentHash), teamIdx: index("idx_files_team").on(t.teamId) }))
 
 export type FileRow = typeof files.$inferSelect
 
@@ -161,10 +176,15 @@ export const uploadRequests = sqliteTable("upload_requests", {
   instructions: text("instructions"),
   password: text("password"),
   maxFileSize: integer("max_file_size"),
+  totalMaxBytes: integer("total_max_bytes"),
   allowedTypes: text("allowed_types"),
   uploadLimit: integer("upload_limit"),
   uploadCount: integer("upload_count").notNull().default(0),
   requireEmail: integer("require_email", { mode: "boolean" }).notNull().default(false),
+  status: text("status").default("open"),
+  moderationMode: text("moderation_mode").default("auto"),
+  thankYouMessage: text("thank_you_message"),
+  closeAfterFirstUpload: integer("close_after_first_upload", { mode: "boolean" }).default(false),
   expiresAt: integer("expires_at"),
   createdAt: integer("created_at").notNull(),
   revokedAt: integer("revoked_at"),
@@ -178,8 +198,14 @@ export const publicUploads = sqliteTable("public_uploads", {
   fileId: text("file_id").references(() => files.id, { onDelete: "set null" }),
   uploaderEmail: text("uploader_email"),
   uploaderName: text("uploader_name"),
+  status: text("status").default("approved"),
+  filename: text("filename"),
+  sizeBytes: integer("size_bytes"),
+  contentType: text("content_type"),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: integer("reviewed_at"),
   createdAt: integer("created_at").notNull(),
-})
+}, (t) => ({ requestIdx: index("idx_public_uploads_request").on(t.requestId, t.createdAt), statusIdx: index("idx_public_uploads_status").on(t.status) }))
 
 export type PublicUploadRow = typeof publicUploads.$inferSelect
 
@@ -194,6 +220,54 @@ export const fileVersions = sqliteTable("file_versions", {
 })
 
 export type FileVersionRow = typeof fileVersions.$inferSelect
+
+export const shareEvents = sqliteTable("share_events", {
+  id: text("id").primaryKey(),
+  token: text("token").notNull(),
+  fileId: text("file_id"),
+  folderId: text("folder_id"),
+  event: text("event").notNull(),
+  ip: text("ip"),
+  country: text("country"),
+  userAgent: text("user_agent"),
+  referer: text("referer"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ tokenIdx: index("idx_share_events_token").on(t.token, t.createdAt), fileIdx: index("idx_share_events_file").on(t.fileId, t.createdAt), folderIdx: index("idx_share_events_folder").on(t.folderId, t.createdAt) }))
+
+export type ShareEventRow = typeof shareEvents.$inferSelect
+
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message"),
+  targetType: text("target_type"),
+  targetId: text("target_id"),
+  readAt: integer("read_at"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ userIdx: index("idx_notifications_user").on(t.userId, t.createdAt) }))
+
+export type NotificationRow = typeof notifications.$inferSelect
+
+export const teams = sqliteTable("teams", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at").notNull(),
+})
+
+export type TeamRow = typeof teams.$inferSelect
+
+export const teamMembers = sqliteTable("team_members", {
+  id: text("id").primaryKey(),
+  teamId: text("team_id").notNull().references(() => teams.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ uniqueMember: uniqueIndex("idx_team_members_unique").on(t.teamId, t.userId) }))
+
+export type TeamMemberRow = typeof teamMembers.$inferSelect
 
 export const rateLimits = sqliteTable("rate_limits", {
   key: text("key").primaryKey(),
