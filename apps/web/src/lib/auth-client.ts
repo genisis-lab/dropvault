@@ -6,7 +6,16 @@ import { twoFactorClient } from "better-auth/client/plugins"
 // ever point the web app directly at the Worker.
 export const authClient = createAuthClient({
   baseURL: import.meta.env.VITE_API_URL ?? window.location.origin,
-  plugins: [twoFactorClient()],
+  plugins: [
+    twoFactorClient({
+      onTwoFactorRedirect() {
+        try {
+          sessionStorage.setItem("dropvault:two-factor-required", "1")
+          window.dispatchEvent(new CustomEvent("dropvault:two-factor-required"))
+        } catch {}
+      },
+    }),
+  ],
 })
 
 export const { signIn, signUp, signOut, useSession } = authClient
