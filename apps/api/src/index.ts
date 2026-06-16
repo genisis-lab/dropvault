@@ -1,12 +1,15 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createAuth } from "./auth"
+import { getDb } from "./db"
 import filesRoute from "./routes/files"
 import foldersRoute from "./routes/folders"
 import shareRoute from "./routes/share"
 import adminRoute from "./routes/admin"
 import accountRoute from "./routes/account"
 import uploadRequestsRoute from "./routes/uploadRequests"
+import { isIpBanned } from "./lib/ipAccess"
+import { clientIp } from "./lib/rateLimit"
 import { sweepExpired } from "./lib/sweep"
 import type { Bindings, Variables } from "./types"
 
@@ -20,6 +23,17 @@ app.use("*", async (c, next) => {
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
   return handler(c, next)
+})
+
+// Owner-managed IP bans apply globally (including sign-in and public links), but
+// we keep health checks reachable so deployment verification and uptime probes
+// still work from anywhere.
+app.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname
+  if (path === "/health" || path === "/api/health") return next()
+  const banned = await isIpBanned(getDb(c.env.DB), clientIp(c)).catch(() => false)
+  if (!banned) return next()
+  return path.startsWith("/api/share/") ? c.text("forbidden", 403) : c.json({ error: "ip banned" }, 403)
 })
 
 app.use("/api/share/*", async (c, next) => {
