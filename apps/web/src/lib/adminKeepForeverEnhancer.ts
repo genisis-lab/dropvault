@@ -14,6 +14,7 @@ type AdminUser = {
 type UserDetailResponse = { user: AdminUser }
 
 let busy = false
+let lastProfileUser: AdminUser | null = null
 const ROLE_DEFAULTS = new Set(["owner", "admin", "moderator"])
 
 function canRun() {
@@ -25,6 +26,22 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
+function installFetchCapture() {
+  if (!canRun() || (window as any).__dropvaultKeepForeverFetchCapture) return
+  ;(window as any).__dropvaultKeepForeverFetchCapture = true
+  const originalFetch = window.fetch.bind(window)
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const res = await originalFetch(input, init)
+    try {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+      if (/\/api\/admin\/users\/[^/?#]+/.test(url) && !url.includes("/bulk")) {
+        res.clone().json().then((data: UserDetailResponse) => { if (data?.user?.id) { lastProfileUser = data.user; void enhance(true) } }).catch(() => {})
+      }
+    } catch {}
+    return res
+  }
+}
+
 function text(el: Element | null | undefined) {
   return (el?.textContent ?? "").trim()
 }
@@ -32,7 +49,7 @@ function text(el: Element | null | undefined) {
 function profileRoot(): HTMLElement | null {
   const backButton = Array.from(document.querySelectorAll("button")).find((button) => text(button).toLowerCase().includes("back to users"))
   if (!backButton) return null
-  return (backButton.closest(".space-y-5") as HTMLElement | null) ?? (backButton.parentElement?.parentElement as HTMLElement | null) ?? document.body
+  return (backButton.parentElement as HTMLElement | null) ?? document.body
 }
 
 function findProfileEmail(root: HTMLElement): string | null {
@@ -71,14 +88,21 @@ function roleLabel(role: AdminRole) {
 }
 
 async function loadProfileUser(root: HTMLElement): Promise<AdminUser | null> {
+  const email = findProfileEmail(root)
+  if (lastProfileUser && (!email || lastProfileUser.email.toLowerCase() === email.toLowerCase())) return lastProfileUser
   const id = findUserIdFromRequest()
   if (id) {
-    try { return (await json<UserDetailResponse>(await fetch(`${API}/api/admin/users/${encodeURIComponent(id)}`, { credentials: "include" }))).user } catch {}
+    try {
+      const user = (await json<UserDetailResponse>(await fetch(`${API}/api/admin/users/${encodeURIComponent(id)}`, { credentials: "include" }))).user
+      lastProfileUser = user
+      return user
+    } catch {}
   }
-  const email = findProfileEmail(root)
   if (!email) return null
   const users = (await json<{ users: AdminUser[] }>(await fetch(`${API}/api/admin/users`, { credentials: "include" }))).users ?? []
-  return users.find((row) => row.email.toLowerCase() === email.toLowerCase()) ?? null
+  const user = users.find((row) => row.email.toLowerCase() === email.toLowerCase()) ?? null
+  if (user) lastProfileUser = user
+  return user
 }
 
 function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
@@ -88,14 +112,14 @@ function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
   const canToggle = !roleDefault
   const nextAllowed = !directGrant
   panel.innerHTML = `
-    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Keep files forever</h4>
+    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Keep files forever setting</h4>
     <div class="mt-2 flex flex-wrap items-center gap-2">
       <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${pillClasses(enabled)}">${enabled ? "Enabled" : "Disabled"}</span>
       ${roleDefault ? `<span class="rounded-full bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700">Default for ${roleLabel(user.role)}</span>` : ""}
       ${directGrant ? `<span class="rounded-full bg-drift-500/10 px-2 py-0.5 text-[11px] font-semibold text-drift-700">Direct grant</span>` : ""}
     </div>
-    <p class="mt-2 text-sm text-slate-600">${roleDefault ? "Owner, admin, and moderator accounts can keep files forever by default. This profile shows that the permission is active because of their role." : enabled ? "This user has a direct keep-forever grant and can upload files without an expiry date." : "This user needs a direct grant before they can upload files without an expiry date."}</p>
-    <button data-keep-forever-toggle="true" ${canToggle && !saving ? "" : "disabled"} class="mt-3 rounded-lg ${nextAllowed ? "bg-drift-500 text-white hover:bg-drift-600" : "border border-red-200 text-red-600 hover:bg-red-50"} px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50">${saving ? "Saving…" : roleDefault ? "Enabled by role" : nextAllowed ? "Grant keep-forever" : "Remove keep-forever"}</button>
+    <p class="mt-2 text-sm text-slate-600">${roleDefault ? "Owner, admin, and moderator accounts can keep files forever by default. This profile shows that the permission is active because of their role." : enabled ? "This direct admin setting lets the user upload files without an expiry date, even if they never requested it." : "Turn this setting on to grant keep-forever permission immediately without waiting for a request."}</p>
+    <button data-keep-forever-toggle="true" ${canToggle && !saving ? "" : "disabled"} class="mt-3 rounded-lg ${nextAllowed ? "bg-drift-500 text-white hover:bg-drift-600" : "border border-red-200 text-red-600 hover:bg-red-50"} px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50">${saving ? "Saving…" : roleDefault ? "Enabled by role" : nextAllowed ? "Grant permission now" : "Remove permission"}</button>
   `
   const button = panel.querySelector<HTMLButtonElement>("[data-keep-forever-toggle]")
   button?.addEventListener("click", async () => {
@@ -109,6 +133,7 @@ function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
         body: JSON.stringify({ allowed: nextAllowed }),
       }))
       const updated = (await json<UserDetailResponse>(await fetch(`${API}/api/admin/users/${encodeURIComponent(user.id)}`, { credentials: "include" }))).user
+      lastProfileUser = updated
       renderPanel(panel, updated)
     } catch (err) {
       renderPanel(panel, user)
@@ -117,7 +142,7 @@ function renderPanel(panel: HTMLElement, user: AdminUser, saving = false) {
   })
 }
 
-async function enhance() {
+async function enhance(force = false) {
   if (!canRun() || busy) return
   const root = profileRoot()
   if (!root) return
@@ -128,13 +153,13 @@ async function enhance() {
   try {
     const user = await loadProfileUser(root)
     if (!user) return
-    if (existing?.dataset.userId === user.id) return
+    if (!force && existing?.dataset.userId === user.id) return
     const panel = existing ?? document.createElement("div")
     panel.dataset.adminKeepForeverProfile = "true"
     panel.dataset.userId = user.id
     panel.className = "rounded-xl border border-slate-200 p-4"
     renderPanel(panel, user)
-    storageCard.insertAdjacentElement("afterend", panel)
+    if (!existing) storageCard.insertAdjacentElement("afterend", panel)
   } catch {
     // The current user may not have admin access yet or the admin panel may not be open.
   } finally {
@@ -143,9 +168,10 @@ async function enhance() {
 }
 
 if (canRun()) {
+  installFetchCapture()
   const observer = new MutationObserver(() => { void enhance() })
   observer.observe(document.body, { childList: true, subtree: true })
-  window.addEventListener("focus", () => { void enhance() })
+  window.addEventListener("focus", () => { void enhance(true) })
   window.setInterval(() => { void enhance() }, 1000)
   void enhance()
 }
