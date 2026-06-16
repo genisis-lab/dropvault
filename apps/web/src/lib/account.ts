@@ -10,6 +10,9 @@ export type AccountStatus = {
   // null means unlimited storage (admins and the owner).
   quotaBytes: number | null
   isAdmin: boolean
+  adminRole?: string | null
+  keepFilesForever?: boolean
+  canKeepFilesForever?: boolean
 }
 
 export async function accountStatus(): Promise<AccountStatus> {
