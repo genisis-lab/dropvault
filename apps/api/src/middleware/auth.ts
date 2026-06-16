@@ -2,6 +2,8 @@ import { createMiddleware } from "hono/factory"
 import { eq } from "drizzle-orm"
 import { createAuth } from "../auth"
 import { getDb, schema } from "../db"
+import { clientIpInfo } from "../lib/rateLimit"
+import { nowSeconds } from "../lib/expiry"
 import type { Bindings, Variables } from "../types"
 
 // Validates the better-auth session and attaches userId/userEmail.
@@ -27,6 +29,26 @@ export const requireAuth = createMiddleware<{ Bindings: Bindings; Variables: Var
     }
     c.set("userId", session.user.id)
     c.set("userEmail", session.user.email)
+
+    // Store both IP families when proxy headers expose both. Better Auth's
+    // session.ipAddress is a single value, so keep that as the primary display IP
+    // while also saving ip_v4/ip_v6 plus an append-only observation row.
+    try {
+      const info = clientIpInfo(c)
+      const sessionId = String((session as any)?.session?.id ?? "")
+      const path = new URL(c.req.url).pathname.slice(0, 500)
+      if (sessionId) {
+        await c.env.DB.prepare("UPDATE session SET ipAddress = ?, ip_v4 = ?, ip_v6 = ? WHERE id = ?")
+          .bind(info.primary === "unknown" ? null : info.primary, info.ipv4, info.ipv6, sessionId)
+          .run()
+          .catch(() => {})
+      }
+      await c.env.DB.prepare("INSERT INTO ip_observations (id, user_id, primary_ip, ip_v4, ip_v6, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), session.user.id, info.primary === "unknown" ? null : info.primary, info.ipv4, info.ipv6, path, nowSeconds())
+        .run()
+        .catch(() => {})
+    } catch {}
+
     await next()
   },
 )
