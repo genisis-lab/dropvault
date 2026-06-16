@@ -3,11 +3,21 @@ import { and, desc, eq, gt, isNull } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS } from "../lib/expiry"
 import { hashSecret } from "../lib/hash"
+import { clientIp } from "../lib/rateLimit"
 import { requireAuth } from "../middleware/auth"
 import { adminRole } from "../middleware/admin"
 import type { Bindings, Variables } from "../types"
 
-type ShareBody = { password?: string | null; downloadLimit?: number | null; expiresInDays?: number | null }
+type ShareBody = {
+  password?: string | null
+  downloadLimit?: number | null
+  expiresInDays?: number | null
+  accessMode?: "download" | "preview" | "disabled"
+  oneTime?: boolean
+  allowlist?: string[] | string | null
+  ipAllowlist?: string[] | string | null
+  countryAllowlist?: string[] | string | null
+}
 
 const files = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 files.use("*", requireAuth)
@@ -43,7 +53,7 @@ function typeAllowed(type: string | null, allowed: string[]): boolean {
 }
 async function logActivity(c: any, db: ReturnType<typeof getDb>, action: string, targetId: string, detail: string | null) {
   try {
-    await db.insert(schema.activityLog).values({ id: crypto.randomUUID(), userId: c.get("userId") ?? null, actorEmail: c.get("userEmail") ?? null, action, targetType: "file", targetId, detail, ip: c.req.header("CF-Connecting-IP") ?? null, userAgent: c.req.header("User-Agent") ?? null, createdAt: nowSeconds() }).run()
+    await db.insert(schema.activityLog).values({ id: crypto.randomUUID(), userId: c.get("userId") ?? null, actorEmail: c.get("userEmail") ?? null, action, targetType: "file", targetId, detail, ip: clientIp(c), userAgent: c.req.header("User-Agent") ?? null, createdAt: nowSeconds() }).run()
   } catch {}
 }
 function parseTags(raw: string | null): string[] {
@@ -54,11 +64,18 @@ function serializeTags(input: unknown): string | null {
   const tags = input.map((x) => String(x).trim()).filter(Boolean).slice(0, 20)
   return JSON.stringify(Array.from(new Set(tags)).map((x) => x.slice(0, 40)))
 }
+function serializeList(input: unknown): string | null {
+  if (input == null) return null
+  const arr = Array.isArray(input) ? input : String(input).split(/[\n,]/)
+  const values = arr.map((x) => String(x).trim()).filter(Boolean).slice(0, 100)
+  return values.length ? JSON.stringify(Array.from(new Set(values))) : null
+}
+function accessMode(input: unknown): string { return ["download", "preview", "disabled"].includes(String(input)) ? String(input) : "download" }
 function safeFile(row: any) { const { sharePassword, tags, ...r } = row; return { ...r, tags: parseTags(tags ?? null), shareHasPassword: !!sharePassword } }
 
 files.post("/presign", async (c) => {
   const userId = c.get("userId")
-  const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null }>()
+  const body = await c.req.json<{ filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; folderId?: string | null; contentHash?: string | null }>()
   if (!body?.filename) return c.json({ error: "filename required" }, 400)
   const sizeBytes = normalizeUploadSize(body.sizeBytes)
   if (sizeBytes == null) return c.json({ error: "valid file size required" }, 400)
@@ -83,13 +100,15 @@ files.post("/presign", async (c) => {
     const used = owned.reduce((s, f) => s + (f.status === "ready" ? f.sizeBytes || 0 : 0), 0)
     if (used + sizeBytes > quotaLimit) return c.json({ error: "storage quota exceeded" }, 413)
   }
+  const contentHash = body.contentHash ? String(body.contentHash).trim().slice(0, 128) : null
+  const duplicate = contentHash ? await db.select().from(schema.files).where(and(eq(schema.files.ownerId, userId), eq(schema.files.contentHash, contentHash), eq(schema.files.sizeBytes, sizeBytes), eq(schema.files.status, "ready"), isNull(schema.files.deletedAt))).get().catch(() => null) : null
   const id = crypto.randomUUID()
   const r2Key = `${userId}/${id}`
   const createdAt = nowSeconds()
   const expiresAt = computeExpiresAt(c.env, createdAt, body.expiryDays)
-  await db.insert(schema.files).values({ id, ownerId: userId, filename: body.filename.trim().slice(0, 255), r2Key, sizeBytes, contentType, status: "pending", folderId, versionGroupId: id, createdAt, expiresAt }).run()
-  await logActivity(c, db, "file.presign", id, body.filename)
-  return c.json({ id, uploadUrl: `/api/files/${id}/upload`, expiresAt })
+  await db.insert(schema.files).values({ id, ownerId: userId, filename: body.filename.trim().slice(0, 255), r2Key, sizeBytes, contentType, contentHash, status: "pending", folderId, versionGroupId: id, createdAt, expiresAt }).run()
+  await logActivity(c, db, duplicate ? "file.presign.duplicate" : "file.presign", id, body.filename)
+  return c.json({ id, uploadUrl: `/api/files/${id}/upload`, expiresAt, duplicateOf: duplicate?.id ?? null })
 })
 
 async function loadPendingOwned(c: any, id: string) {
@@ -228,11 +247,21 @@ files.post("/:id/share", async (c) => {
   if (!row) return c.json({ error: "not found" }, 404)
   const token = row.shareToken ?? crypto.randomUUID().replace(/-/g, "")
   const update: Record<string, unknown> = { shareToken: token }
-  const hasOptions = "password" in body || "downloadLimit" in body || "expiresInDays" in body
-  if (hasOptions) { update.sharePassword = body.password ? await hashSecret(String(body.password)) : null; update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null; update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null; update.shareDownloadCount = 0 }
+  const hasOptions = "password" in body || "downloadLimit" in body || "expiresInDays" in body || "accessMode" in body || "oneTime" in body || "allowlist" in body || "ipAllowlist" in body || "countryAllowlist" in body
+  if (hasOptions) {
+    update.sharePassword = body.password ? await hashSecret(String(body.password)) : null
+    update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null
+    update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null
+    update.shareAccessMode = accessMode(body.accessMode)
+    update.shareOneTime = !!body.oneTime
+    update.shareAllowlist = serializeList(body.allowlist)
+    update.shareIpAllowlist = serializeList(body.ipAllowlist)
+    update.shareCountryAllowlist = serializeList(body.countryAllowlist)
+    update.shareDownloadCount = 0
+  }
   await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
   await logActivity(c, db, "file.share", id, row.filename)
-  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}`, hasPassword: hasOptions ? !!body.password : !!row.sharePassword, downloadLimit: hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null, shareExpiresAt: hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null })
+  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}`, hasPassword: hasOptions ? !!body.password : !!row.sharePassword, downloadLimit: hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null, shareExpiresAt: hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null, accessMode: hasOptions ? update.shareAccessMode : row.shareAccessMode ?? "download", oneTime: hasOptions ? !!update.shareOneTime : !!row.shareOneTime })
 })
 files.delete("/:id/share", async (c) => {
   const userId = c.get("userId")
@@ -240,9 +269,16 @@ files.delete("/:id/share", async (c) => {
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
-  await db.update(schema.files).set({ shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null }).where(eq(schema.files.id, id)).run()
+  await db.update(schema.files).set({ shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null, shareAccessMode: "download", shareOneTime: false, shareAllowlist: null, shareIpAllowlist: null, shareCountryAllowlist: null }).where(eq(schema.files.id, id)).run()
   await logActivity(c, db, "file.revoke", id, row.filename)
   return c.json({ ok: true })
+})
+files.get("/:id/share/events", async (c) => {
+  const { db, row } = await loadReadyOwned(c, c.req.param("id"))
+  if (!row) return c.json({ error: "not found" }, 404)
+  const events = await db.select().from(schema.shareEvents).where(eq(schema.shareEvents.fileId, row.id)).orderBy(desc(schema.shareEvents.createdAt)).limit(200).all().catch(() => [])
+  const summary = events.reduce((acc, ev) => { acc[ev.event] = (acc[ev.event] ?? 0) + 1; return acc }, {} as Record<string, number>)
+  return c.json({ events, summary })
 })
 files.get("/:id/versions", async (c) => {
   const userId = c.get("userId")
@@ -252,6 +288,32 @@ files.get("/:id/versions", async (c) => {
   if (!row) return c.json({ error: "not found" }, 404)
   const versions = await db.select().from(schema.fileVersions).where(eq(schema.fileVersions.versionGroupId, row.versionGroupId ?? row.id)).orderBy(desc(schema.fileVersions.versionNumber)).all().catch(() => [])
   return c.json({ versions })
+})
+files.get("/:id/versions/:versionId/download", async (c) => {
+  const { db, row } = await loadReadyOwned(c, c.req.param("id"))
+  if (!row) return c.json({ error: "not found" }, 404)
+  const version = await db.select().from(schema.fileVersions).where(eq(schema.fileVersions.id, c.req.param("versionId"))).get().catch(() => null)
+  if (!version || version.versionGroupId !== (row.versionGroupId ?? row.id)) return c.json({ error: "version not found" }, 404)
+  const object = await c.env.FILES.get(version.r2Key)
+  if (!object) return c.json({ error: "version object missing" }, 404)
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `attachment; filename=\"v${version.versionNumber}-${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("X-Content-Type-Options", "nosniff")
+  return new Response(object.body, { headers })
+})
+files.post("/:id/versions/:versionId/restore", async (c) => {
+  const { db, row } = await loadReadyOwned(c, c.req.param("id"))
+  if (!row) return c.json({ error: "not found" }, 404)
+  const version = await db.select().from(schema.fileVersions).where(eq(schema.fileVersions.id, c.req.param("versionId"))).get().catch(() => null)
+  if (!version || version.versionGroupId !== (row.versionGroupId ?? row.id)) return c.json({ error: "version not found" }, 404)
+  const object = await c.env.FILES.get(version.r2Key)
+  if (!object) return c.json({ error: "version object missing" }, 404)
+  const newKey = `${row.ownerId}/${row.id}/restore-${crypto.randomUUID()}`
+  await c.env.FILES.put(newKey, object.body, row.contentType ? { httpMetadata: { contentType: row.contentType } } : undefined)
+  const versions = await db.select().from(schema.fileVersions).where(eq(schema.fileVersions.versionGroupId, row.versionGroupId ?? row.id)).all().catch(() => [])
+  const nextVersion = Math.max(0, ...versions.map((v) => v.versionNumber)) + 1
+  await db.update(schema.files).set({ r2Key: newKey, sizeBytes: version.sizeBytes, status: "ready" }).where(eq(schema.files.id, row.id)).run()
+  await db.insert(schema.fileVersions).values({ id: crypto.randomUUID(), fileId: row.id, versionGroupId: row.versionGroupId ?? row.id, versionNumber: nextVersion, r2Key: newKey, sizeBytes: version.sizeBytes, createdAt: nowSeconds() }).run()
+  await logActivity(c, db, "file.version.restore", row.id, `restored v${version.versionNumber}`)
+  return c.json({ ok: true, versionNumber: nextVersion })
 })
 files.patch("/:id", async (c) => {
   const userId = c.get("userId")
