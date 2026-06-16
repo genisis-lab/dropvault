@@ -9,23 +9,95 @@ export type IpBanEntry = {
   createdBy: string | null
 }
 
+function cleanIpCandidate(raw: string | null | undefined): string {
+  let value = String(raw ?? "").trim().toLowerCase()
+  if (!value) return ""
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1).trim()
+
+  // Forwarded/proxy headers sometimes include bracketed IPv6 with a port:
+  // [2001:db8::10]:443. Store and compare the address only.
+  const bracketed = /^\[([^\]]+)](?::\d+)?$/.exec(value)
+  if (bracketed) value = bracketed[1]
+
+  // IPv4 may arrive with a proxy-added port, e.g. 203.0.113.10:443.
+  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(value)) value = value.replace(/:\d+$/, "")
+
+  // Drop IPv6 zone identifiers such as fe80::1%eth0. These are not useful for
+  // allowlists/banlists and would make otherwise identical addresses compare
+  // differently.
+  const zone = value.indexOf("%")
+  if (zone !== -1) value = value.slice(0, zone)
+  return value
+}
+
+function normalizeIpv4(value: string): string | null {
+  const parts = value.split(".")
+  if (parts.length !== 4) return null
+  const nums = parts.map((part) => (/^\d+$/.test(part) ? Number(part) : NaN))
+  if (nums.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null
+  return nums.join(".")
+}
+
+function normalizeIpv6(value: string): string | null {
+  if (!value.includes(":")) return null
+  if (!/^[0-9a-f:]+$/.test(value)) return null
+  if (value.includes(":::")) return null
+  const pieces = value.split("::")
+  if (pieces.length > 2) return null
+  const left = pieces[0] ? pieces[0].split(":") : []
+  const right = pieces[1] ? pieces[1].split(":") : []
+  const groups = [...left, ...right]
+  if (groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null
+  if (pieces.length === 1 && groups.length !== 8) return null
+  if (pieces.length === 2 && groups.length >= 8) return null
+  const normalizeGroup = (g: string) => g.replace(/^0+([0-9a-f])/, "$1").replace(/^0+$/, "0")
+  return pieces.length === 1
+    ? groups.map(normalizeGroup).join(":")
+    : `${left.map(normalizeGroup).join(":")}::${right.map(normalizeGroup).join(":")}`
+}
+
 export function normalizeIp(raw: string | null | undefined): string | null {
-  const value = String(raw ?? "").trim().toLowerCase()
+  const value = cleanIpCandidate(raw)
   if (!value) return null
-  const stripped = value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value
-  if (stripped.includes(".")) {
-    const parts = stripped.split(".")
-    if (parts.length !== 4) return null
-    const nums = parts.map((part) => (/^\d+$/.test(part) ? Number(part) : NaN))
-    if (nums.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null
-    return nums.join(".")
-  }
-  if (stripped.includes(":")) {
-    if (!/^[0-9a-f:.]+$/.test(stripped)) return null
-    if (!/^[0-9a-f:.]*:[0-9a-f:.]*$/.test(stripped)) return null
-    return stripped
-  }
-  return null
+
+  // Cloudflare/proxies can report IPv4 clients as IPv4-mapped IPv6.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(value)
+  if (mapped) return normalizeIpv4(mapped[1])
+
+  if (value.includes(".")) return normalizeIpv4(value)
+  return normalizeIpv6(value)
+}
+
+function ipv4ToInt(ip: string): number | null {
+  const normalized = normalizeIpv4(ip)
+  if (!normalized) return null
+  return normalized.split(".").reduce((acc, part) => ((acc << 8) + Number(part)) >>> 0, 0)
+}
+
+function ipv4MatchesCidr(ip: string, cidr: string): boolean {
+  const [baseRaw, prefixRaw] = cidr.split("/")
+  const prefix = Number(prefixRaw)
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false
+  const ipInt = ipv4ToInt(ip)
+  const baseInt = ipv4ToInt(baseRaw)
+  if (ipInt == null || baseInt == null) return false
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0
+  return (ipInt & mask) === (baseInt & mask)
+}
+
+// Exact IPv4/IPv6 allowlist matching, with optional IPv4 CIDR support. This is
+// used by share links so a visitor coming through Cloudflare as IPv4, IPv6, or
+// IPv4-mapped IPv6 can be compared consistently against the owner's allowlist.
+export function ipMatchesAllowlist(rawIp: string | null | undefined, allowlist: string[]): boolean {
+  if (!allowlist.length) return true
+  const ip = normalizeIp(rawIp)
+  if (!ip) return false
+  return allowlist.some((entry) => {
+    const value = String(entry ?? "").trim().toLowerCase()
+    if (!value) return false
+    if (value.includes("/") && ip.includes(".")) return ipv4MatchesCidr(ip, value)
+    return normalizeIp(value) === ip
+  })
 }
 
 export function parseIpBans(raw: string | null | undefined): IpBanEntry[] {
