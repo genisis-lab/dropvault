@@ -8,6 +8,9 @@ import shareRoute from "./routes/share"
 import adminRoute from "./routes/admin"
 import accountRoute from "./routes/account"
 import uploadRequestsRoute from "./routes/uploadRequests"
+import notificationsRoute from "./routes/notifications"
+import sessionsRoute from "./routes/sessions"
+import teamsRoute from "./routes/teams"
 import { isIpBanned } from "./lib/ipAccess"
 import { clientIp } from "./lib/rateLimit"
 import { sweepExpired } from "./lib/sweep"
@@ -57,6 +60,9 @@ app.route("/api/share", shareRoute)
 app.route("/api/files", filesRoute)
 app.route("/api/folders", foldersRoute)
 app.route("/api/upload-requests", uploadRequestsRoute)
+app.route("/api/notifications", notificationsRoute)
+app.route("/api/sessions", sessionsRoute)
+app.route("/api/teams", teamsRoute)
 app.route("/api/account", accountRoute)
 app.route("/api/admin", adminRoute)
 
