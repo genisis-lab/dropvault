@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS, FOREVER_EXPIRES_AT } from "../lib/expiry"
 import { hashSecret } from "../lib/hash"
@@ -35,6 +35,33 @@ function addInlineSecurityHeaders(headers: Headers): void {
   headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; sandbox")
   headers.set("X-Content-Type-Options", "nosniff")
   headers.set("Referrer-Policy", "no-referrer")
+}
+// Parse a single-range HTTP Range header ("bytes=start-end" or suffix
+// "bytes=-N"). Returns null for absent/unsatisfiable/multi-range requests so the
+// caller falls back to a normal 200 full-body response.
+function parseRange(header: string | null, size: number): { offset: number; length: number; end: number } | null {
+  if (!header || size <= 0) return null
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!m) return null
+  const startRaw = m[1]
+  const endRaw = m[2]
+  if (startRaw === "" && endRaw === "") return null
+  let start: number
+  let end: number
+  if (startRaw === "") {
+    const n = Number(endRaw)
+    if (!Number.isFinite(n) || n <= 0) return null
+    start = Math.max(0, size - n)
+    end = size - 1
+  } else {
+    start = Number(startRaw)
+    if (!Number.isFinite(start) || start < 0) return null
+    end = endRaw === "" ? size - 1 : Number(endRaw)
+    if (!Number.isFinite(end)) return null
+    end = Math.min(end, size - 1)
+  }
+  if (start > end || start >= size) return null
+  return { offset: start, length: end - start + 1, end }
 }
 async function settings(db: ReturnType<typeof getDb>) {
   const rows = await db.select().from(schema.appSettings).all().catch(() => [])
@@ -217,8 +244,31 @@ files.get("/", async (c) => {
   const userId = c.get("userId")
   const includeTrash = c.req.query("trash") === "true"
   const db = getDb(c.env.DB)
-  const rows = await db.select().from(schema.files).where(and(eq(schema.files.ownerId, userId), eq(schema.files.status, "ready"), gt(schema.files.expiresAt, nowSeconds()), includeTrash ? gt(schema.files.deletedAt, 0) : isNull(schema.files.deletedAt))).orderBy(desc(schema.files.createdAt)).all()
-  return c.json({ files: rows.map(safeFile) })
+  const limitParam = Number(c.req.query("limit"))
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 200) : null
+  const conds: any[] = [eq(schema.files.ownerId, userId), eq(schema.files.status, "ready"), gt(schema.files.expiresAt, nowSeconds()), includeTrash ? gt(schema.files.deletedAt, 0) : isNull(schema.files.deletedAt)]
+  // Keyset cursor: `${createdAt}_${id}`. With createdAt DESC, id DESC ordering,
+  // the next page is everything strictly "after" the cursor row.
+  const cursorRaw = limit ? (c.req.query("cursor") || "") : ""
+  if (limit && cursorRaw) {
+    const sep = cursorRaw.lastIndexOf("_")
+    const cTime = Number(cursorRaw.slice(0, sep))
+    const cId = cursorRaw.slice(sep + 1)
+    if (sep > 0 && Number.isFinite(cTime) && cId) {
+      conds.push(or(lt(schema.files.createdAt, cTime), and(eq(schema.files.createdAt, cTime), lt(schema.files.id, cId))))
+    }
+  }
+  let query: any = db.select().from(schema.files).where(and(...conds)).orderBy(desc(schema.files.createdAt), desc(schema.files.id))
+  if (limit) query = query.limit(limit + 1)
+  const rowsAll = await query.all()
+  let rows = rowsAll
+  let nextCursor: string | null = null
+  if (limit && rowsAll.length > limit) {
+    rows = rowsAll.slice(0, limit)
+    const last = rows[rows.length - 1]
+    nextCursor = `${last.createdAt}_${last.id}`
+  }
+  return c.json({ files: rows.map(safeFile), nextCursor })
 })
 async function loadReadyOwned(c: any, id: string) {
   const userId = c.get("userId")
@@ -231,10 +281,16 @@ files.get("/:id/download", async (c) => {
   const { db, row } = await loadReadyOwned(c, id)
   if (!row || row.status !== "ready") return c.json({ error: "not found" }, 404)
   if (isExpired(row.expiresAt)) { try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); return c.json({ error: "expired" }, 410) }
-  const object = await c.env.FILES.get(row.r2Key)
+  const head = await c.env.FILES.head(row.r2Key)
+  if (!head) return c.json({ error: "not found" }, 404)
+  const size = head.size
+  const range = parseRange(c.req.header("Range") ?? null, size)
+  const object = await c.env.FILES.get(row.r2Key, range ? { range: { offset: range.offset, length: range.length } } : undefined)
   if (!object) return c.json({ error: "not found" }, 404)
-  await logActivity(c, db, "file.download", id, row.filename)
-  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `attachment; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("X-Content-Type-Options", "nosniff")
+  if (!range || range.offset === 0) await logActivity(c, db, "file.download", id, row.filename)
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Disposition", `attachment; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("X-Content-Type-Options", "nosniff"); headers.set("Accept-Ranges", "bytes")
+  if (range) { headers.set("Content-Range", `bytes ${range.offset}-${range.end}/${size}`); headers.set("Content-Length", String(range.length)); return new Response(object.body, { status: 206, headers }) }
+  headers.set("Content-Length", String(size))
   return new Response(object.body, { headers })
 })
 files.get("/:id/inline", async (c) => {
@@ -248,9 +304,13 @@ files.get("/:id/inline", async (c) => {
   const etag = meta.httpEtag
   const inm = c.req.header("If-None-Match")
   if (etag && inm && inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "private, max-age=3600" } })
-  const object = await c.env.FILES.get(row.r2Key)
+  const size = meta.size
+  const range = parseRange(c.req.header("Range") ?? null, size)
+  const object = await c.env.FILES.get(row.r2Key, range ? { range: { offset: range.offset, length: range.length } } : undefined)
   if (!object) return c.json({ error: "not found" }, 404)
-  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `inline; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("Cache-Control", "private, max-age=3600"); if (etag) headers.set("ETag", etag); addInlineSecurityHeaders(headers)
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Disposition", `inline; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("Cache-Control", "private, max-age=3600"); headers.set("Accept-Ranges", "bytes"); if (etag) headers.set("ETag", etag); addInlineSecurityHeaders(headers)
+  if (range) { headers.set("Content-Range", `bytes ${range.offset}-${range.end}/${size}`); headers.set("Content-Length", String(range.length)); return new Response(object.body, { status: 206, headers }) }
+  headers.set("Content-Length", String(size))
   return new Response(object.body, { headers })
 })
 files.put("/:id/thumbnail", async (c) => {
