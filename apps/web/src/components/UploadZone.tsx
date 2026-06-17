@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { AlertCircle, CheckCircle2, FolderUp, Infinity, RotateCw, UploadCloud } from "lucide-react"
-import { complete, MULTIPART_THRESHOLD, presign, uploadLargeFile, uploadToR2, uploadUrlFor } from "../lib/api"
+import { complete, generateAndUploadThumbnail, MULTIPART_THRESHOLD, presign, uploadLargeFile, uploadToR2, uploadUrlFor } from "../lib/api"
 import { accountStatus } from "../lib/account"
 import { formatBytes } from "../lib/format"
 
@@ -138,6 +138,11 @@ export default function UploadZone({
             }
             await complete(id)
           })
+        }
+        // Best-effort: generate a small cached thumbnail so the grid/list never
+        // has to download the full-size image (fixes slow/failed 12MB previews).
+        if (file.type.startsWith("image/")) {
+          await generateAndUploadThumbnail(id, file).catch(() => {})
         }
         setJobs((j) => (j[key] ? { ...j, [key]: { ...j[key], pct: 100, state: "done" } } : j))
         onUploaded()
