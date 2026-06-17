@@ -28,12 +28,25 @@ function accessDeniedPage(msg: string): string { return infoPage("Access restric
 function isImageType(type: string | null): boolean { return !!type && type.startsWith("image/") }
 function isVideoType(type: string | null): boolean { return !!type && type.startsWith("video/") }
 function isInlineSafeType(type: string | null): boolean { return !!type && (type.startsWith("image/") || type.startsWith("video/") || type.includes("pdf")) }
-// Inline (preview) responses get a locked-down CSP. allow-same-origin is
-// required so the media document is NOT forced into an opaque origin, which
-// otherwise blocks <video> playback/seeking and the "Open original" view.
-// allow-scripts is deliberately omitted, so inline user content still cannot
-// execute JavaScript.
-function addShareInlineSecurityHeaders(headers: Headers): void { headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; sandbox allow-same-origin"); headers.set("X-Content-Type-Options", "nosniff"); headers.set("Referrer-Policy", "no-referrer") }
+// Decide the security headers for an inline (preview) response.
+//
+// Script-capable document types (SVG/HTML/XML, or an unknown type) are fully
+// sandboxed so an untrusted upload can never execute JavaScript in our origin.
+//
+// Inert media (raster image / video / audio / pdf) is NOT sandboxed: the
+// browser's built-in player/viewer needs to run a script for its controls, and
+// a blanket sandbox breaks playback ("frame is sandboxed and the allow-scripts
+// permission is not set"). Because we always send an explicit Content-Type plus
+// X-Content-Type-Options: nosniff, the bytes can never be reinterpreted as
+// executable HTML, so dropping the sandbox introduces no XSS vector.
+function addShareInlineSecurityHeaders(headers: Headers, contentType: string | null): void {
+  headers.set("X-Content-Type-Options", "nosniff")
+  headers.set("Referrer-Policy", "no-referrer")
+  const type = (contentType ?? "").toLowerCase()
+  const scriptable = !type || type.includes("svg") || type.includes("html") || type.includes("xml")
+  if (scriptable) { headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; base-uri 'none'; frame-ancestors 'none'; sandbox") }
+  else { headers.set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'self'; frame-ancestors 'none'") }
+}
 // Best-effort MIME lookup from a filename extension. Used as a fallback when
 // R2 stored no Content-Type (or a generic octet-stream), which otherwise makes
 // browsers refuse to play media inline.
@@ -109,7 +122,7 @@ async function streamShare(c: any, key: string, filename: string, attachment: bo
   headers.set("Content-Disposition", `${attachment ? "attachment" : "inline"}; filename="${filename.replace(/["\\]/g, "_")}"`)
   headers.set("Accept-Ranges", "bytes")
   if (attachment) { headers.set("Cache-Control", "private, max-age=0, no-store"); headers.set("X-Content-Type-Options", "nosniff") }
-  else { headers.set("Cache-Control", "private, max-age=300"); addShareInlineSecurityHeaders(headers) }
+  else { headers.set("Cache-Control", "private, max-age=300"); addShareInlineSecurityHeaders(headers, resolved) }
   if (range) { headers.set("Content-Range", `bytes ${range.offset}-${range.end}/${size}`); headers.set("Content-Length", String(range.length)); return new Response(object.body, { status: 206, headers }) }
   headers.set("Content-Length", String(size))
   return new Response(object.body, { headers })
