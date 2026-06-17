@@ -62,6 +62,47 @@ async function sha256Hex(file: File): Promise<string | null> {
 }
 export async function fileContentHash(file: File) { return sha256Hex(file) }
 
+// Generate a small JPEG thumbnail for an image entirely in the browser so the
+// dashboard never has to download full-resolution images just to show previews.
+// Returns null for non-images or when the browser can't decode the file.
+export async function generateImageThumbnail(file: File, maxSize = 400): Promise<Blob | null> {
+  if (!file.type.startsWith("image/") || typeof createImageBitmap !== "function") return null
+  let bitmap: ImageBitmap | null = null
+  try {
+    bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height))
+    const w = Math.max(1, Math.round(bitmap.width * scale))
+    const h = Math.max(1, Math.round(bitmap.height * scale))
+    if (typeof OffscreenCanvas === "function") {
+      const canvas = new OffscreenCanvas(w, h)
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return null
+      ctx.drawImage(bitmap, 0, 0, w, h)
+      return await canvas.convertToBlob({ type: "image/jpeg", quality: 0.72 })
+    }
+    const canvas = document.createElement("canvas")
+    canvas.width = w; canvas.height = h
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return null
+    ctx.drawImage(bitmap, 0, 0, w, h)
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72))
+  } catch {
+    return null
+  } finally {
+    bitmap?.close?.()
+  }
+}
+
+export async function uploadThumbnail(id: string, blob: Blob): Promise<void> {
+  await fetch(`${API}/api/files/${id}/thumbnail`, { method: "PUT", credentials: "include", headers: { "Content-Type": "image/jpeg" }, body: blob })
+}
+
+// Best-effort: build a thumbnail and upload it. Never throws — a missing thumbnail
+// just falls back to the full image on the server side.
+export async function generateAndUploadThumbnail(id: string, file: File): Promise<void> {
+  try { const thumb = await generateImageThumbnail(file); if (thumb && thumb.size > 0) await uploadThumbnail(id, thumb) } catch {}
+}
+
 export async function listFiles(opts?: { trash?: boolean }): Promise<DriftFile[]> {
   const qs = opts?.trash ? "?trash=true" : ""
   const res = await fetch(`${API}/api/files${qs}`, { credentials: "include" })
@@ -97,6 +138,7 @@ export async function permanentDeleteFile(id: string) { return j<{ ok: true }>(a
 export async function fileVersions(id: string) { return (await j<{ versions: FileVersion[] }>(await fetch(`${API}/api/files/${id}/versions`, { credentials: "include" }))).versions }
 export function downloadUrl(id: string) { return `${API}/api/files/${id}/download` }
 export function inlineUrl(id: string) { return `${API}/api/files/${id}/inline` }
+export function thumbUrl(id: string) { return `${API}/api/files/${id}/thumbnail` }
 export function versionDownloadUrl(id: string, versionId: string) { return `${API}/api/files/${id}/versions/${versionId}/download` }
 export async function restoreFileVersion(id: string, versionId: string) { return j<{ ok: true; versionNumber: number }>(await fetch(`${API}/api/files/${id}/versions/${versionId}/restore`, { method: "POST", credentials: "include" })) }
 
