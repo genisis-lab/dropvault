@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { createAuth } from "../auth"
 import { getDb, schema } from "../db"
 import { adminRole } from "../middleware/admin"
@@ -46,6 +46,25 @@ account.get("/me", async (c) => {
     keepFilesForever: !!u?.keepFilesForever,
     canKeepFilesForever,
   })
+})
+
+// A signed-in user's own activity trail. Scoped strictly to their userId and
+// deliberately omits IP / user-agent (those stay admin-only via /api/admin).
+account.get("/activity", async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user) return c.json({ error: "unauthorized" }, 401)
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 50, 1), 200)
+  const db = getDb(c.env.DB)
+  const rows = await db
+    .select()
+    .from(schema.activityLog)
+    .where(eq(schema.activityLog.userId, session.user.id))
+    .orderBy(desc(schema.activityLog.createdAt))
+    .limit(limit)
+    .all()
+    .catch(() => [])
+  return c.json({ entries: rows.map((r) => ({ id: r.id, action: r.action, targetType: r.targetType, targetId: r.targetId, detail: r.detail, createdAt: r.createdAt })) })
 })
 
 export default account
