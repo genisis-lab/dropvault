@@ -15,7 +15,7 @@ import portalRequestsRoute from "./routes/portalRequests"
 import keepForeverRoute from "./routes/keepForever"
 import { isIpBanned } from "./lib/ipAccess"
 import { clientIp } from "./lib/rateLimit"
-import { sweepExpired } from "./lib/sweep"
+import { sweepExpired, reconcileOrphans } from "./lib/sweep"
 import type { Bindings, Variables } from "./types"
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
@@ -50,8 +50,18 @@ app.use("/api/share/*", async (c, next) => {
   c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 })
 
-app.get("/health", (c) => c.json({ ok: true, service: "dropvault-api" }))
-app.get("/api/health", (c) => c.json({ ok: true, service: "dropvault-api" }))
+// Deep health check: round-trips D1 and R2 so monitoring catches a broken
+// binding or missing migration instead of a static ok. Returns 503 when any
+// dependency is unreachable.
+async function healthCheck(c: { env: Bindings; json: (body: unknown, status?: number) => Response }): Promise<Response> {
+  const checks: Record<string, "ok" | "error"> = { d1: "ok", r2: "ok" }
+  let ok = true
+  try { await c.env.DB.prepare("SELECT 1").first() } catch { checks.d1 = "error"; ok = false }
+  try { await c.env.FILES.head("__healthcheck__") } catch { checks.r2 = "error"; ok = false }
+  return c.json({ ok, service: "dropvault-api", checks }, ok ? 200 : 503)
+}
+app.get("/health", (c) => healthCheck(c))
+app.get("/api/health", (c) => healthCheck(c))
 
 app.on(["GET", "POST"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw))
 
@@ -70,6 +80,9 @@ app.route("/api/admin", adminRoute)
 export default {
   fetch: app.fetch,
   scheduled: async (_event: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
-    ctx.waitUntil(sweepExpired(env))
+    ctx.waitUntil((async () => {
+      try { await sweepExpired(env) } catch (err) { console.error("[cron] sweepExpired failed", err) }
+      try { await reconcileOrphans(env) } catch (err) { console.error("[cron] reconcileOrphans failed", err) }
+    })())
   },
 }
