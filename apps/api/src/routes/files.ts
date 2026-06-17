@@ -14,6 +14,7 @@ type ShareBody = {
   expiresInDays?: number | null
   accessMode?: "download" | "preview" | "disabled"
   oneTime?: boolean
+  embed?: boolean
   allowlist?: string[] | string | null
   ipAllowlist?: string[] | string | null
   countryAllowlist?: string[] | string | null
@@ -81,7 +82,7 @@ function serializeList(input: unknown): string | null {
   return values.length ? JSON.stringify(Array.from(new Set(values))) : null
 }
 function accessMode(input: unknown): string { return ["download", "preview", "disabled"].includes(String(input)) ? String(input) : "download" }
-function safeFile(row: any) { const { sharePassword, tags, ...r } = row; return { ...r, tags: parseTags(tags ?? null), shareHasPassword: !!sharePassword, keepForever: !!row.keepForever } }
+function safeFile(row: any) { const { sharePassword, tags, ...r } = row; return { ...r, tags: parseTags(tags ?? null), shareHasPassword: !!sharePassword, shareEmbed: row.shareEmbed !== false, keepForever: !!row.keepForever } }
 
 files.post("/presign", async (c) => {
   const userId = c.get("userId")
@@ -299,13 +300,14 @@ files.post("/:id/share", async (c) => {
   if (!row) return c.json({ error: "not found" }, 404)
   const token = row.shareToken ?? crypto.randomUUID().replace(/-/g, "")
   const update: Record<string, unknown> = { shareToken: token }
-  const hasOptions = "password" in body || "downloadLimit" in body || "expiresInDays" in body || "accessMode" in body || "oneTime" in body || "allowlist" in body || "ipAllowlist" in body || "countryAllowlist" in body
+  const hasOptions = "password" in body || "downloadLimit" in body || "expiresInDays" in body || "accessMode" in body || "oneTime" in body || "embed" in body || "allowlist" in body || "ipAllowlist" in body || "countryAllowlist" in body
   if (hasOptions) {
     update.sharePassword = body.password ? await hashSecret(String(body.password)) : null
     update.shareDownloadLimit = typeof body.downloadLimit === "number" && body.downloadLimit > 0 ? Math.floor(body.downloadLimit) : null
     update.shareExpiresAt = typeof body.expiresInDays === "number" && body.expiresInDays > 0 ? nowSeconds() + Math.round(body.expiresInDays * DAY_SECONDS) : null
     update.shareAccessMode = accessMode(body.accessMode)
     update.shareOneTime = !!body.oneTime
+    update.shareEmbed = body.embed !== false
     update.shareAllowlist = serializeList(body.allowlist)
     update.shareIpAllowlist = serializeList(body.ipAllowlist)
     update.shareCountryAllowlist = serializeList(body.countryAllowlist)
@@ -313,7 +315,7 @@ files.post("/:id/share", async (c) => {
   }
   await db.update(schema.files).set(update).where(eq(schema.files.id, id)).run()
   await logActivity(c, db, "file.share", id, row.filename)
-  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}`, hasPassword: hasOptions ? !!body.password : !!row.sharePassword, downloadLimit: hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null, shareExpiresAt: hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null, accessMode: hasOptions ? update.shareAccessMode : row.shareAccessMode ?? "download", oneTime: hasOptions ? !!update.shareOneTime : !!row.shareOneTime })
+  return c.json({ token, url: `${c.env.PUBLIC_APP_URL}/api/share/${token}`, hasPassword: hasOptions ? !!body.password : !!row.sharePassword, downloadLimit: hasOptions ? (update.shareDownloadLimit as number | null) : row.shareDownloadLimit ?? null, shareExpiresAt: hasOptions ? (update.shareExpiresAt as number | null) : row.shareExpiresAt ?? null, accessMode: hasOptions ? update.shareAccessMode : row.shareAccessMode ?? "download", oneTime: hasOptions ? !!update.shareOneTime : !!row.shareOneTime, embed: hasOptions ? (update.shareEmbed as boolean) : row.shareEmbed !== false })
 })
 files.delete("/:id/share", async (c) => {
   const userId = c.get("userId")
@@ -321,7 +323,7 @@ files.delete("/:id/share", async (c) => {
   const db = getDb(c.env.DB)
   const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get()
   if (!row) return c.json({ error: "not found" }, 404)
-  await db.update(schema.files).set({ shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null, shareAccessMode: "download", shareOneTime: false, shareAllowlist: null, shareIpAllowlist: null, shareCountryAllowlist: null }).where(eq(schema.files.id, id)).run()
+  await db.update(schema.files).set({ shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null, shareAccessMode: "download", shareOneTime: false, shareEmbed: true, shareAllowlist: null, shareIpAllowlist: null, shareCountryAllowlist: null }).where(eq(schema.files.id, id)).run()
   await logActivity(c, db, "file.revoke", id, row.filename)
   return c.json({ ok: true })
 })
@@ -384,6 +386,46 @@ files.post("/bulk-keep-forever", async (c) => {
     count++
   }
   await logActivity(c, db, enable ? "file.keepForever.bulk" : "file.unkeepForever.bulk", ids[0], `${count} file${count === 1 ? "" : "s"}`)
+  return c.json({ ok: true, count })
+})
+files.post("/bulk", async (c) => {
+  const userId = c.get("userId")
+  const body = await c.req.json<{ action?: string; ids?: string[]; folderId?: string | null; tags?: string[] }>().catch(() => ({} as { action?: string; ids?: string[]; folderId?: string | null; tags?: string[] }))
+  const action = String(body.action || "")
+  const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string").slice(0, 500) : []
+  if (ids.length === 0) return c.json({ error: "no files selected" }, 400)
+  const allowed = ["trash", "restore", "permanentDelete", "favorite", "unfavorite", "move", "tags"]
+  if (!allowed.includes(action)) return c.json({ error: "unsupported bulk action" }, 400)
+  const db = getDb(c.env.DB)
+  let targetFolderId: string | null = null
+  if (action === "move" && body.folderId) {
+    const folder = await db.select().from(schema.folders).where(and(eq(schema.folders.id, body.folderId), eq(schema.folders.ownerId, userId))).get().catch(() => null)
+    if (!folder) return c.json({ error: "folder not found" }, 404)
+    targetFolderId = body.folderId
+  }
+  const tags = action === "tags" ? serializeTags(body.tags) : null
+  let count = 0
+  for (const id of ids) {
+    const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get().catch(() => null)
+    if (!row) continue
+    if (action === "trash") {
+      await db.update(schema.files).set({ deletedAt: nowSeconds(), shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null }).where(eq(schema.files.id, id)).run()
+    } else if (action === "restore") {
+      await db.update(schema.files).set({ deletedAt: null }).where(eq(schema.files.id, id)).run()
+    } else if (action === "permanentDelete") {
+      try { await c.env.FILES.delete(row.r2Key) } catch {}
+      try { await c.env.FILES.delete(thumbKey(row.r2Key)) } catch {}
+      await db.delete(schema.files).where(eq(schema.files.id, id)).run()
+    } else if (action === "favorite" || action === "unfavorite") {
+      await db.update(schema.files).set({ favorite: action === "favorite" }).where(eq(schema.files.id, id)).run()
+    } else if (action === "move") {
+      await db.update(schema.files).set({ folderId: targetFolderId }).where(eq(schema.files.id, id)).run()
+    } else if (action === "tags") {
+      await db.update(schema.files).set({ tags }).where(eq(schema.files.id, id)).run()
+    }
+    count++
+  }
+  await logActivity(c, db, `file.bulk.${action}`, ids[0], `${count} file${count === 1 ? "" : "s"}`)
   return c.json({ ok: true, count })
 })
 files.patch("/:id", async (c) => {
