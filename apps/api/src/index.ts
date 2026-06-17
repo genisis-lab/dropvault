@@ -44,7 +44,7 @@ app.use("/api/share/*", async (c, next) => {
   try { decoded = decodeURIComponent(sharePath) } catch { return c.text("not found", 404) }
   if (!/^[A-Za-z0-9/_-]*$/.test(decoded)) return c.text("not found", 404)
   await next()
-  c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms allow-downloads allow-popups")
+  c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-same-origin allow-forms allow-downloads allow-popups")
   c.header("X-Content-Type-Options", "nosniff")
   c.header("Referrer-Policy", "no-referrer")
   c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
