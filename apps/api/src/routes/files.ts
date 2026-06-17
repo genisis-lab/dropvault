@@ -27,6 +27,9 @@ function normalizeUploadSize(value: unknown): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null
 }
 function isInlineSafeContentType(type: string | null): boolean { return !!type && (type.startsWith("image/") || type.includes("pdf")) }
+function isImageContentType(type: string | null): boolean { return !!type && type.startsWith("image/") }
+function thumbKey(r2Key: string): string { return `${r2Key}/thumb` }
+const THUMB_MAX_BYTES = 2 * 1024 * 1024
 function addInlineSecurityHeaders(headers: Headers): void {
   headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; sandbox")
   headers.set("X-Content-Type-Options", "nosniff")
@@ -239,9 +242,49 @@ files.get("/:id/inline", async (c) => {
   if (!row || row.status !== "ready") return c.json({ error: "not found" }, 404)
   if (!isInlineSafeContentType(row.contentType)) return c.json({ error: "inline preview not allowed" }, 415)
   if (isExpired(row.expiresAt)) { try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); return c.json({ error: "expired" }, 410) }
+  const meta = await c.env.FILES.head(row.r2Key)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  const etag = meta.httpEtag
+  const inm = c.req.header("If-None-Match")
+  if (etag && inm && inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "private, max-age=3600" } })
   const object = await c.env.FILES.get(row.r2Key)
   if (!object) return c.json({ error: "not found" }, 404)
-  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `inline; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("Cache-Control", "private, max-age=60"); addInlineSecurityHeaders(headers)
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", `inline; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`); headers.set("Cache-Control", "private, max-age=3600"); if (etag) headers.set("ETag", etag); addInlineSecurityHeaders(headers)
+  return new Response(object.body, { headers })
+})
+files.put("/:id/thumbnail", async (c) => {
+  const id = c.req.param("id")
+  const { row } = await loadReadyOwned(c, id)
+  if (!row) return c.json({ error: "not found" }, 404)
+  if (!isImageContentType(row.contentType)) return c.json({ error: "thumbnail only for images" }, 415)
+  const declared = Number(c.req.header("Content-Length") || 0)
+  if (declared && declared > THUMB_MAX_BYTES) return c.json({ error: "thumbnail too large" }, 413)
+  const body = c.req.raw.body
+  if (!body) return c.json({ error: "empty thumbnail" }, 400)
+  const key = thumbKey(row.r2Key)
+  await c.env.FILES.put(key, body, { httpMetadata: { contentType: "image/jpeg" } })
+  const stored = await c.env.FILES.head(key)
+  if (stored && stored.size > THUMB_MAX_BYTES) { try { await c.env.FILES.delete(key) } catch {}; return c.json({ error: "thumbnail too large" }, 413) }
+  return c.json({ ok: true })
+})
+files.get("/:id/thumbnail", async (c) => {
+  const id = c.req.param("id")
+  const { db, row } = await loadReadyOwned(c, id)
+  if (!row || row.status !== "ready") return c.json({ error: "not found" }, 404)
+  if (!isImageContentType(row.contentType)) return c.json({ error: "no thumbnail" }, 415)
+  if (isExpired(row.expiresAt)) { try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); return c.json({ error: "expired" }, 410) }
+  const tKey = thumbKey(row.r2Key)
+  let meta = await c.env.FILES.head(tKey)
+  const usingThumb = !!meta
+  const key = usingThumb ? tKey : row.r2Key
+  if (!meta) meta = await c.env.FILES.head(row.r2Key)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  const etag = meta.httpEtag
+  const inm = c.req.header("If-None-Match")
+  if (etag && inm && inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "private, max-age=604800" } })
+  const object = await c.env.FILES.get(key)
+  if (!object) return c.json({ error: "not found" }, 404)
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("Content-Type", usingThumb ? "image/jpeg" : (row.contentType || "application/octet-stream")); headers.set("Content-Length", String(object.size)); headers.set("Content-Disposition", "inline"); headers.set("Cache-Control", "private, max-age=604800"); if (etag) headers.set("ETag", etag); addInlineSecurityHeaders(headers)
   return new Response(object.body, { headers })
 })
 files.post("/:id/share", async (c) => {
@@ -373,7 +416,7 @@ files.patch("/:id", async (c) => {
   return c.json({ ok: true, file: next ? safeFile(next) : null, expiresAt: next?.expiresAt, folderId: next?.folderId ?? null, filename: next?.filename })
 })
 files.post("/:id/restore", async (c) => { const userId = c.get("userId"); const id = c.req.param("id"); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get(); if (!row) return c.json({ error: "not found" }, 404); await db.update(schema.files).set({ deletedAt: null }).where(eq(schema.files.id, id)).run(); await logActivity(c, db, "file.restore", id, row.filename); return c.json({ ok: true }) })
-files.delete("/:id/permanent", async (c) => { const userId = c.get("userId"); const id = c.req.param("id"); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get(); if (!row) return c.json({ error: "not found" }, 404); try { await c.env.FILES.delete(row.r2Key) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); await logActivity(c, db, "file.deletePermanent", id, row.filename); return c.json({ ok: true }) })
+files.delete("/:id/permanent", async (c) => { const userId = c.get("userId"); const id = c.req.param("id"); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get(); if (!row) return c.json({ error: "not found" }, 404); try { await c.env.FILES.delete(row.r2Key) } catch {}; try { await c.env.FILES.delete(thumbKey(row.r2Key)) } catch {}; await db.delete(schema.files).where(eq(schema.files.id, id)).run(); await logActivity(c, db, "file.deletePermanent", id, row.filename); return c.json({ ok: true }) })
 files.delete("/:id", async (c) => { const userId = c.get("userId"); const id = c.req.param("id"); const db = getDb(c.env.DB); const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get(); if (!row) return c.json({ error: "not found" }, 404); await db.update(schema.files).set({ deletedAt: nowSeconds(), shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null }).where(eq(schema.files.id, id)).run(); await logActivity(c, db, "file.trash", id, row.filename); return c.json({ ok: true }) })
 
 export default files
