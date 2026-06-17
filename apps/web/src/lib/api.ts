@@ -110,6 +110,18 @@ export async function listFiles(opts?: { trash?: boolean }): Promise<DriftFile[]
   return (await j<{ files: DriftFile[] }>(res)).files
 }
 
+// Keyset-paginated listing for infinite scroll. Pass the previous nextCursor to
+// fetch the following page; nextCursor is null when there are no more rows.
+export async function listFilesPage(opts?: { trash?: boolean; limit?: number; cursor?: string | null }): Promise<{ files: DriftFile[]; nextCursor: string | null }> {
+  const params = new URLSearchParams()
+  if (opts?.trash) params.set("trash", "true")
+  if (opts?.limit) params.set("limit", String(opts.limit))
+  if (opts?.cursor) params.set("cursor", opts.cursor)
+  const qs = params.toString() ? `?${params.toString()}` : ""
+  const res = await fetch(`${API}/api/files${qs}`, { credentials: "include" })
+  return j<{ files: DriftFile[]; nextCursor: string | null }>(res)
+}
+
 export async function presign(input: { filename: string; contentType?: string; sizeBytes?: number; expiryDays?: number; keepForever?: boolean; folderId?: string | null; contentHash?: string | null }) {
   const res = await fetch(`${API}/api/files/presign`, {
     method: "POST",
@@ -258,6 +270,7 @@ export async function adminBanIp(ip: string, note?: string | null): Promise<{ ok
 export async function adminUnbanIp(ip: string): Promise<{ ok: true; bans: IpBanEntry[] }> { return j(await fetch(`${API}/api/admin/ip-bans/${encodeURIComponent(ip)}`, { method: "DELETE", credentials: "include" })) }
 export async function adminAudit(limit?: number): Promise<AdminAuditEntry[]> { const qs = limit ? `?limit=${limit}` : ""; return (await j<{ entries: AdminAuditEntry[] }>(await fetch(`${API}/api/admin/audit${qs}`, { credentials: "include" }))).entries }
 export async function adminActivity(limit?: number): Promise<ActivityEntry[]> { const qs = limit ? `?limit=${limit}` : ""; return (await j<{ entries: ActivityEntry[] }>(await fetch(`${API}/api/admin/activity${qs}`, { credentials: "include" }))).entries }
+export async function myActivity(limit?: number): Promise<ActivityEntry[]> { const qs = limit ? `?limit=${limit}` : ""; return (await j<{ entries: ActivityEntry[] }>(await fetch(`${API}/api/account/activity${qs}`, { credentials: "include" }))).entries }
 export async function adminSettings(): Promise<AdminSettings> { return (await j<{ settings: AdminSettings }>(await fetch(`${API}/api/admin/settings`, { credentials: "include" }))).settings }
 export async function adminSaveSettings(settings: AdminSettings): Promise<{ ok: true; settings: AdminSettings }> { return j(await fetch(`${API}/api/admin/settings`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) })) }
 
