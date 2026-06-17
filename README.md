@@ -1,6 +1,6 @@
 # 🌬️ Dropvault
 
-A mini Google Drive that **auto-expires** your files. Upload anything, share with friends, and let it disappear after a couple of days — or keep it up to 30. Built entirely on Cloudflare.
+A mini Google Drive that **auto-expires** your files. Upload anything, organize it into folders, share with friends, and let it disappear after a couple of days — or keep it up to 30 (or forever, if your account allows). Built entirely on Cloudflare.
 
 > The name is a default — rename freely (see **Renaming** below). Other ideas from planning: Ephemera, Vanish, Dropvault, Tempbin, Fadefile.
 
@@ -8,14 +8,52 @@ A mini Google Drive that **auto-expires** your files. Upload anything, share wit
 
 ## ✨ Features
 
+### Accounts & access
 - **Auth your friends will actually use** — email + password *or* one-click Google sign-in (better-auth). Anyone can self-register; no manual allow-listing.
+- **Two-factor authentication (2FA)** — optional TOTP-based 2FA with an enrollment flow and a required-on-login challenge.
+- **Account & security settings** — manage your password, 2FA, and active sessions; revoke other sessions remotely.
+
+### Uploads
 - **Cloudflare-native uploads** — the browser streams to the API Worker, which writes to R2 through its bucket binding with a live progress bar.
+- **Multipart uploads for large files** — big files are split into parts and uploaded in chunks, so multi-GB uploads are reliable and resumable across parts.
+- **Robust multi-file uploads** — bounded-concurrency upload pool with automatic retry (exponential backoff + jitter), permanent-vs-transient error detection, per-file error surfacing, and one-click “Retry failed.” Designed so large batches (30+ files) don’t partially fail.
+- **Folder uploads** — drag in whole directories; the folder tree is traversed and preserved.
+- **Auto-generated thumbnails** — image thumbnails are generated client-side at upload (small JPEG, ~400px) so grids and lists never download full-size originals just to render a preview. Falls back gracefully to the original (or a type icon) when no thumbnail exists.
+
+### Files & organization
+- **Folders** — create folders, move files between them, and browse per-folder views.
+- **Infinite scroll** — My Drive renders files in windows and loads more on scroll, so large libraries stay fast and light.
+- **Search, sort & filters** — filter by type, sort, and search your library instantly.
+- **Tags & favorites** — tag files and star favorites for quick access.
+- **Trash & restore** — deleted files go to Trash where they can be restored or permanently deleted.
+- **Version history** — keep and browse previous versions of a file.
+- **Inline preview** — preview images and PDFs in-app with secure inline headers.
+- **Storage breakdown** — see how your storage is used by file type.
+
+### Sharing
+- **Shareable links** — generate a public link for any file.
+- **Link controls** — optional password protection, link expiry dates, and download-count limits. Revoke a link anytime.
+- **Folder share links** — share an entire folder via a link.
+- **Public upload requests** — request files from others via a public upload portal, no account required for the uploader.
+
+### Expiration
 - **Expiration as defense-in-depth:**
   1. **On-access check** — an expired file is never served (returns `410` and is deleted on the spot).
   2. **Hourly Cron sweep** — a scheduled Worker reclaims expired objects from R2 + rows from D1.
   3. **R2 lifecycle rule** — a 30-day bucket rule as a final backstop.
 - **Per-file expiry** — choose 1 / 2 / 7 / 14 / 30 days at upload, extend later (clamped to 30 days total).
-- **Polished UI** — React + Tailwind, Framer Motion animations, a subtle react-three-fiber 3D backdrop, animated upload progress and live expiry countdowns.
+- **Keep forever** — eligible accounts can mark files to never expire.
+
+### Caching & performance
+- **Browser caching with revalidation** — thumbnails and inline previews are served with `Cache-Control` + `ETag`/`304` revalidation, so reloads serve from the browser cache instead of re-hammering the server. Private files use private (non-shared) caching to keep auth intact.
+
+### Admin & moderation
+- **Admin panel** — admins (configured via `ADMIN_EMAILS`) can manage users and content.
+- **User suspension** and **keep-forever permission grants** for individual users.
+- **IP access controls** — IP observation/logging and IP banning for abuse mitigation.
+
+### UI
+- **Polished UI** — React + Tailwind, Framer Motion animations, a subtle react-three-fiber 3D backdrop, animated upload progress, live expiry countdowns, notifications, and a responsive mobile-friendly layout.
 
 ---
 
@@ -25,14 +63,19 @@ A mini Google Drive that **auto-expires** your files. Upload anything, share wit
 Browser (React SPA, Cloudflare Pages)
   │  1. POST /api/files/presign           ── Worker creates a "pending" row, returns upload URL
   │  2. PUT /api/files/:id/upload          ── Worker streams the file into R2
+  │     (or multipart: create → upload parts → complete, for large files)
   │  3. POST /api/files/:id/complete       ── Worker marks row "ready"
-  │  4. GET /api/files                     ── list live files
-  │  5. GET /api/files/:id/download        ── on-access expiry check → stream from R2
+  │  4. PUT /api/files/:id/thumbnail        ── browser-generated image thumbnail → R2
+  │  5. GET /api/files                     ── list live files
+  │  6. GET /api/files/:id/inline          ── cached inline preview (ETag/304)
+  │  7. GET /api/files/:id/thumbnail        ── cached thumbnail (ETag/304)
+  │  8. GET /api/files/:id/download        ── on-access expiry check → stream from R2
   ▼
 Worker API (Hono, Cloudflare Workers)
-  ├── better-auth  →  D1 (user/session/account/verification)
-  ├── files metadata →  D1 (files)
-  ├── upload/download →  R2 bucket binding
+  ├── better-auth  →  D1 (user/session/account/verification + 2FA)
+  ├── files & folders metadata →  D1
+  ├── upload/download/thumbnails →  R2 bucket binding
+  ├── sharing, upload requests, teams, notifications, admin → D1
   └── scheduled()   →  hourly sweep of expired files
 ```
 
@@ -82,6 +125,7 @@ wrangler d1 create dropvault
 Then open `apps/api/wrangler.toml` and fill in:
 - `database_id` (from the step above)
 - `PUBLIC_APP_URL` (your Pages URL, e.g. `https://dropvault.pages.dev`)
+- `ADMIN_EMAILS` (comma-separated list of admin accounts, optional)
 
 ### 3. Apply the database schema
 
@@ -151,6 +195,8 @@ wrangler pages deploy dist --project-name dropvault
 
 Or connect this GitHub repo to Cloudflare Pages for automatic deploys on every push (build command `pnpm build`, output `apps/web/dist`).
 
+> **Note:** Some features ship across both stacks. Thumbnails, caching, and inline previews require the **API Worker** redeploy (for the routes) *and* the **web** redeploy (for the UI). Features touching the schema (2FA, keep-forever, IP observations, etc.) require running the D1 migrations.
+
 ---
 
 ## ✏️ Renaming from "Dropvault"
@@ -162,6 +208,8 @@ Name references live in: `package.json` files, `apps/api/wrangler.toml` (worker 
 ## 🔐 Notes & trade-offs
 
 - **On-access deletion** means even if the sweep is delayed, no one can ever download an expired file.
-- Uploads and downloads use the Worker R2 binding, so no separate R2 S3 credentials are needed.
+- Uploads and downloads use the Worker R2 binding, so no separate R2 S3 credentials are needed. Large files use R2 multipart uploads through the Worker.
 - Files are namespaced by user (`r2Key = <userId>/<uuid>`), and every API route enforces ownership.
-- For very large files you'd later want multipart uploads or a presigned/direct-upload path; Worker-mediated uploads keep the current app simple and avoid separate S3 credentials.
+- **Thumbnails are generated client-side**, not in the Worker — resizing large (e.g. 12MB) images server-side would exceed Worker CPU limits, and Cloudflare Image Resizing isn’t available on `workers.dev`.
+- **Private files are never cached in a shared/edge cache** keyed by a guessable URL (that would bypass auth). Caching relies on `Cache-Control: private` + the browser cache + `ETag`/`304` revalidation.
+- My Drive uses **client-side windowing (infinite scroll)** rather than server-side pagination, because search, sort, storage totals, and the type breakdown currently assume the full file list. True server-side cursor pagination is a possible future enhancement once those move server-side.
