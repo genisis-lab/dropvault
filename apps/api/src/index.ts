@@ -44,15 +44,20 @@ app.use("/api/share/*", async (c, next) => {
   try { decoded = decodeURIComponent(sharePath) } catch { return c.text("not found", 404) }
   if (!/^[A-Za-z0-9/_-]*$/.test(decoded)) return c.text("not found", 404)
   await next()
-  // Only apply the default hardened CSP when the route handler did not set its
-  // own. streamShare sets a content-type-aware CSP for inline media: inert
-  // media (video/image/audio/pdf) is intentionally served WITHOUT a sandbox so
-  // the browser's native player/viewer (which needs to run a script for its
-  // controls) works. Overwriting it here re-introduced the sandbox and blocked
-  // video playback ("frame is sandboxed and the allow-scripts permission is not
-  // set"), so we must not clobber an existing CSP.
+  // Do not add a CSP sandbox at the share middleware level.
+  //
+  // The browser's native video/PDF/media viewer needs to run its own control
+  // scripts. A response-level `sandbox` directive without allow-scripts breaks
+  // both inline <video> and top-level ?raw=1 playback with:
+  // "Blocked script execution ... because the document's frame is sandboxed".
+  //
+  // The generated share pages are server-rendered by us (filenames are escaped;
+  // no user-provided HTML is executed) and already have a strict CSP with no
+  // script sources. Raw bytes are served with an explicit Content-Type and
+  // nosniff, so they cannot be reinterpreted as HTML. Therefore a sandbox here
+  // is unnecessary and harmful. Keep the rest of the hardening headers.
   if (!c.res.headers.get("Content-Security-Policy")) {
-    c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-same-origin allow-forms allow-downloads allow-popups")
+    c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
   }
   c.header("X-Content-Type-Options", "nosniff")
   c.header("Referrer-Policy", "no-referrer")
