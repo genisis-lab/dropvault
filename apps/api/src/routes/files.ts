@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { and, desc, eq, gt, isNull } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm"
 import { getDb, schema } from "../db"
 import { computeExpiresAt, clampExtension, isExpired, nowSeconds, DAY_SECONDS, FOREVER_EXPIRES_AT } from "../lib/expiry"
 import { hashSecret } from "../lib/hash"
@@ -392,7 +392,7 @@ files.post("/bulk", async (c) => {
   const userId = c.get("userId")
   const body = await c.req.json<{ action?: string; ids?: string[]; folderId?: string | null; tags?: string[] }>().catch(() => ({} as { action?: string; ids?: string[]; folderId?: string | null; tags?: string[] }))
   const action = String(body.action || "")
-  const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string").slice(0, 500) : []
+  const ids = Array.isArray(body.ids) ? Array.from(new Set(body.ids.filter((x): x is string => typeof x === "string"))).slice(0, 500) : []
   if (ids.length === 0) return c.json({ error: "no files selected" }, 400)
   const allowed = ["trash", "restore", "permanentDelete", "favorite", "unfavorite", "move", "tags"]
   if (!allowed.includes(action)) return c.json({ error: "unsupported bulk action" }, 400)
@@ -403,29 +403,31 @@ files.post("/bulk", async (c) => {
     if (!folder) return c.json({ error: "folder not found" }, 404)
     targetFolderId = body.folderId
   }
-  const tags = action === "tags" ? serializeTags(body.tags) : null
-  let count = 0
-  for (const id of ids) {
-    const row = await db.select().from(schema.files).where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId))).get().catch(() => null)
-    if (!row) continue
-    if (action === "trash") {
-      await db.update(schema.files).set({ deletedAt: nowSeconds(), shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null }).where(eq(schema.files.id, id)).run()
-    } else if (action === "restore") {
-      await db.update(schema.files).set({ deletedAt: null }).where(eq(schema.files.id, id)).run()
-    } else if (action === "permanentDelete") {
-      try { await c.env.FILES.delete(row.r2Key) } catch {}
-      try { await c.env.FILES.delete(thumbKey(row.r2Key)) } catch {}
-      await db.delete(schema.files).where(eq(schema.files.id, id)).run()
-    } else if (action === "favorite" || action === "unfavorite") {
-      await db.update(schema.files).set({ favorite: action === "favorite" }).where(eq(schema.files.id, id)).run()
-    } else if (action === "move") {
-      await db.update(schema.files).set({ folderId: targetFolderId }).where(eq(schema.files.id, id)).run()
-    } else if (action === "tags") {
-      await db.update(schema.files).set({ tags }).where(eq(schema.files.id, id)).run()
-    }
-    count++
+  // Restrict to files this user actually owns in a single query, then apply the
+  // mutation with one batched query so the request scales no matter how many
+  // files are selected (a per-item loop blew past the Worker subrequest limit).
+  const owned = await db.select().from(schema.files).where(and(eq(schema.files.ownerId, userId), inArray(schema.files.id, ids))).all().catch(() => [])
+  const ownedIds = owned.map((r) => r.id)
+  if (ownedIds.length === 0) return c.json({ ok: true, count: 0 })
+  const scope = and(eq(schema.files.ownerId, userId), inArray(schema.files.id, ownedIds))
+  if (action === "trash") {
+    await db.update(schema.files).set({ deletedAt: nowSeconds(), shareToken: null, sharePassword: null, shareDownloadLimit: null, shareDownloadCount: 0, shareExpiresAt: null }).where(scope).run()
+  } else if (action === "restore") {
+    await db.update(schema.files).set({ deletedAt: null }).where(scope).run()
+  } else if (action === "permanentDelete") {
+    const keys: string[] = []
+    for (const r of owned) { keys.push(r.r2Key, thumbKey(r.r2Key)) }
+    try { await c.env.FILES.delete(keys) } catch {}
+    await db.delete(schema.files).where(scope).run()
+  } else if (action === "favorite" || action === "unfavorite") {
+    await db.update(schema.files).set({ favorite: action === "favorite" }).where(scope).run()
+  } else if (action === "move") {
+    await db.update(schema.files).set({ folderId: targetFolderId }).where(scope).run()
+  } else if (action === "tags") {
+    await db.update(schema.files).set({ tags: serializeTags(body.tags) }).where(scope).run()
   }
-  await logActivity(c, db, `file.bulk.${action}`, ids[0], `${count} file${count === 1 ? "" : "s"}`)
+  const count = ownedIds.length
+  await logActivity(c, db, `file.bulk.${action}`, ownedIds[0], `${count} file${count === 1 ? "" : "s"}`)
   return c.json({ ok: true, count })
 })
 files.patch("/:id", async (c) => {
