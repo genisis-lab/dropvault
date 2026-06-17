@@ -25,6 +25,7 @@ export type DriftFile = {
   shareExpiresAt?: number | null
   shareAccessMode?: "download" | "preview" | "disabled"
   shareOneTime?: boolean
+  shareEmbed?: boolean
   shareAllowlist?: string | null
   shareIpAllowlist?: string | null
   shareCountryAllowlist?: string | null
@@ -125,6 +126,8 @@ export async function extendFile(id: string, days: number) { return patchFile(id
 export async function keepFileForever(id: string) { return patchFile(id, { keepForever: true }) as Promise<{ ok: true; expiresAt: number; file?: DriftFile | null }> }
 export async function unkeepFileForever(id: string) { return patchFile(id, { keepForever: false }) as Promise<{ ok: true; expiresAt: number; file?: DriftFile | null }> }
 export async function bulkKeepForever(ids: string[], keepForever: boolean) { return j<{ ok: true; count: number }>(await fetch(`${API}/api/files/bulk-keep-forever`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, keepForever }) })) }
+export type BulkFileAction = "trash" | "restore" | "permanentDelete" | "favorite" | "unfavorite" | "move" | "tags"
+export async function bulkFiles(action: BulkFileAction, ids: string[], opts?: { folderId?: string | null; tags?: string[] }) { return j<{ ok: true; count: number }>(await fetch(`${API}/api/files/bulk`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, ...opts }) })) }
 export async function renameFile(id: string, filename: string) { return patchFile(id, { filename }) as Promise<{ ok: true; filename: string }> }
 export async function moveFile(id: string, folderId: string | null) { return patchFile(id, { folderId }) as Promise<{ ok: true }> }
 export async function updateFileMeta(id: string, input: { favorite?: boolean; tags?: string[] }) { return patchFile(id, input) }
@@ -148,11 +151,12 @@ export type ShareOptions = {
   expiresInDays?: number | null
   accessMode?: "download" | "preview" | "disabled"
   oneTime?: boolean
+  embed?: boolean
   allowlist?: string[] | string | null
   ipAllowlist?: string[] | string | null
   countryAllowlist?: string[] | string | null
 }
-export type ShareResult = { token: string; url: string; hasPassword?: boolean; downloadLimit?: number | null; shareExpiresAt?: number | null; accessMode?: string; oneTime?: boolean }
+export type ShareResult = { token: string; url: string; hasPassword?: boolean; downloadLimit?: number | null; shareExpiresAt?: number | null; accessMode?: string; oneTime?: boolean; embed?: boolean }
 export type ShareEvent = { id: string; token: string; fileId?: string | null; folderId?: string | null; event: string; ip?: string | null; country?: string | null; userAgent?: string | null; referer?: string | null; createdAt: number }
 export async function createShare(id: string, options?: ShareOptions): Promise<ShareResult> {
   const res = await fetch(`${API}/api/files/${id}/share`, { method: "POST", credentials: "include", headers: options ? { "Content-Type": "application/json" } : undefined, body: options ? JSON.stringify(options) : undefined })
