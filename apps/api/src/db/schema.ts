@@ -108,6 +108,7 @@ export const files = sqliteTable("files", {
   shareAllowlist: text("share_allowlist"),
   shareIpAllowlist: text("share_ip_allowlist"),
   shareCountryAllowlist: text("share_country_allowlist"),
+  shareEmbed: integer("share_embed", { mode: "boolean" }).default(true),
   createdAt: integer("created_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
   keepForever: integer("keep_forever", { mode: "boolean" }).default(false),
