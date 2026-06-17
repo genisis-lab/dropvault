@@ -44,7 +44,16 @@ app.use("/api/share/*", async (c, next) => {
   try { decoded = decodeURIComponent(sharePath) } catch { return c.text("not found", 404) }
   if (!/^[A-Za-z0-9/_-]*$/.test(decoded)) return c.text("not found", 404)
   await next()
-  c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-same-origin allow-forms allow-downloads allow-popups")
+  // Only apply the default hardened CSP when the route handler did not set its
+  // own. streamShare sets a content-type-aware CSP for inline media: inert
+  // media (video/image/audio/pdf) is intentionally served WITHOUT a sandbox so
+  // the browser's native player/viewer (which needs to run a script for its
+  // controls) works. Overwriting it here re-introduced the sandbox and blocked
+  // video playback ("frame is sandboxed and the allow-scripts permission is not
+  // set"), so we must not clobber an existing CSP.
+  if (!c.res.headers.get("Content-Security-Policy")) {
+    c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-same-origin allow-forms allow-downloads allow-popups")
+  }
   c.header("X-Content-Type-Options", "nosniff")
   c.header("Referrer-Policy", "no-referrer")
   c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
