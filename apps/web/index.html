@@ -7,13 +7,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <script>
-      // Apply the saved theme before first paint to avoid a flash of the wrong theme.
+      // Apply the saved appearance before first paint to avoid a flash of the
+      // wrong theme. No saved preference (or "auto") follows the operating
+      // system's light/dark setting.
       (function () {
         try {
           var t = localStorage.getItem("dropvault-theme")
-          if (t === "dark" || t === "sunset") {
-            document.documentElement.classList.add(t)
+          var systemDark =
+            window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+          var resolved =
+            t === "light" || t === "dark" || t === "sunset"
+              ? t
+              : systemDark
+                ? "dark"
+                : "light"
+          if (resolved === "dark" || resolved === "sunset") {
+            document.documentElement.classList.add(resolved)
             document.documentElement.style.colorScheme = "dark"
+          } else {
+            document.documentElement.style.colorScheme = "light"
           }
         } catch (e) {}
       })()
