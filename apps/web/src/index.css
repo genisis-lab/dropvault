@@ -69,22 +69,3 @@ html.dark .text-drift-600, html.sunset .text-drift-600 { color: #818cf8 !importa
   main [style*="opacity"] { opacity: 1 !important; }
   main [style*="filter"] { filter: none !important; }
 }
-
-/* ── Playground skin (opt-in) ────────────────────────────────────────────
-   A playful, colorful Google-Drive-style re-skin layered on top of the active
-   color theme, so it works in light, dark and sunset. Enabled by adding the
-   `skin-playground` class to <html> (see lib/layout.tsx). Conservative by
-   design: it only adjusts accent glow, borders, radii and shadows — the full
-   Playground layout (nav rail, big New button, type chips, tiles) builds on
-   top of this in a later phase. */
-html.skin-playground { --c-line: 232 230 252; --shadow-sm: 0 2px 8px rgba(99, 102, 241, 0.10); --shadow-lg: 0 18px 44px -14px rgba(124, 58, 237, 0.28), 0 4px 12px rgba(79, 70, 229, 0.10); --glow-a: rgba(236, 72, 153, 0.16); --glow-b: rgba(79, 70, 229, 0.16); }
-html.skin-playground.dark, html.skin-playground.sunset { --c-line: 64 54 110; --shadow-sm: 0 2px 10px rgba(124, 58, 237, 0.30); --shadow-lg: 0 22px 52px -14px rgba(124, 58, 237, 0.55), 0 0 0 1px rgba(167, 139, 250, 0.10); --glow-a: rgba(236, 72, 153, 0.22); --glow-b: rgba(124, 58, 237, 0.20); }
-html.skin-playground .drive-shadow { box-shadow: var(--shadow-sm); }
-html.skin-playground .drive-shadow-lg { box-shadow: var(--shadow-lg); }
-html.skin-playground .rounded-2xl { border-radius: 1.5rem !important; }
-html.skin-playground .rounded-xl { border-radius: 1.15rem !important; }
-html.skin-playground .rounded-lg { border-radius: 0.9rem !important; }
-@media (hover: hover) and (pointer: fine) {
-  html.skin-playground main .drive-shadow { transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease; }
-  html.skin-playground main .drive-shadow:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-}
