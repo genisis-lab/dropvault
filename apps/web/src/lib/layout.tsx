@@ -2,34 +2,30 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, LayoutGrid, Shapes, Sparkles, type LucideIcon } from "lucide-react"
+import { Check, LayoutGrid, Sparkles, type LucideIcon } from "lucide-react"
 
 // The layout (or "experience") is orthogonal to the color theme in theme.tsx.
-// Themes control colors (auto/light/dark/sunset); the layout controls the
-// overall shape of the dashboard. "calm" is the Calm Workspace (Concept A) and
-// is the default; "classic" preserves the original Dropvault layout; and
-// "playground" is the playful, colorful Google-Drive-style skin. Playground
-// currently reuses the classic dashboard structure (Dashboard only special-
-// cases "calm") while it adds the playful skin via the `skin-playground` class.
-export type Layout = "calm" | "classic" | "playground"
+// Themes control colors (light/dark/sunset); the layout controls the overall
+// shape of the dashboard. "calm" is the Calm Workspace (Concept A) and is the
+// default; "classic" preserves the original Dropvault layout so users can
+// switch back to it.
+export type Layout = "calm" | "classic"
 
-export const LAYOUTS: Layout[] = ["calm", "classic", "playground"]
+export const LAYOUTS: Layout[] = ["calm", "classic"]
 const STORAGE_KEY = "dropvault-layout"
 
 const LAYOUT_OPTIONS: { id: Layout; label: string; desc: string; icon: LucideIcon }[] = [
   { id: "calm", label: "Calm Workspace", desc: "Spacious, search-first home", icon: Sparkles },
   { id: "classic", label: "Classic", desc: "The original Dropvault layout", icon: LayoutGrid },
-  { id: "playground", label: "Playground", desc: "Playful, colorful Google-Drive style", icon: Shapes },
 ]
 
 function isLayout(value: unknown): value is Layout {
-  return value === "calm" || value === "classic" || value === "playground"
+  return value === "calm" || value === "classic"
 }
 
 function readStoredLayout(): Layout {
@@ -41,14 +37,6 @@ function readStoredLayout(): Layout {
     /* ignore */
   }
   return "calm"
-}
-
-// Toggles the documentElement class so the Playground skin (colorful, rounded,
-// playful tokens in index.css) can re-style the app on top of any color theme,
-// without a full structural rebuild.
-export function applySkin(layout: Layout) {
-  if (typeof document === "undefined") return
-  document.documentElement.classList.toggle("skin-playground", layout === "playground")
 }
 
 type LayoutContextValue = { layout: Layout; setLayout: (layout: Layout) => void }
@@ -64,10 +52,6 @@ export function useLayout() {
 
 export function LayoutProvider({ children }: { children: ReactNode }) {
   const [layout, setLayoutState] = useState<Layout>(readStoredLayout)
-
-  useEffect(() => {
-    applySkin(layout)
-  }, [layout])
 
   const setLayout = useCallback((next: Layout) => {
     setLayoutState(next)
