@@ -1,77 +1,106 @@
-import { useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
-import { Check, Folder, Info, Link2, Lock, MoreVertical, Pencil, Share2, SlidersHorizontal, Trash2, X } from "lucide-react"
-import type { Folder as FolderT } from "../lib/api"
-import { folderShareUrl } from "../lib/api"
+import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Check,
+  Folder,
+  Info,
+  Link2,
+  Lock,
+  MoreVertical,
+  Pencil,
+  Share2,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from "lucide-react";
+import type { Folder as FolderT } from "../lib/api";
+import { folderShareUrl } from "../lib/api";
 
-export const DRAG_MIME = "application/x-dropvault"
+export const DRAG_MIME = "application/x-dropvault";
 
-const cardInitial = { opacity: 0, y: 12, scale: 0.97 }
-const cardAnimate = { opacity: 1, y: 0, scale: 1 }
-const cardExit = { opacity: 0, scale: 0.92 }
-const menuInitial = { opacity: 0, scale: 0.95, y: -4 }
-const menuAnimate = { opacity: 1, scale: 1, y: 0 }
+const cardInitial = { opacity: 0, y: 12, scale: 0.97 };
+const cardAnimate = { opacity: 1, y: 0, scale: 1 };
+const cardExit = { opacity: 0, scale: 0.92 };
+const menuInitial = { opacity: 0, scale: 0.95, y: -4 };
+const menuAnimate = { opacity: 1, scale: 1, y: 0 };
 
 type Props = {
-  folder: FolderT
-  view: "grid" | "list"
-  onOpen: (id: string) => void
-  onShare: (id: string) => Promise<string>
-  onRevoke: (id: string) => void
-  onRename: (id: string) => void
-  onDelete: (id: string) => void
-  onOpenShare?: (id: string) => void
-  onOpenDetails?: (id: string) => void
-  onDropFiles?: (folderId: string, ids: string[]) => void
-}
+  folder: FolderT;
+  view: "grid" | "list";
+  onOpen: (id: string) => void;
+  onShare: (id: string) => Promise<string>;
+  onRevoke: (id: string) => void;
+  onRename: (id: string) => void;
+  onDelete: (id: string) => void;
+  onOpenShare?: (id: string) => void;
+  onOpenDetails?: (id: string) => void;
+  onDropFiles?: (folderId: string, ids: string[]) => void;
+};
 
-export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, onRename, onDelete, onOpenShare, onOpenDetails, onDropFiles }: Props) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [dropActive, setDropActive] = useState(false)
+export default function FolderCard({
+  folder,
+  view,
+  onOpen,
+  onShare,
+  onRevoke,
+  onRename,
+  onDelete,
+  onOpenShare,
+  onOpenDetails,
+  onDropFiles,
+}: Props) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
 
   async function copyLink() {
-    setBusy(true)
+    setBusy(true);
     try {
-      const url = folder.shareToken ? folderShareUrl(folder.shareToken) : await onShare(folder.id)
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
+      const url = folder.shareToken
+        ? folderShareUrl(folder.shareToken)
+        : await onShare(folder.id);
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
     } catch {
       /* ignore */
     } finally {
-      setBusy(false)
-      setMenuOpen(false)
+      setBusy(false);
+      setMenuOpen(false);
     }
   }
 
   function handleDragOver(e: React.DragEvent) {
-    if (!onDropFiles || !e.dataTransfer.types.includes(DRAG_MIME)) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = "move"
-    setDropActive(true)
+    if (!onDropFiles || !e.dataTransfer.types.includes(DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropActive(true);
   }
 
   function handleDrop(e: React.DragEvent) {
-    setDropActive(false)
-    if (!onDropFiles || !e.dataTransfer.types.includes(DRAG_MIME)) return
-    e.preventDefault()
+    setDropActive(false);
+    if (!onDropFiles || !e.dataTransfer.types.includes(DRAG_MIME)) return;
+    e.preventDefault();
     try {
-      const ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME))
-      if (Array.isArray(ids) && ids.length) onDropFiles(folder.id, ids)
+      const ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME));
+      if (Array.isArray(ids) && ids.length) onDropFiles(folder.id, ids);
     } catch {
       /* ignore */
     }
   }
 
-  const meta = `${folder.fileCount} item${folder.fileCount === 1 ? "" : "s"}`
+  const meta = `${folder.fileCount} item${folder.fileCount === 1 ? "" : "s"}`;
 
   const menu = (
     <AnimatePresence>
       {menuOpen && (
         <>
-          <button className="fixed inset-0 z-30 cursor-default" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
+          <button
+            className="fixed inset-0 z-30 cursor-default"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+          />
           <motion.div
             initial={menuInitial}
             animate={menuAnimate}
@@ -81,8 +110,8 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             {onOpenDetails && (
               <button
                 onClick={() => {
-                  onOpenDetails(folder.id)
-                  setMenuOpen(false)
+                  onOpenDetails(folder.id);
+                  setMenuOpen(false);
                 }}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
               >
@@ -94,14 +123,18 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
               onClick={copyLink}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
+              {copied ? (
+                <Check size={15} className="text-emerald-500" />
+              ) : (
+                <Link2 size={15} />
+              )}
               {folder.shareToken ? "Copy link" : "Get link"}
             </button>
             {onOpenShare && (
               <button
                 onClick={() => {
-                  onOpenShare(folder.id)
-                  setMenuOpen(false)
+                  onOpenShare(folder.id);
+                  setMenuOpen(false);
                 }}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
               >
@@ -111,8 +144,8 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             {folder.shareToken && (
               <button
                 onClick={() => {
-                  onRevoke(folder.id)
-                  setMenuOpen(false)
+                  onRevoke(folder.id);
+                  setMenuOpen(false);
                 }}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
               >
@@ -121,8 +154,8 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             )}
             <button
               onClick={() => {
-                onRename(folder.id)
-                setMenuOpen(false)
+                onRename(folder.id);
+                setMenuOpen(false);
               }}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
             >
@@ -130,8 +163,8 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
             </button>
             <button
               onClick={() => {
-                onDelete(folder.id)
-                setMenuOpen(false)
+                onDelete(folder.id);
+                setMenuOpen(false);
               }}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50"
             >
@@ -141,17 +174,20 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
         </>
       )}
     </AnimatePresence>
-  )
+  );
 
   const ringClass = dropActive
     ? "border-drift-400 ring-2 ring-drift-400/60 bg-drift-500/5"
-    : "border-slate-200 hover:border-slate-300"
+    : "border-slate-200 hover:border-slate-300";
 
   const shareBadge = folder.shareToken ? (
     <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
-      <Share2 size={11} /> Shared{folder.shareHasPassword && <Lock size={10} className="text-drift-500/80" />}
+      <Share2 size={11} /> Shared
+      {folder.shareHasPassword && (
+        <Lock size={10} className="text-drift-500/80" />
+      )}
     </span>
-  ) : null
+  ) : null;
 
   if (view === "list") {
     return (
@@ -163,14 +199,24 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
         onDragOver={handleDragOver}
         onDragLeave={() => setDropActive(false)}
         onDrop={handleDrop}
-        className={"relative flex items-center gap-3 border-l-2 px-4 py-2.5 transition " + (dropActive ? "border-drift-400 bg-drift-500/5" : "border-transparent hover:bg-slate-50")}
+        className={
+          "relative flex items-center gap-3 border-l-2 px-4 py-2.5 transition " +
+          (dropActive
+            ? "border-drift-400 bg-drift-500/5"
+            : "border-transparent hover:bg-slate-50")
+        }
       >
-        <button onClick={() => onOpen(folder.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <button
+          onClick={() => onOpen(folder.id)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-500">
             <Folder size={18} />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-800">{folder.name}</p>
+            <p className="truncate text-sm font-medium text-slate-800">
+              {folder.name}
+            </p>
             <p className="text-xs text-slate-400">{meta}</p>
           </div>
         </button>
@@ -186,7 +232,7 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
           {menu}
         </div>
       </motion.div>
-    )
+    );
   }
 
   return (
@@ -198,18 +244,29 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
       onDragOver={handleDragOver}
       onDragLeave={() => setDropActive(false)}
       onDrop={handleDrop}
-      className={"group relative flex items-center gap-3 rounded-2xl border bg-white px-3 py-3 drive-shadow transition hover:shadow-md " + ringClass}
+      className={
+        "group relative flex items-center gap-3 rounded-2xl border bg-white px-3 py-3 drive-shadow transition hover:shadow-md " +
+        ringClass
+      }
     >
-      <button onClick={() => onOpen(folder.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button
+        onClick={() => onOpen(folder.id)}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-500">
           <Folder size={20} />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800" title={folder.name}>
+          <p
+            className="truncate text-sm font-semibold text-slate-800"
+            title={folder.name}
+          >
             {folder.name}
           </p>
           <p className="text-xs text-slate-400">
-            {dropActive ? "Drop to move here" : meta + (folder.shareToken ? " · shared" : "")}
+            {dropActive
+              ? "Drop to move here"
+              : meta + (folder.shareToken ? " · shared" : "")}
           </p>
         </div>
       </button>
@@ -224,5 +281,5 @@ export default function FolderCard({ folder, view, onOpen, onShare, onRevoke, on
         {menu}
       </div>
     </motion.div>
-  )
+  );
 }

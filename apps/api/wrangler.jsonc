@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dropvault-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "dropvault-files",
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dropvault",
+      "database_id": "b72b57d4-bbb9-4810-a006-251d9aed1955",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "triggers": {
+    "crons": ["0 * * * *"],
+  },
+  "vars": {
+    "API_URL": "https://dropvault-api.neil27.workers.dev",
+    "PUBLIC_APP_URL": "https://drop-vault.pages.dev",
+    "DEFAULT_EXPIRY_DAYS": "7",
+    "MAX_EXPIRY_DAYS": "30",
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05,
+    },
+  },
+}
