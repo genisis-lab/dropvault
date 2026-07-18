@@ -1,7 +1,19 @@
 packages:
   - "apps/*"
 
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
-  - workerd
+overrides:
+  esbuild: 0.28.1
+  vite: 8.1.5
+
+# These exact direct/locked releases were intentionally reviewed and pinned.
+# Keep pnpm 11's one-day quarantine for every other newly published package.
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-types@5.20260717.1"
+  - "autoprefixer@10.5.4"
+  - "obug@2.1.4"
+  - "vite@8.1.5"
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

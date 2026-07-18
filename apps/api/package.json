@@ -13,15 +13,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-auth": "^1.2.0",
-    "drizzle-orm": "^0.36.0",
-    "hono": "^4.6.0"
+    "better-auth": "1.6.23",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.12.30"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240924.0",
-    "drizzle-kit": "^0.28.0",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0",
-    "wrangler": "^3.80.0"
+    "@cloudflare/vitest-pool-workers": "0.18.5",
+    "@types/node": "24.10.13",
+    "drizzle-kit": "0.31.10",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10",
+    "wrangler": "4.111.0"
   }
 }

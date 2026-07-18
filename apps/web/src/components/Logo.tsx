@@ -1,10 +1,10 @@
-import { motion } from "framer-motion"
+import { motion } from "framer-motion";
 
 export default function Logo({ size = 26 }: { size?: number }) {
-  const initial = { rotate: -12, scale: 0.8, opacity: 0 }
-  const animate = { rotate: 0, scale: 1, opacity: 1 }
-  const transition = { type: "spring" as const, stiffness: 200, damping: 14 }
-  const boxStyle = { width: size + 10, height: size + 10 }
+  const initial = { rotate: -12, scale: 0.8, opacity: 0 };
+  const animate = { rotate: 0, scale: 1, opacity: 1 };
+  const transition = { type: "spring" as const, stiffness: 200, damping: 14 };
+  const boxStyle = { width: size + 10, height: size + 10 };
 
   return (
     <div className="flex items-center gap-2">
@@ -36,5 +36,5 @@ export default function Logo({ size = 26 }: { size?: number }) {
         Drop<span className="text-gradient">vault</span>
       </span>
     </div>
-  )
+  );
 }

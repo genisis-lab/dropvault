@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react"
-import { AnimatePresence, motion } from "framer-motion"
+import { useEffect, useState, type FormEvent } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
-const backdropInit = { opacity: 0 }
-const backdropShow = { opacity: 1 }
-const panelInit = { opacity: 0, scale: 0.96, y: 8 }
-const panelShow = { opacity: 1, scale: 1, y: 0 }
+const backdropInit = { opacity: 0 };
+const backdropShow = { opacity: 1 };
+const panelInit = { opacity: 0, scale: 0.96, y: 8 };
+const panelShow = { opacity: 1, scale: 1, y: 0 };
 
 export default function NameDialog({
   open,
@@ -14,22 +14,22 @@ export default function NameDialog({
   onCancel,
   onConfirm,
 }: {
-  open: boolean
-  title: string
-  initial?: string
-  confirmLabel?: string
-  onCancel: () => void
-  onConfirm: (name: string) => void
+  open: boolean;
+  title: string;
+  initial?: string;
+  confirmLabel?: string;
+  onCancel: () => void;
+  onConfirm: (name: string) => void;
 }) {
-  const [value, setValue] = useState(initial ?? "")
+  const [value, setValue] = useState(initial ?? "");
   useEffect(() => {
-    if (open) setValue(initial ?? "")
-  }, [open, initial])
+    if (open) setValue(initial ?? "");
+  }, [open, initial]);
 
   function submit(e: FormEvent) {
-    e.preventDefault()
-    const v = value.trim()
-    if (v) onConfirm(v)
+    e.preventDefault();
+    const v = value.trim();
+    if (v) onConfirm(v);
   }
 
   return (
@@ -77,5 +77,5 @@ export default function NameDialog({
         </motion.div>
       )}
     </AnimatePresence>
-  )
+  );
 }

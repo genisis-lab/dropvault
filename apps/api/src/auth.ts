@@ -1,14 +1,15 @@
-import { betterAuth } from "better-auth"
-import { drizzleAdapter } from "better-auth/adapters/drizzle"
-import { captcha, twoFactor } from "better-auth/plugins"
-import { eq } from "drizzle-orm"
-import { getDb, schema } from "./db"
-import { adminEmailSet } from "./middleware/admin"
-import { isSafeWebhookUrl } from "./lib/url"
-import type { Bindings } from "./types"
+import { betterAuth } from "better-auth";
+import { waitUntil } from "cloudflare:workers";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { captcha, twoFactor } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "./db";
+import { adminEmailSet } from "./middleware/admin";
+import { deliverPendingEvents, enqueueEvent } from "./lib/delivery";
+import type { Bindings } from "./types";
 
 function nowSec() {
-  return Math.floor(Date.now() / 1000)
+  return Math.floor(Date.now() / 1000);
 }
 
 // Reads the configured signup mode from app_settings. "open" (default) lets
@@ -20,29 +21,53 @@ async function getSignupMode(db: ReturnType<typeof getDb>): Promise<string> {
     .from(schema.appSettings)
     .where(eq(schema.appSettings.key, "signupMode"))
     .get()
-    .catch(() => null)
-  return row?.value === "approval" ? "approval" : "open"
+    .catch(() => null);
+  return row?.value === "approval" ? "approval" : "open";
 }
 
 // Best-effort webhook fired when a new account is created, if enabled.
-async function notifySignup(db: ReturnType<typeof getDb>, email: string) {
+async function notifySignup(
+  env: Bindings,
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  email: string,
+) {
   try {
-    const rows = await db.select().from(schema.appSettings).all().catch(() => [])
-    const map = new Map(rows.map((r) => [r.key, r.value] as const))
-    if (map.get("notifyOnSignup") !== "true") return
-    const url = map.get("notifyWebhookUrl") ?? ""
-    if (!isSafeWebhookUrl(url)) return
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event: "signup", message: `New signup: ${email}`, at: nowSec() }),
-    })
+    const rows = await db
+      .select()
+      .from(schema.appSettings)
+      .all()
+      .catch(() => []);
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    if (map.get("notifyOnSignup") !== "true") return;
+    await enqueueEvent(db, {
+      type: "signup",
+      userId,
+      payload: { email, at: nowSec() },
+    });
+    waitUntil(deliverPendingEvents(env, 5));
   } catch {}
 }
 
 // better-auth must be created per request because D1 is only bound at request time.
 export function createAuth(env: Bindings) {
-  const db = getDb(env.DB)
+  const db = getDb(env.DB);
+  const queueAuthMessage = (
+    type: string,
+    user: { id?: string; email: string; name?: string },
+    url: string,
+  ) => {
+    waitUntil(
+      (async () => {
+        await enqueueEvent(db, {
+          type,
+          userId: user.id ?? null,
+          payload: { email: user.email, name: user.name ?? null, url },
+        });
+        await deliverPendingEvents(env, 5);
+      })(),
+    );
+  };
   // Cloudflare Turnstile guards the email sign-in/sign-up endpoints. The plugin
   // reads the `x-captcha-response` header and verifies it server-side. It is
   // only enabled when a secret is configured, so local dev still works without
@@ -53,9 +78,14 @@ export function createAuth(env: Bindings) {
       allowPasswordless: true,
     }),
     ...(env.TURNSTILE_SECRET_KEY
-      ? [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY })]
+      ? [
+          captcha({
+            provider: "cloudflare-turnstile",
+            secretKey: env.TURNSTILE_SECRET_KEY,
+          }),
+        ]
       : []),
-  ]
+  ];
   return betterAuth({
     appName: "Dropvault",
     // The web app proxies /api/* to this Worker (see functions/api/[[path]].ts),
@@ -76,7 +106,27 @@ export function createAuth(env: Bindings) {
       },
     }),
     // Email + password for simple friend signup...
-    emailAndPassword: { enabled: true },
+    emailAndPassword: {
+      enabled: true,
+      requireEmailVerification: !!env.NOTIFICATION_WEBHOOK_URL,
+      minPasswordLength: 10,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url }) =>
+        queueAuthMessage("password_reset", user, url),
+      onPasswordReset: async ({ user }) => {
+        await enqueueEvent(db, {
+          type: "password_reset_complete",
+          userId: user.id,
+          payload: { email: user.email },
+        });
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: !!env.NOTIFICATION_WEBHOOK_URL,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url }) =>
+        queueAuthMessage("verify_email", user, url),
+    },
     // ...and Google OAuth. Register the callback URL noted in DEPLOYMENT.md.
     socialProviders: {
       google: {
@@ -98,26 +148,31 @@ export function createAuth(env: Bindings) {
         create: {
           after: async (createdUser: any) => {
             try {
-              const email = String(createdUser?.email ?? "").toLowerCase()
-              const id = String(createdUser?.id ?? "")
-              if (!id) return
-              const mode = await getSignupMode(db)
-              const isBootstrapAdmin = adminEmailSet(env).has(email)
+              const email = String(createdUser?.email ?? "").toLowerCase();
+              const id = String(createdUser?.id ?? "");
+              if (!id) return;
+              const mode = await getSignupMode(db);
+              const isBootstrapAdmin = adminEmailSet(env).has(email);
               if (mode === "approval" && !isBootstrapAdmin) {
                 await db
                   .insert(schema.userSuspensions)
-                  .values({ userId: id, reason: "Awaiting admin approval", createdBy: "system", createdAt: nowSec() })
+                  .values({
+                    userId: id,
+                    reason: "Awaiting admin approval",
+                    createdBy: "system",
+                    createdAt: nowSec(),
+                  })
                   .run()
-                  .catch(() => {})
+                  .catch(() => {});
               }
-              await notifySignup(db, email)
+              await notifySignup(env, db, id, email);
             } catch {}
           },
         },
       },
     },
     plugins,
-  })
+  });
 }
 
-export type Auth = ReturnType<typeof createAuth>
+export type Auth = ReturnType<typeof createAuth>;
