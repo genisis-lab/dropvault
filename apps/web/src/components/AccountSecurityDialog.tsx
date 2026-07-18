@@ -17,6 +17,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { copyText } from "../lib/clipboard";
 import {
   adminAccess,
   listSessions,
@@ -470,9 +471,7 @@ export default function AccountSecurityDialog({
                           </span>
                           <button
                             onClick={() =>
-                              navigator.clipboard.writeText(
-                                manualSecret || totpUri,
-                              )
+                              void copyText(manualSecret || totpUri)
                             }
                             className="text-slate-400 hover:text-slate-700"
                           >

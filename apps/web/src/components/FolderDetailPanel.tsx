@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { folderShareUrl, type Folder as FolderT } from "../lib/api";
+import { copyText } from "../lib/clipboard";
+import { useToast } from "./Toast";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { x: "100%" };
@@ -55,6 +57,7 @@ function Body({
   onDelete,
   onSaveAutomation,
 }: Props & { folder: FolderT }) {
+  const { error } = useToast();
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const shared = !!folder.shareToken;
@@ -71,10 +74,11 @@ function Body({
       const url = folder.shareToken
         ? folderShareUrl(folder.shareToken)
         : await onShare(folder.id);
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
+    } catch (e) {
+      error((e as Error)?.message || "Couldn't copy the link");
     } finally {
       setBusy(false);
     }
