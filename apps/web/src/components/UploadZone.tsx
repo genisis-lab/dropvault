@@ -465,6 +465,16 @@ export default function UploadZone({
           <LockKeyhole size={13} /> End-to-end encrypt (up to{" "}
           {formatBytes(MAX_BROWSER_ENCRYPTION_BYTES)})
         </label>
+        {encryptChoice && (
+          <p
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-xl text-center text-xs leading-5 text-slate-500"
+          >
+            Encryption happens in this browser before upload. Downloads in this
+            browser decrypt automatically, and encrypted share links include the
+            decryption key after the # symbol.
+          </p>
+        )}
         <div
           onClick={(e) => e.stopPropagation()}
           className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-600"

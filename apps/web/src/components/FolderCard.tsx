@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import type { Folder as FolderT } from "../lib/api";
 import { folderShareUrl } from "../lib/api";
+import { copyText } from "../lib/clipboard";
+import { useToast } from "./Toast";
 
 export const DRAG_MIME = "application/x-dropvault";
 
@@ -49,6 +51,7 @@ export default function FolderCard({
   onOpenDetails,
   onDropFiles,
 }: Props) {
+  const { error } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -60,11 +63,11 @@ export default function FolderCard({
       const url = folder.shareToken
         ? folderShareUrl(folder.shareToken)
         : await onShare(folder.id);
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      error((e as Error)?.message || "Couldn't copy the link");
     } finally {
       setBusy(false);
       setMenuOpen(false);

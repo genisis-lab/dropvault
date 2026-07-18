@@ -23,6 +23,7 @@ import {
   type Folder,
   type ShareEvent,
 } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 import { useToast } from "./Toast";
 
 const EXPIRY_CHOICES: { value: number; label: string }[] = [
@@ -105,12 +106,18 @@ export default function FolderShareDialog({
         countryAllowlist: linesToList(countryAllowlist),
       });
       setUrl(res.url);
+      let autoCopied = false;
       try {
-        await navigator.clipboard.writeText(res.url);
+        await copyText(res.url);
+        autoCopied = true;
       } catch {}
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-      success("Folder link ready & copied");
+      if (autoCopied) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      }
+      success(
+        autoCopied ? "Folder link ready & copied" : "Folder link ready",
+      );
       onChanged();
       folderShareEvents(folder.id)
         .then(setAnalytics)
@@ -124,10 +131,12 @@ export default function FolderShareDialog({
   async function copy() {
     if (!url) return;
     try {
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {}
+    } catch (e) {
+      error((e as Error)?.message || "Couldn't copy the link");
+    }
   }
   async function revoke() {
     if (!folder) return;
