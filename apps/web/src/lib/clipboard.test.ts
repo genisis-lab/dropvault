@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { copyText } from "./clipboard";
+import { copyText, copyTextFrom } from "./clipboard";
 
 const originalClipboard = navigator.clipboard;
 const originalExecCommand = document.execCommand;
+const originalClipboardItem = globalThis.ClipboardItem;
+const originalPrompt = window.prompt;
 
 afterEach(() => {
   Object.defineProperty(navigator, "clipboard", {
@@ -12,6 +14,14 @@ afterEach(() => {
   Object.defineProperty(document, "execCommand", {
     configurable: true,
     value: originalExecCommand,
+  });
+  Object.defineProperty(globalThis, "ClipboardItem", {
+    configurable: true,
+    value: originalClipboardItem,
+  });
+  Object.defineProperty(window, "prompt", {
+    configurable: true,
+    value: originalPrompt,
   });
   document.querySelectorAll("textarea").forEach((element) => element.remove());
   vi.restoreAllMocks();
@@ -25,7 +35,7 @@ describe("copyText", () => {
       value: { writeText },
     });
 
-    await copyText("share link");
+    await expect(copyText("share link")).resolves.toBe("copied");
 
     expect(writeText).toHaveBeenCalledWith("share link");
   });
@@ -41,13 +51,13 @@ describe("copyText", () => {
       value: execCommand,
     });
 
-    await copyText("encrypted share link");
+    await expect(copyText("encrypted share link")).resolves.toBe("copied");
 
     expect(execCommand).toHaveBeenCalledWith("copy");
     expect(document.querySelector("textarea")).toBeNull();
   });
 
-  it("reports when neither copy method succeeds", async () => {
+  it("shows a selectable manual fallback when automatic copy is blocked", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: undefined,
@@ -57,8 +67,52 @@ describe("copyText", () => {
       value: vi.fn().mockReturnValue(false),
     });
 
-    await expect(copyText("share link")).rejects.toThrow(
-      "Clipboard access was blocked",
+    const prompt = vi.fn().mockReturnValue("share link");
+    Object.defineProperty(window, "prompt", {
+      configurable: true,
+      value: prompt,
+    });
+
+    await expect(copyText("share link")).resolves.toBe("manual");
+    expect(prompt).toHaveBeenCalledWith(
+      expect.stringContaining("Automatic copying is blocked"),
+      "share link",
     );
+  });
+
+  it("starts an async ClipboardItem write during the user action", async () => {
+    let resolveText!: (text: string) => void;
+    const textPromise = new Promise<string>((resolve) => {
+      resolveText = resolve;
+    });
+    let clipboardData: Record<string, Promise<Blob>> | undefined;
+    const write = vi.fn().mockImplementation(async (items: ClipboardItem[]) => {
+      clipboardData = (
+        items[0] as unknown as { data: Record<string, Promise<Blob>> }
+      ).data;
+    });
+    class TestClipboardItem {
+      constructor(
+        public data: Record<string, Promise<Blob>>,
+      ) {}
+    }
+    Object.defineProperty(globalThis, "ClipboardItem", {
+      configurable: true,
+      value: TestClipboardItem,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write },
+    });
+
+    const copying = copyTextFrom(() => textPromise);
+    expect(write).toHaveBeenCalledTimes(1);
+    resolveText("created share link");
+
+    await expect(copying).resolves.toEqual({
+      text: "created share link",
+      result: "copied",
+    });
+    await expect(clipboardData?.["text/plain"]).resolves.toBeInstanceOf(Blob);
   });
 });
