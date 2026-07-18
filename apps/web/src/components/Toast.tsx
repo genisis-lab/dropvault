@@ -1,52 +1,58 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-import { AnimatePresence, motion } from "framer-motion"
-import { AlertCircle, Check, Info, X } from "lucide-react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  type ReactNode,
+} from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertCircle, Check, Info, X } from "lucide-react";
 
-type ToastKind = "success" | "error" | "info"
-type ToastItem = { id: number; kind: ToastKind; message: string }
+type ToastKind = "success" | "error" | "info";
+type ToastItem = { id: number; kind: ToastKind; message: string };
 
 type ToastApi = {
-  toast: (message: string, kind?: ToastKind) => void
-  success: (message: string) => void
-  error: (message: string) => void
-  info: (message: string) => void
-}
+  toast: (message: string, kind?: ToastKind) => void;
+  success: (message: string) => void;
+  error: (message: string) => void;
+  info: (message: string) => void;
+};
 
-const ToastContext = createContext<ToastApi | null>(null)
+const ToastContext = createContext<ToastApi | null>(null);
 
 export function useToast(): ToastApi {
-  const ctx = useContext(ToastContext)
-  if (!ctx) throw new Error("useToast must be used within a ToastProvider")
-  return ctx
+  const ctx = useContext(ToastContext);
+  if (!ctx) throw new Error("useToast must be used within a ToastProvider");
+  return ctx;
 }
 
-const enter = { opacity: 0, y: 16, scale: 0.96 }
-const shown = { opacity: 1, y: 0, scale: 1 }
+const enter = { opacity: 0, y: 16, scale: 0.96 };
+const shown = { opacity: 1, y: 0, scale: 1 };
 
-let counter = 0
+let counter = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const remove = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }, [])
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   const toast = useCallback(
     (message: string, kind: ToastKind = "info") => {
-      const id = ++counter
-      setToasts((prev) => [...prev, { id, kind, message }])
-      setTimeout(() => remove(id), 4000)
+      const id = ++counter;
+      setToasts((prev) => [...prev, { id, kind, message }]);
+      setTimeout(() => remove(id), 4000);
     },
     [remove],
-  )
+  );
 
   const api: ToastApi = {
     toast,
     success: (m) => toast(m, "success"),
     error: (m) => toast(m, "error"),
     info: (m) => toast(m, "info"),
-  }
+  };
 
   return (
     <ToastContext.Provider value={api}>
@@ -79,7 +85,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       : "bg-slate-100 text-slate-500")
                 }
               >
-                {t.kind === "error" ? <AlertCircle size={14} /> : t.kind === "success" ? <Check size={14} /> : <Info size={14} />}
+                {t.kind === "error" ? (
+                  <AlertCircle size={14} />
+                ) : t.kind === "success" ? (
+                  <Check size={14} />
+                ) : (
+                  <Info size={14} />
+                )}
               </span>
               <p className="flex-1 leading-snug text-slate-700">{t.message}</p>
               <button
@@ -94,5 +106,5 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         </AnimatePresence>
       </div>
     </ToastContext.Provider>
-  )
+  );
 }

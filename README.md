@@ -9,11 +9,13 @@ A mini Google Drive that **auto-expires** your files. Upload anything, organize 
 ## ✨ Features
 
 ### Accounts & access
-- **Auth your friends will actually use** — email + password *or* one-click Google sign-in (better-auth). Anyone can self-register; no manual allow-listing.
+
+- **Auth your friends will actually use** — email + password _or_ one-click Google sign-in (better-auth). Anyone can self-register; no manual allow-listing.
 - **Two-factor authentication (2FA)** — optional TOTP-based 2FA with an enrollment flow and a required-on-login challenge.
 - **Account & security settings** — manage your password, 2FA, and active sessions; revoke other sessions remotely.
 
 ### Uploads
+
 - **Cloudflare-native uploads** — the browser streams to the API Worker, which writes to R2 through its bucket binding with a live progress bar.
 - **Multipart uploads for large files** — big files are split into parts and uploaded in chunks, so multi-GB uploads are reliable and resumable across parts.
 - **Robust multi-file uploads** — bounded-concurrency upload pool with automatic retry (exponential backoff + jitter), permanent-vs-transient error detection, per-file error surfacing, and one-click “Retry failed.” Designed so large batches (30+ files) don’t partially fail.
@@ -21,6 +23,7 @@ A mini Google Drive that **auto-expires** your files. Upload anything, organize 
 - **Auto-generated thumbnails** — image thumbnails are generated client-side at upload (small JPEG, ~400px) so grids and lists never download full-size originals just to render a preview. Falls back gracefully to the original (or a type icon) when no thumbnail exists.
 
 ### Files & organization
+
 - **Folders** — create folders, move files between them, and browse per-folder views.
 - **Infinite scroll** — My Drive renders files in windows and loads more on scroll, so large libraries stay fast and light.
 - **Search, sort & filters** — filter by type, sort, and search your library instantly.
@@ -31,12 +34,14 @@ A mini Google Drive that **auto-expires** your files. Upload anything, organize 
 - **Storage breakdown** — see how your storage is used by file type.
 
 ### Sharing
+
 - **Shareable links** — generate a public link for any file.
 - **Link controls** — optional password protection, link expiry dates, and download-count limits. Revoke a link anytime.
 - **Folder share links** — share an entire folder via a link.
 - **Public upload requests** — request files from others via a public upload portal, no account required for the uploader.
 
 ### Expiration
+
 - **Expiration as defense-in-depth:**
   1. **On-access check** — an expired file is never served (returns `410` and is deleted on the spot).
   2. **Hourly Cron sweep** — a scheduled Worker reclaims expired objects from R2 + rows from D1.
@@ -45,14 +50,17 @@ A mini Google Drive that **auto-expires** your files. Upload anything, organize 
 - **Keep forever** — eligible accounts can mark files to never expire.
 
 ### Caching & performance
+
 - **Browser caching with revalidation** — thumbnails and inline previews are served with `Cache-Control` + `ETag`/`304` revalidation, so reloads serve from the browser cache instead of re-hammering the server. Private files use private (non-shared) caching to keep auth intact.
 
 ### Admin & moderation
+
 - **Admin panel** — admins (configured via `ADMIN_EMAILS`) can manage users and content.
 - **User suspension** and **keep-forever permission grants** for individual users.
 - **IP access controls** — IP observation/logging and IP banning for abuse mitigation.
 
 ### UI
+
 - **Polished UI** — React + Tailwind, Framer Motion animations, a subtle react-three-fiber 3D backdrop, animated upload progress, live expiry countdowns, notifications, and a responsive mobile-friendly layout.
 
 ---
@@ -98,7 +106,7 @@ dropvault/
 
 ### Prerequisites
 
-- Node 18+ and `pnpm` (`npm i -g pnpm`)
+- Node 22.13+ and the pinned pnpm version (`npm i -g pnpm@11.13.1`)
 - A Cloudflare account
 - `wrangler` CLI (`pnpm i -g wrangler`) and `wrangler login`
 
@@ -119,10 +127,11 @@ wrangler r2 bucket create dropvault-files
 
 # D1 database for metadata + auth tables
 wrangler d1 create dropvault
-# copy the returned database_id into wrangler.toml (REPLACE_WITH_YOUR_D1_DATABASE_ID)
+# copy the returned database_id into wrangler.jsonc
 ```
 
-Then open `apps/api/wrangler.toml` and fill in:
+Then open `apps/api/wrangler.jsonc` and fill in:
+
 - `database_id` (from the step above)
 - `PUBLIC_APP_URL` (your Pages URL, e.g. `https://dropvault.pages.dev`)
 - `ADMIN_EMAILS` (comma-separated list of admin accounts, optional)
@@ -142,7 +151,13 @@ wrangler d1 migrations apply dropvault --local    # local dev
 wrangler secret put BETTER_AUTH_SECRET       # any long random string (openssl rand -base64 32)
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
+# Optional abuse protection + delivery adapter
+wrangler secret put TURNSTILE_SECRET_KEY
+wrangler secret put NOTIFICATION_WEBHOOK_URL
+wrangler secret put NOTIFICATION_WEBHOOK_SECRET
 ```
+
+Set `VITE_TURNSTILE_SITE_KEY` in the web build environment when the Worker Turnstile secret is enabled. Optional malware scanning uses a Worker service binding named `SCANNER`; see [DEPLOYMENT.md](DEPLOYMENT.md) for the expected setup.
 
 ### 5. Google OAuth
 
@@ -172,10 +187,12 @@ cd apps/web
 pnpm dev            # http://localhost:5173 (proxies /api to the Worker)
 ```
 
-Run the expiry unit tests:
+Run the complete verification suite:
 
 ```bash
-cd apps/api && pnpm test
+pnpm verify
+pnpm test:e2e
+pnpm audit:prod
 ```
 
 ---
@@ -195,13 +212,13 @@ wrangler pages deploy dist --project-name dropvault
 
 Or connect this GitHub repo to Cloudflare Pages for automatic deploys on every push (build command `pnpm build`, output `apps/web/dist`).
 
-> **Note:** Some features ship across both stacks. Thumbnails, caching, and inline previews require the **API Worker** redeploy (for the routes) *and* the **web** redeploy (for the UI). Features touching the schema (2FA, keep-forever, IP observations, etc.) require running the D1 migrations.
+> **Note:** Some features ship across both stacks. Thumbnails, caching, and inline previews require the **API Worker** redeploy (for the routes) _and_ the **web** redeploy (for the UI). Features touching the schema (2FA, keep-forever, IP observations, etc.) require running the D1 migrations.
 
 ---
 
 ## ✏️ Renaming from "Dropvault"
 
-Name references live in: `package.json` files, `apps/api/wrangler.toml` (worker name, bucket, D1, Pages project), `apps/web/src/components/Logo.tsx`, `apps/web/index.html`, and this README. A find-and-replace on `dropvault` / `Dropvault` covers it.
+Name references live in: `package.json` files, `apps/api/wrangler.jsonc` (worker name, bucket, D1, Pages project), `apps/web/src/components/Logo.tsx`, `apps/web/index.html`, and this README. A find-and-replace on `dropvault` / `Dropvault` covers it.
 
 ---
 

@@ -22,12 +22,13 @@ jobs:
         with:
           node-version: 24
 
-      - run: pnpm install --no-frozen-lockfile
-      - run: pnpm --filter @dropvault/web typecheck
-      - run: pnpm --filter @dropvault/api typecheck
-      - run: pnpm --filter @dropvault/web test
-      - run: pnpm --filter @dropvault/api test
-      - run: pnpm --filter @dropvault/web build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm audit:prod
+      - name: Validate all D1 migrations on a fresh database
+        run: pnpm --filter @dropvault/api exec wrangler d1 migrations apply dropvault --local --persist-to "$RUNNER_TEMP/dropvault-d1"
+      - name: Validate the production Worker bundle and bindings
+        run: pnpm --filter @dropvault/api exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/dropvault-worker"
 
   e2e:
     name: E2E (Playwright)
@@ -43,6 +44,6 @@ jobs:
         with:
           node-version: 24
 
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @dropvault/web exec playwright install --with-deps chromium
       - run: pnpm --filter @dropvault/web test:e2e

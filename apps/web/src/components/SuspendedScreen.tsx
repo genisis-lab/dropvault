@@ -1,17 +1,23 @@
-import { motion } from "framer-motion"
-import { ShieldAlert } from "lucide-react"
-import { signOut } from "../lib/auth-client"
-import Logo from "./Logo"
+import { motion } from "framer-motion";
+import { ShieldAlert } from "lucide-react";
+import { signOut } from "../lib/auth-client";
+import Logo from "./Logo";
 
-const cardInitial = { opacity: 0, y: 16, scale: 0.98 }
-const cardAnimate = { opacity: 1, y: 0, scale: 1 }
+const cardInitial = { opacity: 0, y: 16, scale: 0.98 };
+const cardAnimate = { opacity: 1, y: 0, scale: 1 };
 
-export default function SuspendedScreen({ email, reason }: { email: string; reason: string | null }) {
+export default function SuspendedScreen({
+  email,
+  reason,
+}: {
+  email: string;
+  reason: string | null;
+}) {
   async function leave() {
     try {
-      await signOut()
+      await signOut();
     } finally {
-      if (typeof window !== "undefined") window.location.reload()
+      if (typeof window !== "undefined") window.location.reload();
     }
   }
 
@@ -26,9 +32,13 @@ export default function SuspendedScreen({ email, reason }: { email: string; reas
         <div className="mx-auto mt-6 grid h-16 w-16 place-items-center rounded-2xl bg-red-50 text-red-500">
           <ShieldAlert size={30} />
         </div>
-        <h1 className="mt-5 text-2xl font-bold text-slate-800">Your account is suspended</h1>
+        <h1 className="mt-5 text-2xl font-bold text-slate-800">
+          Your account is suspended
+        </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Access for <span className="font-medium text-slate-700">{email}</span> has been suspended by an administrator. You can't upload, share, or manage files while your account is suspended.
+          Access for <span className="font-medium text-slate-700">{email}</span>{" "}
+          has been suspended by an administrator. You can't upload, share, or
+          manage files while your account is suspended.
         </p>
         {reason && (
           <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-left text-sm text-red-700">
@@ -46,5 +56,5 @@ export default function SuspendedScreen({ email, reason }: { email: string; reas
         </button>
       </motion.div>
     </div>
-  )
+  );
 }
