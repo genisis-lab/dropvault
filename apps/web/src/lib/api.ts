@@ -557,15 +557,30 @@ export function uploadToR2(
       if (e.lengthComputable)
         onProgress(Math.round((e.loaded / e.total) * 100));
     };
-    xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error(`upload failed: ${xhr.status}`));
-    xhr.onerror = () => reject(new Error("network error during upload"));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let detail = "";
+      try {
+        detail = String(JSON.parse(xhr.responseText || "{}").error || "");
+      } catch {}
+      reject(new Error(detail || `upload failed: ${xhr.status}`));
+    };
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          navigator.onLine === false
+            ? "You appear to be offline. Reconnect and retry the upload."
+            : "The upload connection was interrupted. Retry to resume the upload.",
+        ),
+      );
+    xhr.onabort = () => reject(new Error("The upload was cancelled."));
     xhr.send(file);
   });
 }
-export const MULTIPART_THRESHOLD = 90 * 1024 * 1024;
+// Requests pass through both Pages Functions and the API Worker. Switching to
+// multipart at 32 MiB keeps every request comfortably below Cloudflare's plan-
+// dependent body limit and makes interrupted transfers resumable by part.
+export const MULTIPART_THRESHOLD = 32 * 1024 * 1024;
 const PART_SIZE = 32 * 1024 * 1024;
 type UploadedPart = { partNumber: number; etag: string };
 async function startMultipart(id: string) {
@@ -605,9 +620,25 @@ function putPart(
         } catch {
           reject(new Error("bad part response"));
         }
-      } else reject(new Error(`part ${partNumber} failed: ${xhr.status}`));
+      } else {
+        let detail = "";
+        try {
+          detail = String(JSON.parse(xhr.responseText || "{}").error || "");
+        } catch {}
+        reject(
+          new Error(detail || `part ${partNumber} failed: ${xhr.status}`),
+        );
+      }
     };
-    xhr.onerror = () => reject(new Error("network error during part upload"));
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          navigator.onLine === false
+            ? "You appear to be offline. Reconnect and retry the upload."
+            : `Upload part ${partNumber} was interrupted. Retrying will resume it.`,
+        ),
+      );
+    xhr.onabort = () => reject(new Error("The upload was cancelled."));
     xhr.send(chunk);
   });
 }

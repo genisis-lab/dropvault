@@ -22,6 +22,8 @@ describe("client-side encryption", () => {
     expect(new TextDecoder().decode(clear.bytes)).toBe("top secret\n");
     expect(clear.filename).toBe("private-note.txt");
     expect(clear.contentType).toBe("text/plain");
+    // AES-GCM appends a 128-bit authentication tag to the encrypted payload.
+    expect(encrypted.file.size).toBe(source.size + 16);
     expect(
       new TextDecoder().decode(await encrypted.file.arrayBuffer()),
     ).not.toContain("top secret");
