@@ -32,7 +32,9 @@ import {
 import type { DriftFile } from "../lib/api";
 import { downloadUrl, shareUrlForFile, thumbUrl } from "../lib/api";
 import { downloadDecryptedFile } from "../lib/encryption";
+import { copyText } from "../lib/clipboard";
 import { formatBytes, timeLeft } from "../lib/format";
+import { useToast } from "./Toast";
 
 export const DRAG_MIME = "application/x-dropvault";
 type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
@@ -122,6 +124,7 @@ export default function FileCard({
   anySelected = false,
   getDragIds,
 }: Props) {
+  const { error } = useToast();
   const { Icon, tint } = kindOf(file.contentType);
   const tone = TINT[tint];
   const isImage = (file.contentType || "").startsWith("image/");
@@ -217,10 +220,11 @@ export default function FileCard({
       const url =
         (file.shareToken ? await shareUrlForFile(file) : null) ??
         (await onShare(file.id));
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
+    } catch (e) {
+      error((e as Error)?.message || "Couldn't copy the link");
     } finally {
       setBusy(false);
       closeMenu();
@@ -267,6 +271,12 @@ export default function FileCard({
       {dlText && <span className="text-drift-500/70">{dlText}</span>}
     </span>
   ) : null;
+  const encryptedPill =
+    file.encryptionMode === "aes-gcm" ? (
+      <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 sm:inline-flex">
+        <Lock size={10} /> Encrypted
+      </span>
+    ) : null;
   const checkbox = onToggleSelect ? (
     <button
       onClick={(e) => {
@@ -642,6 +652,7 @@ export default function FileCard({
           </p>
         </div>
         {sharedPill}
+        {encryptedPill}
         <span className={chipClass}>
           {chipIcon} {chipLabel}
         </span>
@@ -733,6 +744,15 @@ export default function FileCard({
         )}
         {file.shareToken && file.shareHasPassword && (
           <Lock size={12} className="shrink-0 text-slate-400" />
+        )}
+        {file.encryptionMode === "aes-gcm" && (
+          <span
+            title="End-to-end encrypted"
+            aria-label="End-to-end encrypted"
+            className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700"
+          >
+            <Lock size={11} />
+          </span>
         )}
         <div className="relative">
           <button

@@ -21,6 +21,8 @@ import type { DriftFile } from "../lib/api";
 import { downloadUrl, inlineUrl, shareUrlForFile } from "../lib/api";
 import { formatBytes, timeLeft } from "../lib/format";
 import { downloadDecryptedFile } from "../lib/encryption";
+import { copyText } from "../lib/clipboard";
+import { useToast } from "./Toast";
 
 type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
 const TINT: Record<Tint, { bg: string; fg: string }> = {
@@ -112,6 +114,7 @@ function DetailBody({
   onKeepForever,
   onUnkeepForever,
 }: Props & { file: DriftFile }) {
+  const { error } = useToast();
   const { Icon, tint } = kindOf(file.contentType);
   const tone = TINT[tint];
   const isImage = (file.contentType || "").startsWith("image/");
@@ -132,11 +135,11 @@ function DetailBody({
       const url =
         (file.shareToken ? await shareUrlForFile(file) : null) ??
         (await onShare(file.id));
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      error((e as Error)?.message || "Couldn't copy the link");
     } finally {
       setBusy(false);
     }
