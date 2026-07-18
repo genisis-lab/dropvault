@@ -1,48 +1,759 @@
-import { useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
-import { AnimatePresence, motion } from "framer-motion"
-import { Archive, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Film, FolderInput, FolderMinus, History, Image as ImageIcon, Infinity as InfinityIcon, Link2, Lock, MoreVertical, Music, Pencil, RotateCcw, SlidersHorizontal, Star, Tags, Trash2, X } from "lucide-react"
-import type { DriftFile } from "../lib/api"
-import { downloadUrl, shareUrl, thumbUrl } from "../lib/api"
-import { formatBytes, timeLeft } from "../lib/format"
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Archive,
+  CalendarClock,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Download,
+  Eye,
+  FileText,
+  Film,
+  FolderInput,
+  FolderMinus,
+  History,
+  Image as ImageIcon,
+  Infinity as InfinityIcon,
+  Link2,
+  Lock,
+  MoreVertical,
+  Music,
+  Pencil,
+  RotateCcw,
+  SlidersHorizontal,
+  Star,
+  Tags,
+  Trash2,
+  X,
+} from "lucide-react";
+import type { DriftFile } from "../lib/api";
+import { downloadUrl, shareUrlForFile, thumbUrl } from "../lib/api";
+import { downloadDecryptedFile } from "../lib/encryption";
+import { formatBytes, timeLeft } from "../lib/format";
 
-export const DRAG_MIME = "application/x-dropvault"
-type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber"
-const TINT: Record<Tint, { bg: string; fg: string }> = { indigo: { bg: "bg-indigo-50", fg: "text-indigo-500" }, emerald: { bg: "bg-emerald-50", fg: "text-emerald-500" }, rose: { bg: "bg-rose-50", fg: "text-rose-500" }, violet: { bg: "bg-violet-50", fg: "text-violet-500" }, red: { bg: "bg-red-50", fg: "text-red-500" }, amber: { bg: "bg-amber-50", fg: "text-amber-500" } }
-function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } { if (!type) return { Icon: FileText, tint: "indigo" }; if (type.startsWith("image/")) return { Icon: ImageIcon, tint: "emerald" }; if (type.startsWith("video/")) return { Icon: Film, tint: "rose" }; if (type.startsWith("audio/")) return { Icon: Music, tint: "violet" }; if (type.includes("pdf")) return { Icon: FileText, tint: "red" }; if (type.includes("zip") || type.includes("compressed") || type.includes("tar")) return { Icon: Archive, tint: "amber" }; return { Icon: FileText, tint: "indigo" } }
-type FolderOption = { id: string; name: string }
-type MenuPos = { top?: number; bottom?: number; left: number }
-type Props = { file: DriftFile; view: "grid" | "list"; folders?: FolderOption[]; onExtend: (id: string, days: number) => void; onDelete: (id: string) => void; onShare: (id: string) => Promise<string>; onRevoke: (id: string) => void; onMove?: (id: string, folderId: string | null) => void; onRename?: (id: string) => void; onOpenShare?: (id: string) => void; onPreview?: (file: DriftFile) => void; onOpenDetails?: (file: DriftFile) => void; onOpenVersions?: (file: DriftFile) => void; onToggleFavorite?: (id: string) => void; onEditTags?: (id: string) => void; onRestore?: (id: string) => void; onPermanentDelete?: (id: string) => void; canKeepForever?: boolean; onKeepForever?: (id: string) => void; onUnkeepForever?: (id: string) => void; selected?: boolean; onToggleSelect?: (id: string) => void; anySelected?: boolean; getDragIds?: (id: string) => string[] }
-const cardInitial = { opacity: 0, y: 12, scale: 0.97 }; const cardAnimate = { opacity: 1, y: 0, scale: 1 }; const cardExit = { opacity: 0, scale: 0.92 }; const menuInitial = { opacity: 0, y: 8 }; const menuAnimate = { opacity: 1, y: 0 }; const menuTransition = { duration: 0.18, ease: "easeOut" }; const overlayInitial = { opacity: 0 }; const overlayAnimate = { opacity: 1 }; const MENU_W = 240
+export const DRAG_MIME = "application/x-dropvault";
+type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
+const TINT: Record<Tint, { bg: string; fg: string }> = {
+  indigo: { bg: "bg-indigo-50", fg: "text-indigo-500" },
+  emerald: { bg: "bg-emerald-50", fg: "text-emerald-500" },
+  rose: { bg: "bg-rose-50", fg: "text-rose-500" },
+  violet: { bg: "bg-violet-50", fg: "text-violet-500" },
+  red: { bg: "bg-red-50", fg: "text-red-500" },
+  amber: { bg: "bg-amber-50", fg: "text-amber-500" },
+};
+function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } {
+  if (!type) return { Icon: FileText, tint: "indigo" };
+  if (type.startsWith("image/")) return { Icon: ImageIcon, tint: "emerald" };
+  if (type.startsWith("video/")) return { Icon: Film, tint: "rose" };
+  if (type.startsWith("audio/")) return { Icon: Music, tint: "violet" };
+  if (type.includes("pdf")) return { Icon: FileText, tint: "red" };
+  if (
+    type.includes("zip") ||
+    type.includes("compressed") ||
+    type.includes("tar")
+  )
+    return { Icon: Archive, tint: "amber" };
+  return { Icon: FileText, tint: "indigo" };
+}
+type FolderOption = { id: string; name: string };
+type MenuPos = { top?: number; bottom?: number; left: number };
+type Props = {
+  file: DriftFile;
+  view: "grid" | "list";
+  folders?: FolderOption[];
+  onExtend: (id: string, days: number) => void;
+  onDelete: (id: string) => void;
+  onShare: (id: string) => Promise<string>;
+  onRevoke: (id: string) => void;
+  onMove?: (id: string, folderId: string | null) => void;
+  onRename?: (id: string) => void;
+  onOpenShare?: (id: string) => void;
+  onPreview?: (file: DriftFile) => void;
+  onOpenDetails?: (file: DriftFile) => void;
+  onOpenVersions?: (file: DriftFile) => void;
+  onToggleFavorite?: (id: string) => void;
+  onEditTags?: (id: string) => void;
+  onRestore?: (id: string) => void;
+  onPermanentDelete?: (id: string) => void;
+  canKeepForever?: boolean;
+  onKeepForever?: (id: string) => void;
+  onUnkeepForever?: (id: string) => void;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
+  anySelected?: boolean;
+  getDragIds?: (id: string) => string[];
+};
+const cardInitial = { opacity: 0, y: 12, scale: 0.97 };
+const cardAnimate = { opacity: 1, y: 0, scale: 1 };
+const cardExit = { opacity: 0, scale: 0.92 };
+const menuInitial = { opacity: 0, y: 8 };
+const menuAnimate = { opacity: 1, y: 0 };
+const menuTransition = { duration: 0.18, ease: "easeOut" };
+const overlayInitial = { opacity: 0 };
+const overlayAnimate = { opacity: 1 };
+const MENU_W = 240;
 
-export default function FileCard({ file, view, folders = [], onExtend, onDelete, onShare, onRevoke, onMove, onRename, onOpenShare, onPreview, onOpenDetails, onOpenVersions, onToggleFavorite, onEditTags, onRestore, onPermanentDelete, canKeepForever = false, onKeepForever, onUnkeepForever, selected = false, onToggleSelect, anySelected = false, getDragIds }: Props) {
-  const { Icon, tint } = kindOf(file.contentType); const tone = TINT[tint]; const isImage = (file.contentType || "").startsWith("image/"); const canPreview = isImage || (file.contentType || "").includes("pdf")
-  const [left, setLeft] = useState(() => timeLeft(file.expiresAt)); const [menuOpen, setMenuOpen] = useState(false); const [moveOpen, setMoveOpen] = useState(false); const [copied, setCopied] = useState(false); const [busy, setBusy] = useState(false); const [pos, setPos] = useState<MenuPos | null>(null); const [coarsePointer, setCoarsePointer] = useState(false); const [thumbFailed, setThumbFailed] = useState(false); const openedAtRef = useRef(0); const justTouchedRef = useRef(false)
-  useEffect(() => { const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30000); return () => clearInterval(t) }, [file.expiresAt])
-  useEffect(() => { const mq = window.matchMedia("(pointer: coarse)"); const update = () => setCoarsePointer(mq.matches); update(); mq.addEventListener?.("change", update); return () => mq.removeEventListener?.("change", update) }, [])
-  const showThumb = isImage && !file.deletedAt && !thumbFailed
-  function closeMenu() { setMenuOpen(false); setMoveOpen(false); setPos(null) }
-  function openMenuAt(btn: HTMLElement | null) { openedAtRef.current = Date.now(); setMoveOpen(false); const desktop = typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches; if (desktop && btn) { const r = btn.getBoundingClientRect(); const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)); const spaceBelow = window.innerHeight - r.bottom; if (spaceBelow > 320) setPos({ top: r.bottom + 6, left }); else setPos({ bottom: window.innerHeight - r.top + 6, left }) } else setPos(null); setMenuOpen(true) }
-  function openMenu(e: React.MouseEvent<HTMLButtonElement>) { e.stopPropagation(); if (justTouchedRef.current) return; openMenuAt(e.currentTarget) }
-  function openMenuTouch(e: React.TouchEvent<HTMLButtonElement>) { e.stopPropagation(); e.preventDefault(); justTouchedRef.current = true; window.setTimeout(() => { justTouchedRef.current = false }, 600); openMenuAt(e.currentTarget) }
-  function dismissMenu(e: React.MouseEvent<HTMLElement>) { e.stopPropagation(); if (Date.now() - openedAtRef.current < 250) return; closeMenu() }
-  function handleDragStart(e: React.DragEvent) { const ids = getDragIds ? getDragIds(file.id) : [file.id]; e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids)); e.dataTransfer.effectAllowed = "move" }
-  const nativeDragStart = handleDragStart as unknown as React.ComponentProps<typeof motion.div>["onDragStart"]
-  function handleContextMenu(e: React.MouseEvent) { if (!onToggleSelect) return; e.preventDefault(); onToggleSelect(file.id) }
-  function preview() { if (file.deletedAt) return; if (onOpenDetails) { onOpenDetails(file); return } if (canPreview && onPreview) onPreview(file) }
-  async function copyLink() { setBusy(true); try { const url = file.shareToken ? shareUrl(file.shareToken) : await onShare(file.id); await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1600) } catch {} finally { setBusy(false); closeMenu() } }
-  const canMove = !!onMove && !file.deletedAt; const moveTargets = folders.filter((f) => f.id !== file.folderId); const showCheckbox = !!onToggleSelect && (anySelected || selected); const canDrag = !file.deletedAt && !coarsePointer
-  const clickable = canPreview || !!onOpenDetails
-  const chipClass = "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " + (file.deletedAt ? "bg-red-50 text-red-600" : file.keepForever ? "bg-drift-50 text-drift-600" : left.urgent ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500")
-  const chipLabel = file.deletedAt ? "Trash" : file.keepForever ? "Forever" : left.label
-  const chipIcon = file.keepForever && !file.deletedAt ? <InfinityIcon size={11} /> : <Clock size={11} />
-  const dlText = file.shareToken && file.shareDownloadLimit ? `${file.shareDownloadCount ?? 0}/${file.shareDownloadLimit}` : null
-  const sharedPill = file.shareToken ? <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex"><Link2 size={11} /> Shared{file.shareHasPassword && <Lock size={10} className="text-drift-500/80" />}{file.shareExpiresAt && <CalendarClock size={10} className="text-drift-500/80" />}{dlText && <span className="text-drift-500/70">{dlText}</span>}</span> : null
-  const checkbox = onToggleSelect ? <button onClick={(e) => { e.stopPropagation(); onToggleSelect(file.id) }} aria-label={selected ? "Deselect" : "Select"} className={"grid h-5 w-5 place-items-center rounded-md border transition " + (selected ? "border-drift-500 bg-drift-500 text-white" : "border-slate-300 bg-white/90 text-transparent hover:border-drift-400 " + (showCheckbox ? "opacity-100" : "opacity-0 group-hover:opacity-100"))}><Check size={13} /></button> : null
-  const panelClass = pos ? "z-10 w-60 max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg" : "relative z-10 m-3 max-h-[75vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-200 bg-white py-1.5 text-[15px] drive-shadow-lg sm:py-1 sm:text-sm"
-  const panelStyle = pos ? { position: "fixed" as const, top: pos.top, bottom: pos.bottom, left: pos.left } : undefined
-  const menu = createPortal(<AnimatePresence>{menuOpen && <motion.div key="file-actions" onClick={dismissMenu} initial={overlayInitial} animate={overlayAnimate} exit={overlayInitial} transition={menuTransition} className={pos ? "fixed inset-0 z-[60]" : "fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40"}><motion.div onClick={(e) => e.stopPropagation()} initial={menuInitial} animate={menuAnimate} exit={menuInitial} transition={menuTransition} style={panelStyle} className={panelClass}>{!moveOpen ? <>{file.deletedAt ? <><button onClick={() => { onRestore?.(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><RotateCcw size={15} /> Restore</button><button onClick={() => { onPermanentDelete?.(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-red-600 hover:bg-red-50"><Trash2 size={15} /> Delete forever</button></> : <>{canPreview && onPreview && <button onClick={() => { onPreview(file); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Eye size={15} /> Preview</button>}<a href={downloadUrl(file.id)} onClick={closeMenu} className="flex items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Download size={15} /> Download</a>{onRename && <button onClick={() => { onRename(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Pencil size={15} /> Rename</button>}{onOpenVersions && <button onClick={() => { onOpenVersions(file); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><History size={15} /> Version history</button>}<button onClick={() => { onToggleFavorite?.(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Star size={15} className={file.favorite ? "fill-amber-400 text-amber-400" : ""} /> {file.favorite ? "Unfavorite" : "Favorite"}</button><button onClick={() => { onEditTags?.(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Tags size={15} /> Edit tags</button><button disabled={busy} onClick={copyLink} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50">{copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}{file.shareToken ? "Copy link" : "Get link"}</button>{onOpenShare && <button onClick={() => { onOpenShare(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><SlidersHorizontal size={15} /> Share settings…</button>}{file.shareToken && <button onClick={() => { onRevoke(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><X size={15} /> Revoke link</button>}{canMove && <button onClick={() => setMoveOpen(true)} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><FolderInput size={15} /> Move to<ChevronRight size={14} className="ml-auto text-slate-400" /></button>}{!file.keepForever && <button onClick={() => { onExtend(file.id, 7); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Clock size={15} /> Extend 7 days</button>}{canKeepForever && !file.keepForever && onKeepForever && <button onClick={() => { onKeepForever(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 font-medium text-drift-600 hover:bg-drift-50"><InfinityIcon size={15} /> Keep forever</button>}{file.keepForever && onUnkeepForever && <button onClick={() => { onUnkeepForever(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><Clock size={15} /> Stop keeping forever</button>}<button onClick={() => { onDelete(file.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-red-600 hover:bg-red-50"><Trash2 size={15} /> Move to Trash</button></>}</> : <><button onClick={() => setMoveOpen(false)} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 font-medium text-slate-600 hover:bg-slate-50"><ChevronLeft size={15} /> Move to…</button><div className="my-1 h-px bg-slate-100" /><div className="max-h-52 overflow-y-auto">{file.folderId && onMove && <button onClick={() => { onMove(file.id, null); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"><FolderMinus size={15} /> Remove from folder</button>}{moveTargets.map((f) => <button key={f.id} onClick={() => { onMove?.(file.id, f.id); closeMenu() }} className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-left text-slate-700 hover:bg-slate-50"><FolderInput size={15} className="shrink-0 text-amber-500" /><span className="truncate">{f.name}</span></button>)}{moveTargets.length === 0 && !file.folderId && <p className="px-4 py-3 sm:px-3 sm:py-2 text-xs text-slate-400">No other folders yet.</p>}</div></>}</motion.div></motion.div>}</AnimatePresence>, document.body)
-  const tagLine = (file.tags ?? []).length > 0 ? <p className="mt-0.5 truncate text-[11px] text-slate-400">#{(file.tags ?? []).join(" #")}</p> : null
-  if (view === "list") return <motion.div layout draggable={canDrag} onDragStart={nativeDragStart} onContextMenu={handleContextMenu} initial={cardInitial} animate={cardAnimate} exit={cardExit} className={"group relative flex items-center gap-3 px-4 py-2.5 transition " + (selected ? "bg-drift-500/10" : "hover:bg-slate-50")}>{onToggleSelect && <div className="flex w-5 justify-center">{checkbox}</div>}<button type="button" onClick={preview} className={"grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " + tone.bg + " " + tone.fg + (canPreview ? " cursor-zoom-in" : clickable ? " cursor-pointer" : "")}>{showThumb ? <img src={thumbUrl(file.id)} alt={file.filename} className="h-full w-full object-cover" loading="lazy" decoding="async" onError={() => setThumbFailed(true)} /> : <Icon size={18} />}</button><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800" title={file.filename}>{file.favorite && <Star size={12} className="mr-1 inline fill-amber-400 text-amber-400" />}{file.filename}</p>{tagLine}<p className="text-xs text-slate-400 sm:hidden">{formatBytes(file.sizeBytes)}</p></div>{sharedPill}<span className={chipClass}>{chipIcon} {chipLabel}</span><span className="hidden w-20 text-right text-xs text-slate-400 sm:block">{formatBytes(file.sizeBytes)}</span><div className="relative"><button type="button" onClick={openMenu} onTouchEnd={openMenuTouch} aria-label="File actions" className="grid h-8 w-8 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"><MoreVertical size={16} /></button>{menu}</div></motion.div>
-  return <motion.div layout draggable={canDrag} onDragStart={nativeDragStart} onContextMenu={handleContextMenu} initial={cardInitial} animate={cardAnimate} exit={cardExit} className={"group relative flex flex-col rounded-2xl border bg-white drive-shadow transition hover:shadow-md " + (selected ? "border-drift-400 ring-2 ring-drift-400/60" : "border-slate-200 hover:border-slate-300")}><div onClick={preview} className={"relative flex h-24 items-center justify-center overflow-hidden rounded-t-2xl " + tone.bg + (canPreview ? " cursor-zoom-in" : clickable ? " cursor-pointer" : "")}>{showThumb ? <img src={thumbUrl(file.id)} alt={file.filename} className="h-full w-full object-cover" loading="lazy" decoding="async" onError={() => setThumbFailed(true)} /> : <Icon size={34} className={tone.fg} />}{onToggleSelect && <div className="absolute left-2 top-2">{checkbox}</div>}<span className={"absolute right-2 top-2 " + chipClass}>{chipIcon} {chipLabel}</span></div><div className="flex items-center gap-2 px-3 py-2.5"><div className={"grid h-7 w-7 shrink-0 place-items-center rounded-md " + tone.bg + " " + tone.fg}><Icon size={15} /></div><p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800" title={file.filename}>{file.favorite && <Star size={12} className="mr-1 inline fill-amber-400 text-amber-400" />}{file.filename}</p>{file.shareToken && <Link2 size={13} className="shrink-0 text-drift-500" />}{file.shareToken && file.shareHasPassword && <Lock size={12} className="shrink-0 text-slate-400" />}<div className="relative"><button type="button" onClick={openMenu} onTouchEnd={openMenuTouch} aria-label="File actions" className="grid h-7 w-7 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><MoreVertical size={16} /></button>{menu}</div></div><div className="-mt-1 px-3 pb-2.5 text-xs text-slate-400">{formatBytes(file.sizeBytes)}{dlText ? ` · ${dlText} downloads` : ""}{(file.tags ?? []).length > 0 ? " · #" + (file.tags ?? []).join(" #") : ""}</div></motion.div>
+export default function FileCard({
+  file,
+  view,
+  folders = [],
+  onExtend,
+  onDelete,
+  onShare,
+  onRevoke,
+  onMove,
+  onRename,
+  onOpenShare,
+  onPreview,
+  onOpenDetails,
+  onOpenVersions,
+  onToggleFavorite,
+  onEditTags,
+  onRestore,
+  onPermanentDelete,
+  canKeepForever = false,
+  onKeepForever,
+  onUnkeepForever,
+  selected = false,
+  onToggleSelect,
+  anySelected = false,
+  getDragIds,
+}: Props) {
+  const { Icon, tint } = kindOf(file.contentType);
+  const tone = TINT[tint];
+  const isImage = (file.contentType || "").startsWith("image/");
+  const canPreview = isImage || (file.contentType || "").includes("pdf");
+  const [left, setLeft] = useState(() => timeLeft(file.expiresAt));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pos, setPos] = useState<MenuPos | null>(null);
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const openedAtRef = useRef(0);
+  const justTouchedRef = useRef(false);
+  useEffect(() => {
+    const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30000);
+    return () => clearInterval(t);
+  }, [file.expiresAt]);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    const update = () => setCoarsePointer(mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
+  const showThumb = isImage && !file.deletedAt && !thumbFailed;
+  function closeMenu() {
+    setMenuOpen(false);
+    setMoveOpen(false);
+    setPos(null);
+  }
+  function openMenuAt(btn: HTMLElement | null) {
+    openedAtRef.current = Date.now();
+    setMoveOpen(false);
+    const desktop =
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 640px)").matches;
+    if (desktop && btn) {
+      const r = btn.getBoundingClientRect();
+      const left = Math.max(
+        8,
+        Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8),
+      );
+      const spaceBelow = window.innerHeight - r.bottom;
+      if (spaceBelow > 320) setPos({ top: r.bottom + 6, left });
+      else setPos({ bottom: window.innerHeight - r.top + 6, left });
+    } else setPos(null);
+    setMenuOpen(true);
+  }
+  function openMenu(e: React.MouseEvent<HTMLButtonElement>) {
+    e.stopPropagation();
+    if (justTouchedRef.current) return;
+    openMenuAt(e.currentTarget);
+  }
+  function openMenuTouch(e: React.TouchEvent<HTMLButtonElement>) {
+    e.stopPropagation();
+    e.preventDefault();
+    justTouchedRef.current = true;
+    window.setTimeout(() => {
+      justTouchedRef.current = false;
+    }, 600);
+    openMenuAt(e.currentTarget);
+  }
+  function dismissMenu(e: React.MouseEvent<HTMLElement>) {
+    e.stopPropagation();
+    if (Date.now() - openedAtRef.current < 250) return;
+    closeMenu();
+  }
+  function handleDragStart(e: React.DragEvent) {
+    const ids = getDragIds ? getDragIds(file.id) : [file.id];
+    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
+    e.dataTransfer.effectAllowed = "move";
+  }
+  const nativeDragStart = handleDragStart as unknown as React.ComponentProps<
+    typeof motion.div
+  >["onDragStart"];
+  function handleContextMenu(e: React.MouseEvent) {
+    if (!onToggleSelect) return;
+    e.preventDefault();
+    onToggleSelect(file.id);
+  }
+  function preview() {
+    if (file.deletedAt) return;
+    if (onOpenDetails) {
+      onOpenDetails(file);
+      return;
+    }
+    if (canPreview && onPreview) onPreview(file);
+  }
+  async function copyLink() {
+    setBusy(true);
+    try {
+      const url =
+        (file.shareToken ? await shareUrlForFile(file) : null) ??
+        (await onShare(file.id));
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+    } finally {
+      setBusy(false);
+      closeMenu();
+    }
+  }
+  const canMove = !!onMove && !file.deletedAt;
+  const moveTargets = folders.filter((f) => f.id !== file.folderId);
+  const showCheckbox = !!onToggleSelect && (anySelected || selected);
+  const canDrag = !file.deletedAt && !coarsePointer;
+  const clickable = canPreview || !!onOpenDetails;
+  const chipClass =
+    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
+    (file.deletedAt
+      ? "bg-red-50 text-red-600"
+      : file.keepForever
+        ? "bg-drift-50 text-drift-600"
+        : left.urgent
+          ? "bg-red-50 text-red-600"
+          : "bg-slate-100 text-slate-500");
+  const chipLabel = file.deletedAt
+    ? "Trash"
+    : file.keepForever
+      ? "Forever"
+      : left.label;
+  const chipIcon =
+    file.keepForever && !file.deletedAt ? (
+      <InfinityIcon size={11} />
+    ) : (
+      <Clock size={11} />
+    );
+  const dlText =
+    file.shareToken && file.shareDownloadLimit
+      ? `${file.shareDownloadCount ?? 0}/${file.shareDownloadLimit}`
+      : null;
+  const sharedPill = file.shareToken ? (
+    <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
+      <Link2 size={11} /> Shared
+      {file.shareHasPassword && (
+        <Lock size={10} className="text-drift-500/80" />
+      )}
+      {file.shareExpiresAt && (
+        <CalendarClock size={10} className="text-drift-500/80" />
+      )}
+      {dlText && <span className="text-drift-500/70">{dlText}</span>}
+    </span>
+  ) : null;
+  const checkbox = onToggleSelect ? (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggleSelect(file.id);
+      }}
+      aria-label={selected ? "Deselect" : "Select"}
+      className={
+        "grid h-5 w-5 place-items-center rounded-md border transition " +
+        (selected
+          ? "border-drift-500 bg-drift-500 text-white"
+          : "border-slate-300 bg-white/90 text-transparent hover:border-drift-400 " +
+            (showCheckbox
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100"))
+      }
+    >
+      <Check size={13} />
+    </button>
+  ) : null;
+  const panelClass = pos
+    ? "z-10 w-60 max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
+    : "relative z-10 m-3 max-h-[75vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-200 bg-white py-1.5 text-[15px] drive-shadow-lg sm:py-1 sm:text-sm";
+  const panelStyle = pos
+    ? {
+        position: "fixed" as const,
+        top: pos.top,
+        bottom: pos.bottom,
+        left: pos.left,
+      }
+    : undefined;
+  const menu = createPortal(
+    <AnimatePresence>
+      {menuOpen && (
+        <motion.div
+          key="file-actions"
+          onClick={dismissMenu}
+          initial={overlayInitial}
+          animate={overlayAnimate}
+          exit={overlayInitial}
+          transition={menuTransition}
+          className={
+            pos
+              ? "fixed inset-0 z-[60]"
+              : "fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40"
+          }
+        >
+          <motion.div
+            onClick={(e) => e.stopPropagation()}
+            initial={menuInitial}
+            animate={menuAnimate}
+            exit={menuInitial}
+            transition={menuTransition}
+            style={panelStyle}
+            className={panelClass}
+          >
+            {!moveOpen ? (
+              <>
+                {file.deletedAt ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        onRestore?.(file.id);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                    >
+                      <RotateCcw size={15} /> Restore
+                    </button>
+                    <button
+                      onClick={() => {
+                        onPermanentDelete?.(file.id);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 size={15} /> Delete forever
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {canPreview && onPreview && (
+                      <button
+                        onClick={() => {
+                          onPreview(file);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <Eye size={15} /> Preview
+                      </button>
+                    )}
+                    {file.encryptionMode === "aes-gcm" ? (
+                      <button
+                        onClick={() => {
+                          closeMenu();
+                          downloadDecryptedFile(
+                            file,
+                            downloadUrl(file.id),
+                          ).catch((error) =>
+                            window.alert((error as Error).message),
+                          );
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <Download size={15} /> Decrypt &amp; download
+                      </button>
+                    ) : (
+                      <a
+                        href={downloadUrl(file.id)}
+                        onClick={closeMenu}
+                        className="flex items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <Download size={15} /> Download
+                      </a>
+                    )}
+                    {onRename && (
+                      <button
+                        onClick={() => {
+                          onRename(file.id);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <Pencil size={15} /> Rename
+                      </button>
+                    )}
+                    {onOpenVersions && (
+                      <button
+                        onClick={() => {
+                          onOpenVersions(file);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <History size={15} /> Version history
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        onToggleFavorite?.(file.id);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                    >
+                      <Star
+                        size={15}
+                        className={
+                          file.favorite ? "fill-amber-400 text-amber-400" : ""
+                        }
+                      />{" "}
+                      {file.favorite ? "Unfavorite" : "Favorite"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        onEditTags?.(file.id);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                    >
+                      <Tags size={15} /> Edit tags
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={copyLink}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {copied ? (
+                        <Check size={15} className="text-emerald-500" />
+                      ) : (
+                        <Link2 size={15} />
+                      )}
+                      {file.shareToken ? "Copy link" : "Get link"}
+                    </button>
+                    {onOpenShare && (
+                      <button
+                        onClick={() => {
+                          onOpenShare(file.id);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <SlidersHorizontal size={15} /> Share settings…
+                      </button>
+                    )}
+                    {file.shareToken && (
+                      <button
+                        onClick={() => {
+                          onRevoke(file.id);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <X size={15} /> Revoke link
+                      </button>
+                    )}
+                    {canMove && (
+                      <button
+                        onClick={() => setMoveOpen(true)}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <FolderInput size={15} /> Move to
+                        <ChevronRight
+                          size={14}
+                          className="ml-auto text-slate-400"
+                        />
+                      </button>
+                    )}
+                    {!file.keepForever && (
+                      <button
+                        onClick={() => {
+                          onExtend(file.id, 7);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <Clock size={15} /> Extend 7 days
+                      </button>
+                    )}
+                    {canKeepForever && !file.keepForever && onKeepForever && (
+                      <button
+                        onClick={() => {
+                          onKeepForever(file.id);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 font-medium text-drift-600 hover:bg-drift-50"
+                      >
+                        <InfinityIcon size={15} /> Keep forever
+                      </button>
+                    )}
+                    {file.keepForever && onUnkeepForever && (
+                      <button
+                        onClick={() => {
+                          onUnkeepForever(file.id);
+                          closeMenu();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        <Clock size={15} /> Stop keeping forever
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        onDelete(file.id);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 size={15} /> Move to Trash
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setMoveOpen(false)}
+                  className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  <ChevronLeft size={15} /> Move to…
+                </button>
+                <div className="my-1 h-px bg-slate-100" />
+                <div className="max-h-52 overflow-y-auto">
+                  {file.folderId && onMove && (
+                    <button
+                      onClick={() => {
+                        onMove(file.id, null);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                    >
+                      <FolderMinus size={15} /> Remove from folder
+                    </button>
+                  )}
+                  {moveTargets.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => {
+                        onMove?.(file.id, f.id);
+                        closeMenu();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-left text-slate-700 hover:bg-slate-50"
+                    >
+                      <FolderInput
+                        size={15}
+                        className="shrink-0 text-amber-500"
+                      />
+                      <span className="truncate">{f.name}</span>
+                    </button>
+                  ))}
+                  {moveTargets.length === 0 && !file.folderId && (
+                    <p className="px-4 py-3 sm:px-3 sm:py-2 text-xs text-slate-400">
+                      No other folders yet.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+  const tagLine =
+    (file.tags ?? []).length > 0 ? (
+      <p className="mt-0.5 truncate text-[11px] text-slate-400">
+        #{(file.tags ?? []).join(" #")}
+      </p>
+    ) : null;
+  if (view === "list")
+    return (
+      <motion.div
+        layout
+        draggable={canDrag}
+        onDragStart={nativeDragStart}
+        onContextMenu={handleContextMenu}
+        initial={cardInitial}
+        animate={cardAnimate}
+        exit={cardExit}
+        className={
+          "group relative flex items-center gap-3 px-4 py-2.5 transition " +
+          (selected ? "bg-drift-500/10" : "hover:bg-slate-50")
+        }
+      >
+        {onToggleSelect && (
+          <div className="flex w-5 justify-center">{checkbox}</div>
+        )}
+        <button
+          type="button"
+          onClick={preview}
+          className={
+            "grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " +
+            tone.bg +
+            " " +
+            tone.fg +
+            (canPreview
+              ? " cursor-zoom-in"
+              : clickable
+                ? " cursor-pointer"
+                : "")
+          }
+        >
+          {showThumb ? (
+            <img
+              src={thumbUrl(file.id)}
+              alt={file.filename}
+              className="h-full w-full object-cover"
+              loading="lazy"
+              decoding="async"
+              onError={() => setThumbFailed(true)}
+            />
+          ) : (
+            <Icon size={18} />
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <p
+            className="truncate text-sm font-medium text-slate-800"
+            title={file.filename}
+          >
+            {file.favorite && (
+              <Star
+                size={12}
+                className="mr-1 inline fill-amber-400 text-amber-400"
+              />
+            )}
+            {file.filename}
+          </p>
+          {tagLine}
+          <p className="text-xs text-slate-400 sm:hidden">
+            {formatBytes(file.sizeBytes)}
+          </p>
+        </div>
+        {sharedPill}
+        <span className={chipClass}>
+          {chipIcon} {chipLabel}
+        </span>
+        <span className="hidden w-20 text-right text-xs text-slate-400 sm:block">
+          {formatBytes(file.sizeBytes)}
+        </span>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={openMenu}
+            onTouchEnd={openMenuTouch}
+            aria-label="File actions"
+            className="grid h-8 w-8 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <MoreVertical size={16} />
+          </button>
+          {menu}
+        </div>
+      </motion.div>
+    );
+  return (
+    <motion.div
+      layout
+      draggable={canDrag}
+      onDragStart={nativeDragStart}
+      onContextMenu={handleContextMenu}
+      initial={cardInitial}
+      animate={cardAnimate}
+      exit={cardExit}
+      className={
+        "group relative flex flex-col rounded-2xl border bg-white drive-shadow transition hover:shadow-md " +
+        (selected
+          ? "border-drift-400 ring-2 ring-drift-400/60"
+          : "border-slate-200 hover:border-slate-300")
+      }
+    >
+      <div
+        onClick={preview}
+        className={
+          "relative flex h-24 items-center justify-center overflow-hidden rounded-t-2xl " +
+          tone.bg +
+          (canPreview ? " cursor-zoom-in" : clickable ? " cursor-pointer" : "")
+        }
+      >
+        {showThumb ? (
+          <img
+            src={thumbUrl(file.id)}
+            alt={file.filename}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+            onError={() => setThumbFailed(true)}
+          />
+        ) : (
+          <Icon size={34} className={tone.fg} />
+        )}
+        {onToggleSelect && (
+          <div className="absolute left-2 top-2">{checkbox}</div>
+        )}
+        <span className={"absolute right-2 top-2 " + chipClass}>
+          {chipIcon} {chipLabel}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <div
+          className={
+            "grid h-7 w-7 shrink-0 place-items-center rounded-md " +
+            tone.bg +
+            " " +
+            tone.fg
+          }
+        >
+          <Icon size={15} />
+        </div>
+        <p
+          className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800"
+          title={file.filename}
+        >
+          {file.favorite && (
+            <Star
+              size={12}
+              className="mr-1 inline fill-amber-400 text-amber-400"
+            />
+          )}
+          {file.filename}
+        </p>
+        {file.shareToken && (
+          <Link2 size={13} className="shrink-0 text-drift-500" />
+        )}
+        {file.shareToken && file.shareHasPassword && (
+          <Lock size={12} className="shrink-0 text-slate-400" />
+        )}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={openMenu}
+            onTouchEnd={openMenuTouch}
+            aria-label="File actions"
+            className="grid h-7 w-7 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <MoreVertical size={16} />
+          </button>
+          {menu}
+        </div>
+      </div>
+      <div className="-mt-1 px-3 pb-2.5 text-xs text-slate-400">
+        {formatBytes(file.sizeBytes)}
+        {dlText ? ` · ${dlText} downloads` : ""}
+        {(file.tags ?? []).length > 0
+          ? " · #" + (file.tags ?? []).join(" #")
+          : ""}
+      </div>
+    </motion.div>
+  );
 }
