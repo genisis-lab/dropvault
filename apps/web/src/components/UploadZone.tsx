@@ -69,7 +69,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Errors that will never succeed on retry (quota, type, size, permission, auth).
 // Everything else is treated as transient and retried with backoff.
 function isPermanentError(message: string): boolean {
-  return /quota|not allowed|suspended|permission|exceeds|too large|413|415|403|401|400/i.test(
+  return /quota|not allowed|suspended|permission|exceeds|too large|offline|cancelled|413|415|403|401|400/i.test(
     message,
   );
 }
@@ -226,7 +226,11 @@ export default function UploadZone({
           !encrypted && payload.size > MULTIPART_THRESHOLD
             ? await getUploadCheckpoint(file).catch(() => null)
             : null;
-        const checksum = existing ? null : await fileContentHash(payload);
+        // AES-GCM already authenticates the ciphertext and uses a random nonce,
+        // so encrypted payload hashes cannot deduplicate files. Skipping this
+        // avoids buffering the full ciphertext a second time in browser memory.
+        const checksum =
+          existing || encrypted ? null : await fileContentHash(payload);
         const releaseAt = releaseAtInput
           ? Math.floor(new Date(releaseAtInput).getTime() / 1000)
           : null;
@@ -311,8 +315,9 @@ export default function UploadZone({
     ],
   );
 
-  // Run a set of jobs through a bounded worker pool so large batches upload
-  // concurrently without overwhelming the backend.
+  // Browser AES-GCM currently buffers a complete file. Encrypt one at a time so
+  // a multi-file batch cannot retain several plaintext/ciphertext pairs at once.
+  // Normal uploads keep bounded concurrency for throughput.
   const runJobs = useCallback(
     async (entries: Array<{ key: string; file: File }>) => {
       if (!entries.length) return;
@@ -323,14 +328,15 @@ export default function UploadZone({
           await uploadOne(current.key, current.file);
         }
       };
+      const concurrency = encryptChoice ? 1 : UPLOAD_CONCURRENCY;
       await Promise.all(
         Array.from(
-          { length: Math.min(UPLOAD_CONCURRENCY, entries.length) },
+          { length: Math.min(concurrency, entries.length) },
           () => worker(),
         ),
       );
     },
-    [uploadOne],
+    [encryptChoice, uploadOne],
   );
 
   const handleFiles = useCallback(
