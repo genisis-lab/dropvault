@@ -32,7 +32,7 @@ import {
 import type { DriftFile } from "../lib/api";
 import { downloadUrl, shareUrlForFile, thumbUrl } from "../lib/api";
 import { downloadDecryptedFile } from "../lib/encryption";
-import { copyText } from "../lib/clipboard";
+import { copyTextFrom } from "../lib/clipboard";
 import { formatBytes, timeLeft } from "../lib/format";
 import { useToast } from "./Toast";
 
@@ -217,12 +217,14 @@ export default function FileCard({
   async function copyLink() {
     setBusy(true);
     try {
-      const url =
-        (file.shareToken ? await shareUrlForFile(file) : null) ??
-        (await onShare(file.id));
-      await copyText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      const { result } = await copyTextFrom(async () =>
+        ((file.shareToken ? await shareUrlForFile(file) : null) ??
+          (await onShare(file.id))),
+      );
+      if (result === "copied") {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      }
     } catch (e) {
       error((e as Error)?.message || "Couldn't copy the link");
     } finally {

@@ -22,7 +22,7 @@ import {
   type DriftFile,
   type ShareEvent,
 } from "../lib/api";
-import { copyText } from "../lib/clipboard";
+import { copyText, copyTextFrom } from "../lib/clipboard";
 import { useToast } from "./Toast";
 
 const EXPIRY_CHOICES: { value: number; label: string }[] = [
@@ -98,7 +98,7 @@ export default function ShareDialog({
     if (!file) return;
     setBusy(true);
     try {
-      const res = await createShare(file.id, {
+      const sharePromise = createShare(file.id, {
         password: password.trim() ? password.trim() : null,
         downloadLimit: limit.trim()
           ? Math.max(1, Math.floor(Number(limit)))
@@ -111,12 +111,12 @@ export default function ShareDialog({
         ipAllowlist: linesToList(ipAllowlist),
         countryAllowlist: linesToList(countryAllowlist),
       });
+      const { result: copyResult } = await copyTextFrom(() =>
+        sharePromise.then((result) => result.url),
+      );
+      const res = await sharePromise;
       setUrl(res.url);
-      let autoCopied = false;
-      try {
-        await copyText(res.url);
-        autoCopied = true;
-      } catch {}
+      const autoCopied = copyResult === "copied";
       if (autoCopied) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1600);
