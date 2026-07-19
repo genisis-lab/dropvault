@@ -22,6 +22,7 @@ import {
   type AdminRole,
 } from "../middleware/admin";
 import { isSafeWebhookUrl } from "../lib/url";
+import { normalizeTheme } from "../lib/theme";
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
 import type { Bindings, Variables } from "../types";
 
@@ -33,6 +34,7 @@ type SettingsKey =
   | "defaultQuotaBytes"
   | "requirePasswordForShares"
   | "publicSharingEnabled"
+  | "defaultTheme"
   | "signupMode"
   | "trashRetentionDays"
   | "notifyEmail"
@@ -71,6 +73,7 @@ const settingsKeys: SettingsKey[] = [
   "defaultQuotaBytes",
   "requirePasswordForShares",
   "publicSharingEnabled",
+  "defaultTheme",
   "signupMode",
   "trashRetentionDays",
   "notifyEmail",
@@ -349,6 +352,7 @@ async function settingsMap(db: ReturnType<typeof getDb>) {
     defaultQuotaBytes: "1073741824",
     requirePasswordForShares: "false",
     publicSharingEnabled: "true",
+    defaultTheme: "neubrutalism",
     signupMode: "open",
     trashRetentionDays: "30",
     notifyEmail: "",
@@ -1441,6 +1445,7 @@ admin.post("/settings", async (c) => {
     let value = String(body[key] ?? "");
     if (key === "signupMode")
       value = value === "approval" ? "approval" : "open";
+    if (key === "defaultTheme") value = normalizeTheme(value);
     await db
       .delete(schema.appSettings)
       .where(eq(schema.appSettings.key, key))

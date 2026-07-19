@@ -66,7 +66,10 @@ export default function Sidebar(props: SidebarProps) {
   ).length;
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-slate-200 bg-white/80 px-3 py-4 backdrop-blur-xl md:flex">
+      <aside
+        className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-slate-200 bg-white/80 px-3 py-4 backdrop-blur-xl md:flex"
+        data-ui="sidebar"
+      >
         <SidebarContent
           {...props}
           pendingLimitRequests={pendingLimitRequests}
@@ -89,6 +92,7 @@ export default function Sidebar(props: SidebarProps) {
               exit={drawerInitial}
               transition={drawerTransition}
               className="absolute inset-y-0 left-0 flex w-72 max-w-[80vw] flex-col border-r border-slate-200 bg-white px-3 py-4"
+              data-ui="sidebar"
             >
               <SidebarContent
                 {...props}
@@ -151,6 +155,7 @@ function SidebarContent({
           whileTap={newTap}
           onClick={run(onNew)}
           className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-3 pl-4 pr-5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:shadow-glow-500/40"
+          data-ui="new-upload"
         >
           <Plus size={20} /> New
         </motion.button>
@@ -160,6 +165,7 @@ function SidebarContent({
           title="New folder"
           aria-label="New folder"
           className="grid h-12 w-12 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-drift-300 hover:text-drift-600"
+          data-ui="new-folder"
         >
           <FolderPlus size={20} />
         </motion.button>
@@ -172,6 +178,7 @@ function SidebarContent({
             <button
               key={item.id}
               onClick={run(() => setFilter(item.id))}
+              aria-current={active ? "page" : undefined}
               className={
                 "flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium transition " +
                 (active
@@ -217,6 +224,7 @@ function SidebarContent({
                 ? "border-amber-200 bg-amber-50/40"
                 : "border-slate-200")
           }
+          data-ui="storage-card"
         >
           <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
             <HardDrive size={16} /> Storage
