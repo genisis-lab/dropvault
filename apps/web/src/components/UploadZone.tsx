@@ -410,7 +410,7 @@ export default function UploadZone({
   const doneCount = jobList.filter(([, j]) => j.state === "done").length;
 
   return (
-    <div>
+    <div data-ui="upload-zone">
       <motion.div
         animate={dragging ? zoneActive : zoneIdle}
         onDragOver={(e) => {
@@ -425,6 +425,7 @@ export default function UploadZone({
         }}
         onClick={() => ref.current?.click()}
         className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-10 text-center drive-shadow transition sm:py-12"
+        data-ui="upload-target"
       >
         <motion.div
           animate={dragging ? iconUp : iconDown}

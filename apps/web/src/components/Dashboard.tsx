@@ -56,7 +56,14 @@ import { signOut } from "../lib/auth-client";
 import { accountStatus } from "../lib/account";
 import { formatBytes } from "../lib/format";
 import { useLayout } from "../lib/layout";
-import { readSort, writeSort, readView, writeView } from "../lib/prefs";
+import { useTheme } from "../lib/theme";
+import {
+  hasStoredView,
+  readSort,
+  writeSort,
+  readView,
+  writeView,
+} from "../lib/prefs";
 import { downloadFilesAsZip } from "../lib/zip";
 import { downloadDecryptedFile } from "../lib/encryption";
 import Sidebar, { type Filter } from "./Sidebar";
@@ -164,6 +171,7 @@ export default function Dashboard({
 }) {
   const qc = useQueryClient();
   const { layout } = useLayout();
+  const { theme } = useTheme();
   const { success: toastOk, error: toastErr } = useToast();
   const errHandler = (fallback: string) => (e: unknown) =>
     toastErr((e as Error)?.message || fallback);
@@ -201,6 +209,12 @@ export default function Dashboard({
   const dragDepth = useRef(0);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (hasStoredView()) return;
+    setViewState(
+      theme === "neubrutalism" || theme === "quiet" ? "list" : "grid",
+    );
+  }, [theme]);
   function setView(v: ViewMode) {
     setViewState(v);
     writeView(v);
@@ -565,6 +579,8 @@ export default function Dashboard({
   const detailFolder = folders.find((f) => f.id === detailFolderId) ?? null;
   const atRoot = currentFolderId === null;
   const calmHome = layout === "calm" && atRoot && filter === "all";
+  const isProductivityTheme =
+    theme === "neubrutalism" || theme === "quiet";
   function clearSelection() {
     setSelected(new Set());
     setMoveBarOpen(false);
@@ -851,7 +867,7 @@ export default function Dashboard({
     dialog && dialog.mode !== "create" ? dialog.current : "";
   const dialogConfirm = dialog?.mode === "create" ? "Create" : "Rename";
   return (
-    <div>
+    <div data-ui="dashboard-shell">
       <Sidebar
         onNew={() => uploadInputRef.current?.click()}
         onNewFolder={() => setDialog({ mode: "create" })}
@@ -868,7 +884,7 @@ export default function Dashboard({
         onRequestMore={requestMoreLimit}
         quotaBytes={quotaBytes}
       />
-      <div className="md:pl-60">
+      <div className="md:pl-60" data-ui="dashboard-content">
         <Topbar
           search={search}
           setSearch={setSearch}
@@ -881,7 +897,10 @@ export default function Dashboard({
           onOpenSecurity={() => setSecurityOpen(true)}
           onOpenTeams={() => setTeamsOpen(true)}
         />
-        <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <main
+          className="mx-auto max-w-6xl px-4 py-6 sm:px-6"
+          data-ui="workspace"
+        >
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
               {currentFolder && (
@@ -1013,7 +1032,11 @@ export default function Dashboard({
               folderName={currentFolder?.name}
             />
           )}
-          {calmHome && !q && typeScope === "all" && recentFiles.length > 0 && (
+          {calmHome &&
+            !isProductivityTheme &&
+            !q &&
+            typeScope === "all" &&
+            recentFiles.length > 0 && (
             <div className="mt-6">
               <RecentStrip
                 files={recentFiles}
@@ -1021,7 +1044,11 @@ export default function Dashboard({
               />
             </div>
           )}
-          {calmHome && !q && typeScope === "all" && liveFiles.length > 0 && (
+          {calmHome &&
+            !isProductivityTheme &&
+            !q &&
+            typeScope === "all" &&
+            liveFiles.length > 0 && (
             <div className="mt-6">
               <StorageBreakdown files={liveFiles} />
             </div>
@@ -1043,7 +1070,7 @@ export default function Dashboard({
                   layout
                   className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
                 >
-                  <AnimatePresence mode="popLayout">
+                  <AnimatePresence>
                     {visibleFolders.map((fd) => (
                       <FolderCard
                         key={fd.id}
@@ -1099,7 +1126,7 @@ export default function Dashboard({
                   layout
                   className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4"
                 >
-                  <AnimatePresence mode="popLayout">
+                  <AnimatePresence>
                     {pagedFiles.map((f) => (
                       <FileCard
                         key={f.id}
@@ -1153,8 +1180,23 @@ export default function Dashboard({
                   </AnimatePresence>
                 </motion.div>
               ) : (
-                <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow">
-                  <AnimatePresence mode="popLayout">
+                <div
+                  className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow"
+                  data-ui="file-list"
+                >
+                  <div
+                    className="hidden px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid"
+                    data-ui="file-list-header"
+                  >
+                    <span />
+                    <span />
+                    <span>Name</span>
+                    <span>Security</span>
+                    <span>Expires</span>
+                    <span className="text-right">Size</span>
+                    <span className="text-right">Actions</span>
+                  </div>
+                  <AnimatePresence>
                     {pagedFiles.map((f) => (
                       <FileCard
                         key={f.id}
@@ -1218,6 +1260,18 @@ export default function Dashboard({
               )}
             </div>
           )}
+          {theme === "neubrutalism" &&
+            calmHome &&
+            !q &&
+            typeScope === "all" &&
+            recentFiles.length > 0 && (
+              <div className="mt-6">
+                <RecentStrip
+                  files={recentFiles}
+                  onOpen={(file) => setDetailFile(file)}
+                />
+              </div>
+            )}
         </main>
       </div>
       <AnimatePresence>
