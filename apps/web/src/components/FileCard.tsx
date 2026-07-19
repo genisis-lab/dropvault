@@ -262,7 +262,10 @@ export default function FileCard({
       ? `${file.shareDownloadCount ?? 0}/${file.shareDownloadLimit}`
       : null;
   const sharedPill = file.shareToken ? (
-    <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
+    <span
+      className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex"
+      data-ui="shared-label"
+    >
       <Link2 size={11} /> Shared
       {file.shareHasPassword && (
         <Lock size={10} className="text-drift-500/80" />
@@ -275,7 +278,10 @@ export default function FileCard({
   ) : null;
   const encryptedPill =
     file.encryptionMode === "aes-gcm" ? (
-      <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 sm:inline-flex">
+      <span
+        className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 sm:inline-flex"
+        data-ui="encrypted-label"
+      >
         <Lock size={10} /> Encrypted
       </span>
     ) : null;
@@ -603,6 +609,7 @@ export default function FileCard({
           "group relative flex items-center gap-3 px-4 py-2.5 transition " +
           (selected ? "bg-drift-500/10" : "hover:bg-slate-50")
         }
+        data-ui="file-row"
       >
         {onToggleSelect && (
           <div className="flex w-5 justify-center">{checkbox}</div>
@@ -610,6 +617,7 @@ export default function FileCard({
         <button
           type="button"
           onClick={preview}
+          aria-label={`Open details for ${file.filename}`}
           className={
             "grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " +
             tone.bg +
@@ -621,6 +629,7 @@ export default function FileCard({
                 ? " cursor-pointer"
                 : "")
           }
+          data-ui="file-icon"
         >
           {showThumb ? (
             <img
@@ -635,7 +644,7 @@ export default function FileCard({
             <Icon size={18} />
           )}
         </button>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1" data-ui="file-name">
           <p
             className="truncate text-sm font-medium text-slate-800"
             title={file.filename}
@@ -653,15 +662,20 @@ export default function FileCard({
             {formatBytes(file.sizeBytes)}
           </p>
         </div>
-        {sharedPill}
-        {encryptedPill}
-        <span className={chipClass}>
+        <div className="hidden items-center gap-1.5 sm:flex" data-ui="file-security">
+          {encryptedPill}
+          {sharedPill}
+        </div>
+        <span className={chipClass} data-ui="file-expiry">
           {chipIcon} {chipLabel}
         </span>
-        <span className="hidden w-20 text-right text-xs text-slate-400 sm:block">
+        <span
+          className="hidden w-20 text-right text-xs text-slate-400 sm:block"
+          data-ui="file-size"
+        >
           {formatBytes(file.sizeBytes)}
         </span>
-        <div className="relative">
+        <div className="relative" data-ui="file-actions">
           <button
             type="button"
             onClick={openMenu}
@@ -690,6 +704,7 @@ export default function FileCard({
           ? "border-drift-400 ring-2 ring-drift-400/60"
           : "border-slate-200 hover:border-slate-300")
       }
+      data-ui="file-card"
     >
       <div
         onClick={preview}

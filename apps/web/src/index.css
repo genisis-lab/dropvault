@@ -62,6 +62,42 @@ html.sunset {
   --glow-a: rgba(244, 114, 182, 0.16);
   --glow-b: rgba(251, 146, 60, 0.12);
 }
+html.neubrutalism {
+  color-scheme: light;
+  --c-app: 247 244 235;
+  --c-card: 255 253 246;
+  --c-line: 17 17 17;
+  --c-strong: 10 10 10;
+  --c-muted: 48 48 48;
+  --c-faint: 82 82 82;
+  --c-hover: 232 238 255;
+  --c-subtle: 242 237 221;
+  --c-track: 218 218 218;
+  --shadow-sm: 4px 4px 0 #111111;
+  --shadow-lg: 7px 7px 0 #111111;
+  --scroll-thumb: 17 17 17;
+  --scroll-track: 247 244 235;
+  --glow-a: transparent;
+  --glow-b: transparent;
+}
+html.quiet {
+  color-scheme: light;
+  --c-app: 248 249 251;
+  --c-card: 255 255 255;
+  --c-line: 218 223 231;
+  --c-strong: 22 29 43;
+  --c-muted: 76 88 108;
+  --c-faint: 128 139 158;
+  --c-hover: 246 248 251;
+  --c-subtle: 241 244 248;
+  --c-track: 229 233 239;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.035);
+  --shadow-lg: 0 14px 34px -20px rgba(16, 24, 40, 0.28);
+  --scroll-thumb: 184 191 202;
+  --scroll-track: 248 249 251;
+  --glow-a: transparent;
+  --glow-b: transparent;
+}
 html,
 body,
 #root {
@@ -295,6 +331,473 @@ html.sunset .text-drift-700 {
 html.dark .text-drift-600,
 html.sunset .text-drift-600 {
   color: #818cf8 !important;
+}
+
+/* Theme previews in the owner-only workspace settings. */
+.theme-preview {
+  min-width: 0;
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 0.75rem;
+  background: rgb(var(--c-card));
+  padding: 0.625rem;
+  color: rgb(var(--c-muted));
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+.theme-preview:hover:not(:disabled) {
+  border-color: #6366f1;
+  transform: translateY(-1px);
+}
+.theme-preview:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.theme-preview.is-active {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgb(99 102 241 / 0.18);
+  color: rgb(var(--c-strong));
+}
+.theme-preview-canvas {
+  display: grid;
+  height: 3.25rem;
+  grid-template-columns: 0.35fr 1fr;
+  grid-template-rows: 0.35fr 1fr;
+  overflow: hidden;
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 0.45rem;
+  background: #fff;
+}
+.theme-preview-canvas > span:first-child {
+  grid-row: 1 / 3;
+  background: #eef2ff;
+}
+.theme-preview-canvas > span:nth-child(2) {
+  background: #f8fafc;
+}
+.theme-preview-canvas > span:nth-child(3) {
+  margin: 0.35rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+.theme-preview-neubrutalism .theme-preview-canvas {
+  border: 2px solid #111;
+  border-radius: 0.15rem;
+  background: #fffdf6;
+  box-shadow: 3px 3px 0 #111;
+}
+.theme-preview-neubrutalism .theme-preview-canvas > span:first-child {
+  background: #0647ff;
+}
+.theme-preview-neubrutalism .theme-preview-canvas > span:nth-child(2) {
+  background: #f7f4eb;
+}
+.theme-preview-neubrutalism .theme-preview-canvas > span:nth-child(3) {
+  border: 2px solid #111;
+  background: #fff3a6;
+}
+.theme-preview-quiet .theme-preview-canvas > span:first-child {
+  background: #eff4ff;
+}
+.theme-preview-quiet .theme-preview-canvas > span:nth-child(3) {
+  background: #f8fafc;
+}
+.theme-preview-dark .theme-preview-canvas {
+  border-color: #30374b;
+  background: #141826;
+}
+.theme-preview-dark .theme-preview-canvas > span:first-child {
+  background: #1e2436;
+}
+.theme-preview-dark .theme-preview-canvas > span:nth-child(2),
+.theme-preview-dark .theme-preview-canvas > span:nth-child(3) {
+  border-color: #30374b;
+  background: #20263a;
+}
+.theme-preview-sunset .theme-preview-canvas {
+  border-color: #6b3b5b;
+  background: #2b1828;
+}
+.theme-preview-sunset .theme-preview-canvas > span:first-child {
+  background: #713c62;
+}
+.theme-preview-sunset .theme-preview-canvas > span:nth-child(2),
+.theme-preview-sunset .theme-preview-canvas > span:nth-child(3) {
+  border-color: #6b3b5b;
+  background: #3a2034;
+}
+
+/* Quiet Drive: efficient, restrained, and deliberately low on decoration. */
+html.quiet .canvas-glow,
+html.neubrutalism .canvas-glow {
+  display: none;
+}
+html.quiet [class*="bg-gradient-to"],
+html.quiet [class*="from-drift"] {
+  background-color: #155eef !important;
+  background-image: none !important;
+}
+html.quiet .text-gradient {
+  background: none;
+  color: #155eef;
+}
+html.quiet [data-ui="sidebar"] {
+  width: 16.5rem;
+  background: #fbfcfd !important;
+  padding-inline: 1rem;
+  backdrop-filter: none;
+}
+html.quiet [data-ui="dashboard-content"] {
+  padding-left: 16.5rem;
+}
+html.quiet [data-ui="topbar"] {
+  background: rgb(255 255 255 / 0.96) !important;
+  backdrop-filter: none;
+}
+html.quiet [data-ui="workspace"] {
+  max-width: 88rem;
+  padding-top: 1.75rem;
+}
+html.quiet [data-ui="search"] {
+  border: 1px solid #d9dee7;
+  border-radius: 0.6rem;
+  background: white !important;
+}
+html.quiet [data-ui="new-upload"] {
+  border-radius: 0.6rem !important;
+  box-shadow: 0 2px 6px rgb(21 94 239 / 0.18) !important;
+}
+html.quiet [data-ui="new-folder"],
+html.quiet [data-ui="storage-card"] {
+  border-radius: 0.6rem !important;
+}
+html.quiet [data-ui="sidebar"] nav button {
+  border-radius: 0.5rem !important;
+}
+html.quiet [data-ui="sidebar"] nav button[aria-current="page"] {
+  background: #eef4ff !important;
+  color: #155eef !important;
+}
+html.quiet [data-ui="upload-target"] {
+  border-radius: 0.65rem !important;
+  box-shadow: none;
+}
+html.quiet [data-ui="file-list"],
+html.quiet [data-ui="file-card"],
+html.quiet [data-ui="admin-console"] {
+  border-radius: 0.65rem !important;
+  box-shadow: none;
+}
+html.quiet [data-ui="detail-overlay"],
+html.neubrutalism [data-ui="detail-overlay"] {
+  background: transparent !important;
+}
+html.quiet [data-ui="detail-panel"] {
+  max-width: 21rem;
+  box-shadow: -12px 0 32px -28px rgba(16, 24, 40, 0.5) !important;
+}
+html.quiet [data-ui="file-list-header"],
+html.neubrutalism [data-ui="file-list-header"] {
+  grid-template-columns:
+    1.25rem 2.25rem minmax(12rem, 1.8fr) minmax(11rem, 1fr) 7rem 5rem
+    2.25rem;
+  column-gap: 0.75rem;
+}
+@media (min-width: 640px) {
+  html.quiet [data-ui="file-row"] {
+    display: grid;
+    grid-template-columns:
+      1.25rem 2.25rem minmax(12rem, 1.8fr) minmax(11rem, 1fr) 7rem 5rem
+      2.25rem;
+    column-gap: 0.75rem;
+  }
+  html.quiet [data-ui="file-security"] {
+    min-width: 0;
+    overflow: hidden;
+  }
+  html.quiet [data-ui="file-size"] {
+    width: auto;
+  }
+}
+
+/* DropVault Neubrutalism: the primary new visual system. */
+html.neubrutalism body {
+  background: #f7f4eb;
+}
+html.neubrutalism [data-ui="workspace"] h1,
+html.neubrutalism [data-ui="workspace"] h2,
+html.neubrutalism [data-ui="admin-console"] h2,
+html.neubrutalism [data-ui="admin-console"] h3 {
+  font-family: "Archivo Black", Inter, system-ui, sans-serif;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+}
+html.neubrutalism .theme-edition-label {
+  display: block;
+  margin-top: 1px;
+  color: #0647ff;
+  font-family: "Archivo Black", Inter, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.045em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.theme-edition-label {
+  display: none;
+}
+html.neubrutalism [class*="bg-gradient-to"],
+html.neubrutalism [class*="from-drift"] {
+  background-color: #0647ff !important;
+  background-image: none !important;
+}
+html.neubrutalism .text-gradient {
+  background: none;
+  color: #0647ff;
+  -webkit-text-fill-color: currentColor;
+}
+html.neubrutalism .drive-shadow {
+  box-shadow: 4px 4px 0 #111 !important;
+}
+html.neubrutalism .drive-shadow-lg {
+  box-shadow: 7px 7px 0 #111 !important;
+}
+html.neubrutalism .rounded-full,
+html.neubrutalism .rounded-3xl,
+html.neubrutalism .rounded-2xl,
+html.neubrutalism .rounded-xl,
+html.neubrutalism .rounded-lg {
+  border-radius: 0.25rem !important;
+}
+html.neubrutalism [data-ui="sidebar"] {
+  width: 17rem;
+  border-right-width: 2px;
+  border-color: #111 !important;
+  background: #fffdf6 !important;
+  padding: 1.25rem 0.9rem;
+  backdrop-filter: none;
+}
+html.neubrutalism [data-ui="dashboard-content"] {
+  padding-left: 17rem;
+}
+html.neubrutalism [data-ui="topbar"] {
+  border-bottom-width: 2px;
+  border-color: #111 !important;
+  background: #fffdf6 !important;
+  backdrop-filter: none;
+}
+html.neubrutalism [data-ui="topbar"] > div {
+  min-height: 5.25rem;
+  padding-inline: 1.75rem;
+}
+html.neubrutalism [data-ui="search"] {
+  border: 2px solid #111;
+  border-radius: 0.2rem !important;
+  background: #fffdf6 !important;
+  box-shadow: 4px 4px 0 #111;
+  padding-block: 0.8rem;
+}
+html.neubrutalism [data-ui="workspace"] {
+  max-width: none;
+  padding: 2rem 1.75rem 4rem;
+}
+html.neubrutalism [data-ui="new-upload"],
+html.neubrutalism [data-ui="new-folder"] {
+  border: 2px solid #111 !important;
+  box-shadow: 5px 5px 0 #111 !important;
+  text-transform: uppercase;
+}
+html.neubrutalism [data-ui="new-upload"]:active,
+html.neubrutalism [data-ui="new-folder"]:active,
+html.neubrutalism button.drive-shadow:active {
+  transform: translate(3px, 3px);
+  box-shadow: 2px 2px 0 #111 !important;
+}
+html.neubrutalism [data-ui="sidebar"] nav {
+  border: 2px solid #111;
+  background: #fffdf6;
+}
+html.neubrutalism [data-ui="sidebar"] nav button {
+  border-radius: 0 !important;
+  padding-block: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+html.neubrutalism [data-ui="sidebar"] nav button[aria-current="page"] {
+  background: #0647ff !important;
+  color: white !important;
+}
+html.neubrutalism [data-ui="storage-card"] {
+  border: 2px solid #111 !important;
+  background: #fffdf6 !important;
+  box-shadow: 4px 4px 0 #111;
+}
+html.neubrutalism [data-ui="upload-target"] {
+  display: grid !important;
+  grid-template-columns: 4.5rem minmax(18rem, 1fr) minmax(16rem, auto) auto;
+  grid-template-rows: auto auto;
+  justify-content: stretch;
+  gap: 0.5rem 1.25rem;
+  border: 2px dashed #111 !important;
+  border-radius: 0 !important;
+  background: #fffdf6 !important;
+  box-shadow: none !important;
+  padding: 1.25rem !important;
+  text-align: left;
+}
+html.neubrutalism [data-ui="upload-target"] > div:first-child {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  border: 2px solid #111;
+  border-radius: 0 !important;
+  box-shadow: 5px 5px 0 #111 !important;
+}
+html.neubrutalism [data-ui="upload-target"] > div:nth-of-type(2) {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+}
+html.neubrutalism [data-ui="upload-target"] > label {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
+}
+html.neubrutalism [data-ui="upload-target"] > div:nth-of-type(3) {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-content: flex-start;
+}
+html.neubrutalism [data-ui="upload-target"] > button {
+  grid-column: 4;
+  grid-row: 1 / 3;
+  align-self: center;
+}
+html.neubrutalism [data-ui="upload-target"] > p {
+  grid-column: 2 / -1;
+}
+html.neubrutalism [data-ui="upload-target"] label,
+html.neubrutalism [data-ui="upload-target"] button,
+html.neubrutalism [data-ui="workspace"] select,
+html.neubrutalism [data-ui="workspace"] > div button,
+html.neubrutalism [data-ui="admin-console"] button,
+html.neubrutalism [data-ui="admin-console"] input,
+html.neubrutalism [data-ui="admin-console"] select,
+html.neubrutalism [data-ui="admin-console"] textarea {
+  border-width: 2px;
+  border-color: #111 !important;
+}
+html.neubrutalism [data-ui="file-list"],
+html.neubrutalism [data-ui="file-card"] {
+  border: 2px solid #111 !important;
+  border-radius: 0 !important;
+  background: #fffdf6 !important;
+  box-shadow: 5px 5px 0 #111 !important;
+}
+html.neubrutalism [data-ui="file-list-header"] {
+  border-bottom: 2px solid #111;
+  color: #111 !important;
+}
+@media (min-width: 640px) {
+  html.neubrutalism [data-ui="file-row"] {
+    display: grid;
+    min-height: 4.85rem;
+    grid-template-columns:
+      1.25rem 2.25rem minmax(12rem, 1.8fr) minmax(11rem, 1fr) 7rem 5rem
+      2.25rem;
+    column-gap: 0.75rem;
+  }
+  html.neubrutalism [data-ui="file-security"] {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  html.neubrutalism [data-ui="file-size"] {
+    width: auto;
+    color: #111 !important;
+    font-weight: 600;
+  }
+}
+html.neubrutalism [data-ui="file-row"] {
+  border-color: #111 !important;
+}
+html.neubrutalism [data-ui="file-row"]:hover,
+html.neubrutalism [data-ui="file-row"].bg-drift-500\/10 {
+  background: #e7edff !important;
+}
+html.neubrutalism [data-ui="file-icon"] {
+  border: 2px solid #111;
+  box-shadow: 2px 2px 0 #111;
+}
+html.neubrutalism [data-ui="shared-label"],
+html.neubrutalism [data-ui="encrypted-label"],
+html.neubrutalism [data-ui="file-expiry"] {
+  border: 1.5px solid #0647ff;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #0647ff !important;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+html.neubrutalism [data-ui="file-expiry"] {
+  border-color: #9a7400;
+  background: #fff3a6 !important;
+  color: #111 !important;
+}
+html.neubrutalism [data-ui="admin-console"] {
+  border: 2px solid #111 !important;
+  border-radius: 0 !important;
+  background: #fffdf6 !important;
+  box-shadow: 8px 8px 0 #111 !important;
+}
+html.neubrutalism [data-ui="detail-panel"] {
+  max-width: 21rem;
+  border-left: 2px solid #111 !important;
+  background: #fffdf6 !important;
+  box-shadow: -6px 0 0 #111 !important;
+}
+html.neubrutalism [data-ui="default-theme-editor"] {
+  border: 2px solid #111 !important;
+  border-radius: 0 !important;
+  background: #fff8d6;
+}
+html.neubrutalism .theme-preview {
+  border: 2px solid #111;
+  border-radius: 0;
+}
+html.neubrutalism .theme-preview.is-active {
+  box-shadow: 4px 4px 0 #111;
+}
+html.neubrutalism input[type="checkbox"] {
+  accent-color: #0647ff;
+}
+html.neubrutalism ::selection {
+  background: #fff3a6;
+  color: #111;
+}
+
+@media (max-width: 767px) {
+  html.quiet [data-ui="dashboard-content"],
+  html.neubrutalism [data-ui="dashboard-content"] {
+    padding-left: 0;
+  }
+  html.neubrutalism [data-ui="topbar"] > div {
+    min-height: auto;
+    padding-inline: 0.75rem;
+  }
+}
+@media (max-width: 1100px) {
+  html.neubrutalism [data-ui="upload-target"] {
+    display: flex !important;
+    padding-block: 2rem !important;
+    text-align: center;
+  }
+  html.neubrutalism [data-ui="upload-target"] > div,
+  html.neubrutalism [data-ui="upload-target"] > label,
+  html.neubrutalism [data-ui="upload-target"] > button,
+  html.neubrutalism [data-ui="upload-target"] > p {
+    align-self: auto;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,

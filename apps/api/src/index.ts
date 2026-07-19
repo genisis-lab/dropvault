@@ -18,6 +18,7 @@ import { clientIp } from "./lib/rateLimit";
 import { sweepExpired, reconcileOrphans } from "./lib/sweep";
 import { cleanupMetadata, scheduleExpiryWarnings } from "./lib/retention";
 import { deliverPendingEvents } from "./lib/delivery";
+import { workspaceDefaultTheme } from "./lib/theme";
 import type { Bindings, Variables } from "./types";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -111,6 +112,9 @@ async function healthCheck(c: {
 }
 app.get("/health", (c) => healthCheck(c));
 app.get("/api/health", (c) => healthCheck(c));
+app.get("/api/theme", async (c) =>
+  c.json({ theme: await workspaceDefaultTheme(c.env.DB) }),
+);
 
 app.on(["GET", "POST"], "/api/auth/*", (c) =>
   createAuth(c.env).handler(c.req.raw),
