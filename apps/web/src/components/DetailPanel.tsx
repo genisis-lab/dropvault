@@ -84,6 +84,7 @@ export default function DetailPanel(props: Props) {
             aria-label="Close details"
             onClick={onClose}
             className="absolute inset-0 bg-slate-900/30 md:bg-slate-900/10"
+            data-ui="detail-overlay"
           />
           <motion.aside
             initial={panelInitial}
@@ -91,6 +92,7 @@ export default function DetailPanel(props: Props) {
             exit={panelInitial}
             transition={panelTransition}
             className="absolute inset-y-0 right-0 flex w-full max-w-sm flex-col border-l border-slate-200 bg-white drive-shadow-lg"
+            data-ui="detail-panel"
           >
             <DetailBody key={file.id} {...props} file={file} />
           </motion.aside>

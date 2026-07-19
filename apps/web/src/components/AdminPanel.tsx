@@ -14,6 +14,7 @@ import {
   Infinity,
   Link2,
   Loader2,
+  Palette,
   Plus,
   RefreshCw,
   Search,
@@ -70,6 +71,12 @@ import {
 import { formatBytes } from "../lib/format";
 import { setUserKeepForever } from "../lib/keepForever";
 import { useToast } from "./Toast";
+import { announceWorkspaceDefaultTheme } from "../lib/theme";
+import {
+  isTheme,
+  THEME_OPTIONS,
+  type Theme,
+} from "../lib/theme-config";
 
 type Tab =
   | "overview"
@@ -401,7 +408,9 @@ export default function AdminPanel({
   });
   const saveSettingsMut = useMutation({
     mutationFn: (s: AdminSettings) => adminSaveSettings(s),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (isTheme(result.settings.defaultTheme))
+        announceWorkspaceDefaultTheme(result.settings.defaultTheme);
       toastOk("Settings saved");
       setPolicyDraft(null);
       refresh();
@@ -597,7 +606,10 @@ export default function AdminPanel({
         aria-label="Close"
         onClick={onClose}
       />
-      <div className="mt-6 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white drive-shadow-lg">
+      <div
+        className="mt-6 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white drive-shadow-lg"
+        data-ui="admin-console"
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div className="flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-drift-500/10 text-drift-600">
@@ -1513,6 +1525,17 @@ export default function AdminPanel({
               <Loading />
             ) : (
               <div className="space-y-6">
+                <DefaultThemeEditor
+                  value={
+                    isTheme(settings.defaultTheme)
+                      ? settings.defaultTheme
+                      : "neubrutalism"
+                  }
+                  onChange={(defaultTheme) =>
+                    setPolicyDraft({ ...settings, defaultTheme })
+                  }
+                  disabled={!isOwner}
+                />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <PolicyInput
                     label="Default expiry days"
@@ -1593,7 +1616,7 @@ export default function AdminPanel({
                     disabled={!isOwner || saveSettingsMut.isPending}
                     className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
                   >
-                    Save policies
+                    Save workspace settings
                   </button>
                   {!isOwner && (
                     <span className="ml-2 text-xs text-amber-600">
@@ -2310,6 +2333,67 @@ function ActivityTable({
     </div>
   );
 }
+function DefaultThemeEditor({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Theme;
+  onChange: (theme: Theme) => void;
+  disabled: boolean;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 p-4" data-ui="default-theme-editor">
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-drift-500/10 text-drift-600">
+          <Palette size={18} />
+        </span>
+        <div>
+          <h3 className="font-semibold text-slate-800">Default theme</h3>
+          <p className="mt-0.5 text-xs leading-5 text-slate-500">
+            New visitors and anyone following the workspace default will use
+            this appearance. Personal theme choices stay unchanged.
+          </p>
+        </div>
+      </div>
+      <div
+        className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5"
+        role="radiogroup"
+        aria-label="Workspace default theme"
+      >
+        {THEME_OPTIONS.map((option) => {
+          const active = value === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={disabled}
+              onClick={() => onChange(option.id)}
+              className={
+                "theme-preview theme-preview-" +
+                option.id +
+                (active ? " is-active" : "")
+              }
+            >
+              <span className="theme-preview-canvas" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="mt-2 flex items-center gap-1.5 text-left text-xs font-semibold">
+                {option.label}
+                {active && <Check size={13} className="ml-auto" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function PolicyInput({
   label,
   k,

@@ -7,7 +7,7 @@ export default function Logo({ size = 26 }: { size?: number }) {
   const boxStyle = { width: size + 10, height: size + 10 };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" data-ui="logo">
       <motion.div
         initial={initial}
         animate={animate}
@@ -32,8 +32,11 @@ export default function Logo({ size = 26 }: { size?: number }) {
           />
         </svg>
       </motion.div>
-      <span className="text-[17px] font-bold tracking-tight text-slate-800">
-        Drop<span className="text-gradient">vault</span>
+      <span className="leading-tight">
+        <span className="block text-[17px] font-bold tracking-tight text-slate-800">
+          Drop<span className="text-gradient">vault</span>
+        </span>
+        <span className="theme-edition-label">Neubrutalism</span>
       </span>
     </div>
   );

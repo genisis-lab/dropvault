@@ -17,11 +17,19 @@ export function writeSort(v: SortKey) {
     localStorage.setItem(SORT_KEY, v);
   } catch {}
 }
-export function readView(): ViewMode {
-  return typeof localStorage !== "undefined" &&
-    localStorage.getItem(VIEW_KEY) === "list"
-    ? "list"
-    : "grid";
+export function hasStoredView(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(VIEW_KEY) === "list" ||
+      localStorage.getItem(VIEW_KEY) === "grid";
+  } catch {
+    return false;
+  }
+}
+export function readView(fallback: ViewMode = "grid"): ViewMode {
+  if (typeof localStorage === "undefined") return fallback;
+  const stored = localStorage.getItem(VIEW_KEY);
+  return stored === "list" || stored === "grid" ? stored : fallback;
 }
 export function writeView(v: ViewMode) {
   try {
