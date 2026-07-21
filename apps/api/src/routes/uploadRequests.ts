@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import { DAY_SECONDS, nowSeconds } from "../lib/expiry";
 import {
@@ -124,6 +124,7 @@ async function createPublicFile(
   status: string,
   uploaderEmail: string | null,
   uploaderName: string | null,
+  contentHash: string,
 ) {
   const id = crypto.randomUUID();
   const r2Key = `${row.ownerId}/${id}`;
@@ -137,6 +138,9 @@ async function createPublicFile(
       r2Key,
       sizeBytes: file.size,
       contentType,
+      contentHash,
+      checksum: contentHash,
+      checksumAlgorithm: "sha-256",
       status: "pending",
       folderId: row.folderId ?? null,
       versionGroupId: id,
@@ -163,7 +167,10 @@ async function createPublicFile(
     await c.env.FILES.put(
       r2Key,
       file.stream(),
-      contentType ? { httpMetadata: { contentType } } : undefined,
+      {
+        httpMetadata: contentType ? { contentType } : undefined,
+        sha256: contentHash,
+      },
     );
     const object = await c.env.FILES.head(r2Key);
     if (!object || object.size !== file.size)
@@ -669,6 +676,7 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
       name?: string;
       password?: string;
       turnstileToken?: string;
+      contentHash?: string;
     }>()
     .catch(
       () =>
@@ -680,6 +688,7 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
           name?: string;
           password?: string;
           turnstileToken?: string;
+          contentHash?: string;
         },
     );
   if (!(await validTurnstile(c, String(body.turnstileToken || ""))))
@@ -714,6 +723,20 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
       .slice(0, 120) || null;
   if (!filename || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)
     return c.json({ error: "valid file metadata required" }, 400);
+  const contentHash = String(body.contentHash || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(contentHash))
+    return c.json({ error: "valid SHA-256 contentHash required" }, 400);
+  const banned = await db
+    .select()
+    .from(schema.bannedFileHashes)
+    .where(eq(schema.bannedFileHashes.hash, contentHash))
+    .get()
+    .catch(() => null);
+  if (banned)
+    return c.json(
+      { error: "This file is blocked by workspace security policy." },
+      451,
+    );
   if (row.requireEmail && !uploaderEmail)
     return c.json({ error: "email required" }, 400);
   const policy = await workspacePolicy(db);
@@ -746,6 +769,9 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
       r2Key,
       sizeBytes,
       contentType,
+      contentHash,
+      checksum: contentHash,
+      checksumAlgorithm: "sha-256",
       status: "pending",
       folderId: row.folderId ?? null,
       versionGroupId: fileId,
@@ -1087,6 +1113,28 @@ uploadRequests.post("/public/:token", async (c) => {
       { error: "a maximum of 20 files is allowed per submission" },
       413,
     );
+  let contentHashes: string[] = [];
+  try {
+    const parsed = JSON.parse(String(form.get("contentHashes") || "[]"));
+    if (Array.isArray(parsed))
+      contentHashes = parsed.map((value) => String(value).trim().toLowerCase());
+  } catch {}
+  if (
+    contentHashes.length !== files.length ||
+    contentHashes.some((hash) => !/^[a-f0-9]{64}$/.test(hash))
+  )
+    return c.json({ error: "a SHA-256 hash is required for every file" }, 400);
+  const blocked = await db
+    .select({ hash: schema.bannedFileHashes.hash })
+    .from(schema.bannedFileHashes)
+    .where(inArray(schema.bannedFileHashes.hash, contentHashes))
+    .get()
+    .catch(() => null);
+  if (blocked)
+    return c.json(
+      { error: "One or more files are blocked by workspace security policy." },
+      451,
+    );
   const incomingBytes = files.reduce((s, file) => s + file.size, 0);
   if (row.maxFileSize && files.some((file) => file.size > row.maxFileSize!))
     return c.json({ error: "one or more files exceed request limit" }, 413);
@@ -1130,7 +1178,7 @@ uploadRequests.post("/public/:token", async (c) => {
   const status = row.moderationMode === "manual" ? "quarantined" : "ready";
   const fileIds: string[] = [];
   try {
-    for (const file of files)
+    for (const [index, file] of files.entries())
       fileIds.push(
         await createPublicFile(
           c,
@@ -1141,6 +1189,7 @@ uploadRequests.post("/public/:token", async (c) => {
           status,
           uploaderEmail,
           uploaderName,
+          contentHashes[index],
         ),
       );
   } catch (error) {

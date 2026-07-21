@@ -2,10 +2,10 @@ import { createMiddleware } from "hono/factory";
 import { getDb, schema } from "../db";
 import type { Bindings, Variables } from "../types";
 
-export type AdminRole = "owner" | "admin" | "moderator" | "viewer";
+export type AdminRole = "owner" | "admin" | "moderator" | "auditor";
 
 const ROLE_RANK: Record<AdminRole, number> = {
-  viewer: 1,
+  auditor: 1,
   moderator: 2,
   admin: 3,
   owner: 4,
@@ -14,12 +14,14 @@ const VALID_ROLES = new Set<AdminRole>([
   "owner",
   "admin",
   "moderator",
-  "viewer",
+  "auditor",
 ]);
 
 export function normalizeAdminRole(role: unknown): AdminRole {
-  const v = String(role ?? "admin").toLowerCase() as AdminRole;
-  return VALID_ROLES.has(v) ? v : "admin";
+  const raw = String(role ?? "admin").toLowerCase();
+  // Preserve access for installations that used the former read-only name.
+  const v = (raw === "viewer" ? "auditor" : raw) as AdminRole;
+  return VALID_ROLES.has(v) ? v : "auditor";
 }
 
 // Parse the ADMIN_EMAILS bootstrap allowlist. Env admins are owners because they
@@ -96,7 +98,7 @@ export const requireAdmin = createMiddleware<{
   Variables: Variables;
 }>(async (c, next) => {
   const db = getDb(c.env.DB);
-  if (!(await hasRole(c.env, db, c.get("userEmail"), "viewer"))) {
+  if (!(await hasRole(c.env, db, c.get("userEmail"), "auditor"))) {
     return c.json({ error: "forbidden" }, 403);
   }
   await next();

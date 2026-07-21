@@ -10,7 +10,7 @@ import {
   recentIpsFrom,
   removeIpBan,
 } from "../lib/ipAccess";
-import { notifyAdmins, notifyUser } from "../lib/notifications";
+import { notifyAdmins, notifyOwners, notifyUser } from "../lib/notifications";
 import { requireAuth } from "../middleware/auth";
 import {
   adminEmailSet,
@@ -32,6 +32,7 @@ type SettingsKey =
   | "maxUploadBytes"
   | "allowedTypes"
   | "defaultQuotaBytes"
+  | "adminMaxQuotaBytes"
   | "requirePasswordForShares"
   | "publicSharingEnabled"
   | "defaultTheme"
@@ -51,15 +52,39 @@ type BulkUserBody = {
   ids?: unknown[];
   quotaBytes?: number | null;
 };
-type BulkFileBody = { action?: string; ids?: unknown[]; days?: number };
-
-type Capability = "manageUsers" | "manageFiles" | "manageFlags";
-const defaultCapabilityRole: Record<Capability, AdminRole> = {
-  manageUsers: "admin",
-  manageFiles: "admin",
-  manageFlags: "moderator",
+type BulkFileBody = {
+  action?: string;
+  ids?: unknown[];
+  days?: number;
+  confirmation?: string;
 };
-const VALID_ROLES = ["owner", "admin", "moderator", "viewer"];
+
+type Capability =
+  | "manageUsers"
+  | "manageFiles"
+  | "manageFlags"
+  | "viewFileContent"
+  | "viewActivity";
+const capabilityRoles: Record<Capability, AdminRole[]> = {
+  manageUsers: ["owner", "admin"],
+  manageFiles: ["owner", "admin"],
+  manageFlags: ["owner", "admin", "moderator"],
+  viewFileContent: ["owner", "admin"],
+  viewActivity: ["owner", "admin", "auditor"],
+};
+const SECURITY_SETTING_KEYS = new Set<SettingsKey>([
+  "defaultExpiryDays",
+  "maxExpiryDays",
+  "maxUploadBytes",
+  "allowedTypes",
+  "defaultQuotaBytes",
+  "adminMaxQuotaBytes",
+  "requirePasswordForShares",
+  "publicSharingEnabled",
+  "signupMode",
+  "trashRetentionDays",
+  "rolePermissions",
+]);
 
 const MAX_PENDING_LIMIT_REQUESTS = 2;
 const PENDING_APPROVAL_REASON = "Awaiting admin approval";
@@ -71,6 +96,7 @@ const settingsKeys: SettingsKey[] = [
   "maxUploadBytes",
   "allowedTypes",
   "defaultQuotaBytes",
+  "adminMaxQuotaBytes",
   "requirePasswordForShares",
   "publicSharingEnabled",
   "defaultTheme",
@@ -169,26 +195,26 @@ async function forbidUnless(c: any, minimum: AdminRole) {
     return c.json({ error: "forbidden" }, 403);
   return null;
 }
-async function capabilityRole(
-  db: ReturnType<typeof getDb>,
-  cap: Capability,
-): Promise<AdminRole> {
-  const settings = await settingsMap(db);
-  const def = defaultCapabilityRole[cap];
-  try {
-    const parsed = settings.rolePermissions
-      ? JSON.parse(settings.rolePermissions)
-      : {};
-    const v = String(parsed?.[cap] ?? "").toLowerCase();
-    if (VALID_ROLES.includes(v)) return v as AdminRole;
-  } catch {}
-  return def;
-}
 async function forbidUnlessCan(c: any, cap: Capability) {
   const db = getDb(c.env.DB);
-  const min = await capabilityRole(db, cap);
-  if (!(await hasRole(c.env, db, c.get("userEmail"), min)))
+  const role = await adminRole(c.env, db, c.get("userEmail"));
+  if (!role || !capabilityRoles[cap].includes(role))
     return c.json({ error: "forbidden" }, 403);
+  return null;
+}
+
+async function requireOwnerConfirmation(
+  c: any,
+  confirmation: unknown,
+  expected: string,
+) {
+  const denied = await forbidUnless(c, "owner");
+  if (denied) return denied;
+  if (String(confirmation ?? "") !== expected)
+    return c.json(
+      { error: `Owner confirmation required. Type ${expected}.` },
+      400,
+    );
   return null;
 }
 function idsFrom(input: unknown[] | undefined): string[] {
@@ -333,6 +359,12 @@ function fileRow(
     createdAt: f.createdAt,
     expiresAt: f.expiresAt,
     keepForever: !!f.keepForever,
+    contentHash: f.contentHash ?? f.checksum ?? null,
+    checksumAlgorithm: f.checksumAlgorithm ?? "sha-256",
+    encryptionMode: f.encryptionMode ?? "none",
+    encrypted: f.encryptionMode === "aes-gcm",
+    adminContentAccessible: f.encryptionMode !== "aes-gcm",
+    scanStatus: f.scanStatus ?? null,
     ownerId: f.ownerId,
     ownerEmail: emailById.get(f.ownerId) ?? null,
     ownerName: nameById.get(f.ownerId) ?? null,
@@ -350,6 +382,7 @@ async function settingsMap(db: ReturnType<typeof getDb>) {
     maxUploadBytes: "1073741824",
     allowedTypes: "",
     defaultQuotaBytes: "1073741824",
+    adminMaxQuotaBytes: "10737418240",
     requirePasswordForShares: "false",
     publicSharingEnabled: "true",
     defaultTheme: "neubrutalism",
@@ -368,7 +401,108 @@ async function settingsMap(db: ReturnType<typeof getDb>) {
   return out;
 }
 
+type PolicyChange = { key: SettingsKey; before: string; after: string };
+
+function policyChanges(
+  before: Record<SettingsKey, string>,
+  after: Record<SettingsKey, string>,
+): PolicyChange[] {
+  return settingsKeys
+    .filter((key) => before[key] !== after[key])
+    .map((key) => ({ key, before: before[key], after: after[key] }));
+}
+
+function normalizeSettingValue(key: SettingsKey, input: unknown): string {
+  let value = String(input ?? "");
+  if (key === "signupMode") value = value === "approval" ? "approval" : "open";
+  if (key === "defaultTheme") value = normalizeTheme(value);
+  if (key === "rolePermissions")
+    value = JSON.stringify({
+      manageUsers: "admin",
+      manageFiles: "admin",
+      manageFlags: "moderator",
+    });
+  return value;
+}
+
+async function latestPolicyRevision(db: ReturnType<typeof getDb>) {
+  const row = await db
+    .select({ id: schema.policyVersions.id })
+    .from(schema.policyVersions)
+    .orderBy(desc(schema.policyVersions.createdAt))
+    .limit(1)
+    .get()
+    .catch(() => null);
+  return row?.id ?? null;
+}
+
+async function persistPolicy(
+  c: any,
+  db: ReturnType<typeof getDb>,
+  before: Record<SettingsKey, string>,
+  after: Record<SettingsKey, string>,
+  source: "update" | "rollback",
+) {
+  const changes = policyChanges(before, after);
+  if (!changes.length) return { changes, revision: await latestPolicyRevision(db) };
+  const now = nowSeconds();
+  for (const change of changes) {
+    await db
+      .insert(schema.appSettings)
+      .values({
+        key: change.key,
+        value: change.after,
+        updatedBy: c.get("userEmail") ?? null,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.appSettings.key,
+        set: {
+          value: change.after,
+          updatedBy: c.get("userEmail") ?? null,
+          updatedAt: now,
+        },
+      })
+      .run();
+  }
+  const revision = crypto.randomUUID();
+  await db
+    .insert(schema.policyVersions)
+    .values({
+      id: revision,
+      actorId: c.get("userId") ?? null,
+      actorEmail: c.get("userEmail") ?? null,
+      source,
+      beforeJson: JSON.stringify(before),
+      afterJson: JSON.stringify(after),
+      changesJson: JSON.stringify(changes),
+      createdAt: now,
+    })
+    .run();
+  await logAction(
+    c,
+    db,
+    source === "rollback" ? "settings.rollback" : "settings.update",
+    "settings",
+    revision,
+    changes.map((change) => change.key).join(", "),
+  );
+  if (changes.some((change) => SECURITY_SETTING_KEYS.has(change.key)))
+    await notifyOwners(c.env, db, {
+      type: "security.policy_changed",
+      title: source === "rollback" ? "Security policy restored" : "Security policy changed",
+      message: `${c.get("userEmail") ?? "The owner"} ${
+        source === "rollback" ? "restored" : "changed"
+      } ${changes.map((change) => change.key).join(", ")}.`,
+      targetType: "policy_version",
+      targetId: revision,
+    });
+  return { changes, revision };
+}
+
 admin.get("/stats", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageUsers");
+  if (denied) return denied;
   const db = getDb(c.env.DB);
   const [users, files, folders, openFlags, suspensions] = await Promise.all([
     db.select().from(schema.user).all(),
@@ -541,6 +675,8 @@ admin.get("/stats", async (c) => {
 });
 
 admin.get("/users", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageUsers");
+  if (denied) return denied;
   const db = getDb(c.env.DB);
   const limit = Math.min(Math.max(Number(c.req.query("limit")) || 250, 1), 500);
   const cursor = Number(c.req.query("cursor")) || null;
@@ -652,6 +788,8 @@ admin.get("/users", async (c) => {
   });
 });
 admin.get("/users/:id", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageUsers");
+  if (denied) return denied;
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
   const u = await db
@@ -778,6 +916,19 @@ admin.post("/users/:id/quota", async (c) => {
     );
   const bytes =
     body.bytes == null ? null : Math.max(0, Math.floor(Number(body.bytes)));
+  const actorRole = await adminRole(c.env, db, c.get("userEmail"));
+  const policy = await settingsMap(db);
+  const adminMaxQuotaBytes = Math.max(
+    0,
+    Number(policy.adminMaxQuotaBytes) || 10737418240,
+  );
+  if (actorRole === "admin" && bytes != null && bytes > adminMaxQuotaBytes)
+    return c.json(
+      {
+        error: `Admin quota changes are capped at ${adminMaxQuotaBytes} bytes by the owner.`,
+      },
+      403,
+    );
   await db
     .update(schema.user)
     .set({ quotaBytes: bytes })
@@ -882,6 +1033,19 @@ admin.post("/users/bulk", async (c) => {
       body.quotaBytes == null
         ? null
         : Math.max(0, Math.floor(Number(body.quotaBytes)));
+    const actorRole = await adminRole(c.env, db, c.get("userEmail"));
+    const policy = await settingsMap(db);
+    const adminMaxQuotaBytes = Math.max(
+      0,
+      Number(policy.adminMaxQuotaBytes) || 10737418240,
+    );
+    if (actorRole === "admin" && bytes != null && bytes > adminMaxQuotaBytes)
+      return c.json(
+        {
+          error: `Admin quota changes are capped at ${adminMaxQuotaBytes} bytes by the owner.`,
+        },
+        403,
+      );
     const admins = await effectiveAdmins(c.env, db);
     const targets = await db
       .select()
@@ -934,6 +1098,8 @@ admin.post("/users/bulk", async (c) => {
 });
 
 admin.get("/files", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageFiles");
+  if (denied) return denied;
   const db = getDb(c.env.DB);
   const limit = Math.min(Math.max(Number(c.req.query("limit")) || 250, 1), 500);
   const cursor = Number(c.req.query("cursor")) || null;
@@ -963,6 +1129,8 @@ admin.get("/files", async (c) => {
   });
 });
 admin.get("/activity", async (c) => {
+  const denied = await forbidUnlessCan(c, "viewActivity");
+  if (denied) return denied;
   const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500);
   const db = getDb(c.env.DB);
   const viewerRole = await adminRole(c.env, db, c.get("userEmail"));
@@ -1083,7 +1251,14 @@ admin.delete("/files/:id", async (c) => {
   return c.json({ ok: true });
 });
 admin.post("/files/:id/delete-permanent", async (c) => {
-  const denied = await forbidUnlessCan(c, "manageFiles");
+  const body = await c.req
+    .json<{ confirmation?: string }>()
+    .catch(() => ({}) as { confirmation?: string });
+  const denied = await requireOwnerConfirmation(
+    c,
+    body.confirmation,
+    "PERMANENTLY DELETE",
+  );
   if (denied) return denied;
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
@@ -1131,6 +1306,14 @@ admin.post("/files/bulk", async (c) => {
     ].includes(action)
   )
     return c.json({ error: "bad action" }, 400);
+  if (action === "permanentDelete") {
+    const denied = await requireOwnerConfirmation(
+      c,
+      body.confirmation,
+      "PERMANENTLY DELETE",
+    );
+    if (denied) return denied;
+  }
   const db = getDb(c.env.DB);
   const rows = await db
     .select()
@@ -1229,9 +1412,59 @@ admin.get("/flags", async (c) => {
         filename: file?.filename ?? null,
         ownerEmail: file ? (emailById.get(file.ownerId) ?? null) : null,
         fileExists: !!file,
+        sizeBytes: file?.sizeBytes ?? null,
+        contentType: file?.contentType ?? null,
+        contentHash: file?.contentHash ?? file?.checksum ?? null,
+        checksumAlgorithm: file?.checksumAlgorithm ?? "sha-256",
+        encryptionMode: file?.encryptionMode ?? null,
+        adminContentAccessible: !!file && file.encryptionMode !== "aes-gcm",
+        fileStatus: file?.status ?? null,
+        deletedAt: file?.deletedAt ?? null,
+        expiresAt: file?.expiresAt ?? null,
       };
     }),
   });
+});
+admin.get("/flags/:id/content", async (c) => {
+  const denied = await forbidUnlessCan(c, "viewFileContent");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+  const flag = await db
+    .select()
+    .from(schema.fileFlags)
+    .where(eq(schema.fileFlags.id, id))
+    .get();
+  if (!flag?.fileId) return c.json({ error: "reported file not found" }, 404);
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(eq(schema.files.id, flag.fileId))
+    .get();
+  if (!file) return c.json({ error: "reported file not found" }, 404);
+  if (file.encryptionMode === "aes-gcm")
+    return c.json(
+      {
+        error:
+          "This file is end-to-end encrypted. Administrators do not have the decryption key.",
+        code: "e2e_admin_inaccessible",
+      },
+      409,
+    );
+  const object = await c.env.FILES.get(file.r2Key);
+  if (!object) return c.json({ error: "stored object not found" }, 404);
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Content-Type", file.contentType || "application/octet-stream");
+  headers.set(
+    "Content-Disposition",
+    `inline; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+  );
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Security-Policy", "sandbox");
+  await logAction(c, db, "flag.content_view", "flag", id, file.filename);
+  return new Response(object.body, { headers });
 });
 admin.post("/flags/:id", async (c) => {
   const denied = await forbidUnlessCan(c, "manageFlags");
@@ -1247,6 +1480,21 @@ admin.post("/flags/:id", async (c) => {
     .where(eq(schema.fileFlags.id, id))
     .get();
   if (!flag) return c.json({ error: "not found" }, 404);
+  const actorRole = await adminRole(c.env, db, c.get("userEmail"));
+  const operationalActions = new Set([
+    "revoke",
+    "expire",
+    "delete",
+    "restore",
+    "quarantine",
+  ]);
+  if (
+    body.action &&
+    (!operationalActions.has(body.action) ||
+      (actorRole === "moderator" && body.action !== "quarantine") ||
+      actorRole === "auditor")
+  )
+    return c.json({ error: "forbidden for this role" }, 403);
   if (body.action === "revoke" && flag.fileId)
     await db
       .update(schema.files)
@@ -1263,6 +1511,23 @@ admin.post("/flags/:id", async (c) => {
     await db
       .update(schema.files)
       .set({ deletedAt: nowSeconds(), shareToken: null, sharePassword: null })
+      .where(eq(schema.files.id, flag.fileId))
+      .run();
+  if (body.action === "restore" && flag.fileId)
+    await db
+      .update(schema.files)
+      .set({ deletedAt: null })
+      .where(eq(schema.files.id, flag.fileId))
+      .run();
+  if (body.action === "quarantine" && flag.fileId)
+    await db
+      .update(schema.files)
+      .set({
+        status: "quarantined",
+        shareToken: null,
+        sharePassword: null,
+        shareExpiresAt: null,
+      })
       .where(eq(schema.files.id, flag.fileId))
       .run();
   const nextStatus = [
@@ -1294,6 +1559,79 @@ admin.post("/flags/:id", async (c) => {
   );
   return c.json({ ok: true });
 });
+
+admin.post("/flags/:id/ban-hash", async (c) => {
+  const body = await c.req
+    .json<{ confirmation?: string; reason?: string }>()
+    .catch(() => ({}) as { confirmation?: string; reason?: string });
+  const denied = await requireOwnerConfirmation(c, body.confirmation, "BAN HASH");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+  const flag = await db
+    .select()
+    .from(schema.fileFlags)
+    .where(eq(schema.fileFlags.id, id))
+    .get();
+  if (!flag?.fileId) return c.json({ error: "reported file not found" }, 404);
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(eq(schema.files.id, flag.fileId))
+    .get();
+  if (!file) return c.json({ error: "reported file not found" }, 404);
+  if (file.encryptionMode === "aes-gcm")
+    return c.json(
+      {
+        error:
+          "E2E ciphertext uses a random nonce and has no stable plaintext hash available to administrators.",
+      },
+      409,
+    );
+  const hash = String(file.contentHash ?? file.checksum ?? "").toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(hash))
+    return c.json({ error: "This file does not have a verified SHA-256 hash." }, 409);
+  await db
+    .insert(schema.bannedFileHashes)
+    .values({
+      hash,
+      algorithm: "sha-256",
+      reason: body.reason?.slice(0, 500) ?? flag.reason?.slice(0, 500) ?? null,
+      sourceFileId: file.id,
+      createdBy: c.get("userEmail") ?? null,
+      createdAt: nowSeconds(),
+    })
+    .onConflictDoUpdate({
+      target: schema.bannedFileHashes.hash,
+      set: {
+        reason: body.reason?.slice(0, 500) ?? flag.reason?.slice(0, 500) ?? null,
+        sourceFileId: file.id,
+        createdBy: c.get("userEmail") ?? null,
+        createdAt: nowSeconds(),
+      },
+    })
+    .run();
+  await logAction(c, db, "file_hash.ban", "file_hash", hash, file.filename);
+  await notifyOwners(c.env, db, {
+    type: "security.file_hash_banned",
+    title: "File hash permanently banned",
+    message: `${c.get("userEmail") ?? "The owner"} banned SHA-256 ${hash.slice(0, 12)}… from future uploads.`,
+    targetType: "file_hash",
+    targetId: hash,
+  });
+  return c.json({ ok: true, hash });
+});
+
+admin.get("/hash-bans", async (c) => {
+  const db = getDb(c.env.DB);
+  const bans = await db
+    .select()
+    .from(schema.bannedFileHashes)
+    .orderBy(desc(schema.bannedFileHashes.createdAt))
+    .all()
+    .catch(() => []);
+  return c.json({ bans });
+});
 admin.post("/flags/:id/resolve", async (c) => {
   const denied = await forbidUnlessCan(c, "manageFlags");
   if (denied) return denied;
@@ -1308,7 +1646,14 @@ admin.post("/flags/:id/resolve", async (c) => {
   return c.json({ ok: true });
 });
 admin.delete("/flags/:id", async (c) => {
-  const denied = await forbidUnlessCan(c, "manageFlags");
+  const body = await c.req
+    .json<{ confirmation?: string }>()
+    .catch(() => ({}) as { confirmation?: string });
+  const denied = await requireOwnerConfirmation(
+    c,
+    body.confirmation,
+    "DELETE REPORT",
+  );
   if (denied) return denied;
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
@@ -1356,11 +1701,12 @@ admin.post("/admins", async (c) => {
   const db = getDb(c.env.DB);
   if (adminEmailSet(c.env).has(email))
     return c.json({ error: "already configured via ADMIN_EMAILS" }, 400);
-  await db
-    .delete(schema.adminEmails)
+  const previous = await db
+    .select()
+    .from(schema.adminEmails)
     .where(eq(schema.adminEmails.email, email))
-    .run()
-    .catch(() => {});
+    .get()
+    .catch(() => null);
   await db
     .insert(schema.adminEmails)
     .values({
@@ -1369,12 +1715,38 @@ admin.post("/admins", async (c) => {
       addedBy: c.get("userEmail") ?? null,
       createdAt: nowSeconds(),
     })
+    .onConflictDoUpdate({
+      target: schema.adminEmails.email,
+      set: {
+        role,
+        addedBy: c.get("userEmail") ?? null,
+        createdAt: nowSeconds(),
+      },
+    })
     .run();
   await logAction(c, db, "admin.add", "admin", email, role);
+  await notifyOwners(c.env, db, {
+    type: "security.role_changed",
+    title: previous ? "Administrator role changed" : "Administrator added",
+    message: `${c.get("userEmail") ?? "An owner"} ${
+      previous
+        ? `changed ${email} from ${normalizeAdminRole(previous.role)} to ${role}`
+        : `granted ${role} access to ${email}`
+    }.`,
+    targetType: "admin",
+    targetId: email,
+  });
   return c.json({ ok: true });
 });
 admin.delete("/admins/:email", async (c) => {
-  const denied = await forbidUnless(c, "owner");
+  const body = await c.req
+    .json<{ confirmation?: string }>()
+    .catch(() => ({}) as { confirmation?: string });
+  const denied = await requireOwnerConfirmation(
+    c,
+    body.confirmation,
+    "REMOVE ROLE",
+  );
   if (denied) return denied;
   const email = decodeURIComponent(c.req.param("email")).toLowerCase();
   if (adminEmailSet(c.env).has(email))
@@ -1385,6 +1757,13 @@ admin.delete("/admins/:email", async (c) => {
     .where(eq(schema.adminEmails.email, email))
     .run();
   await logAction(c, db, "admin.remove", "admin", email, null);
+  await notifyOwners(c.env, db, {
+    type: "security.role_changed",
+    title: "Administrator access removed",
+    message: `${c.get("userEmail") ?? "An owner"} removed all administrative access from ${email}.`,
+    targetType: "admin",
+    targetId: email,
+  });
   return c.json({ ok: true });
 });
 admin.get("/ip-bans", async (c) => {
@@ -1431,47 +1810,116 @@ admin.delete("/ip-bans/:ip", async (c) => {
 });
 admin.get("/settings", async (c) => {
   const db = getDb(c.env.DB);
-  return c.json({ settings: await settingsMap(db) });
+  return c.json({
+    settings: await settingsMap(db),
+    revision: await latestPolicyRevision(db),
+  });
 });
 admin.post("/settings", async (c) => {
   const denied = await forbidUnless(c, "owner");
   if (denied) return denied;
   const body = await c.req
-    .json<SettingsBody>()
-    .catch(() => ({}) as SettingsBody);
+    .json<{
+      settings?: SettingsBody;
+      expectedRevision?: string | null;
+      reviewed?: boolean;
+      confirmation?: string;
+    }>()
+    .catch(
+      () =>
+        ({}) as {
+          settings?: SettingsBody;
+          expectedRevision?: string | null;
+          reviewed?: boolean;
+          confirmation?: string;
+        },
+    );
+  if (!body.reviewed)
+    return c.json({ error: "Review changes before saving." }, 400);
   const db = getDb(c.env.DB);
-  for (const key of settingsKeys) {
-    if (!(key in body)) continue;
-    let value = String(body[key] ?? "");
-    if (key === "signupMode")
-      value = value === "approval" ? "approval" : "open";
-    if (key === "defaultTheme") value = normalizeTheme(value);
-    await db
-      .delete(schema.appSettings)
-      .where(eq(schema.appSettings.key, key))
-      .run()
-      .catch(() => {});
-    await db
-      .insert(schema.appSettings)
-      .values({
-        key,
-        value,
-        updatedBy: c.get("userEmail"),
-        updatedAt: nowSeconds(),
-      })
-      .run();
-  }
-  await logAction(
+  const revision = await latestPolicyRevision(db);
+  if ((body.expectedRevision ?? null) !== revision)
+    return c.json(
+      { error: "Policies changed in another session. Reload and review again." },
+      409,
+    );
+  const before = await settingsMap(db);
+  const after = { ...before };
+  const requested = body.settings ?? {};
+  for (const key of settingsKeys)
+    if (key in requested)
+      after[key] = normalizeSettingValue(key, requested[key]);
+  const changes = policyChanges(before, after);
+  if (
+    changes.some((change) => SECURITY_SETTING_KEYS.has(change.key)) &&
+    body.confirmation !== "APPLY POLICY"
+  )
+    return c.json(
+      { error: "Owner confirmation required. Type APPLY POLICY." },
+      400,
+    );
+  const saved = await persistPolicy(c, db, before, after, "update");
+  return c.json({ ok: true, settings: after, revision: saved.revision });
+});
+admin.get("/settings/history", async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 50, 1), 200);
+  const db = getDb(c.env.DB);
+  const rows = await db
+    .select()
+    .from(schema.policyVersions)
+    .orderBy(desc(schema.policyVersions.createdAt))
+    .limit(limit)
+    .all()
+    .catch(() => []);
+  return c.json({
+    versions: rows.map((row) => ({
+      id: row.id,
+      actorEmail: row.actorEmail,
+      source: row.source,
+      changes: JSON.parse(row.changesJson || "[]"),
+      settings: JSON.parse(row.afterJson || "{}"),
+      createdAt: row.createdAt,
+    })),
+  });
+});
+admin.post("/settings/rollback/:id", async (c) => {
+  const body = await c.req
+    .json<{ confirmation?: string; expectedRevision?: string | null }>()
+    .catch(
+      () =>
+        ({}) as { confirmation?: string; expectedRevision?: string | null },
+    );
+  const denied = await requireOwnerConfirmation(
     c,
-    db,
-    "settings.update",
-    "settings",
-    null,
-    settingsKeys.filter((key) => key in body).join(", "),
+    body.confirmation,
+    "RESTORE POLICY",
   );
-  return c.json({ ok: true, settings: await settingsMap(db) });
+  if (denied) return denied;
+  const db = getDb(c.env.DB);
+  const revision = await latestPolicyRevision(db);
+  if ((body.expectedRevision ?? null) !== revision)
+    return c.json(
+      { error: "Policies changed in another session. Reload and review again." },
+      409,
+    );
+  const version = await db
+    .select()
+    .from(schema.policyVersions)
+    .where(eq(schema.policyVersions.id, c.req.param("id")))
+    .get();
+  if (!version) return c.json({ error: "policy version not found" }, 404);
+  const targetRaw = JSON.parse(version.afterJson || "{}") as Record<string, unknown>;
+  const before = await settingsMap(db);
+  const after = { ...before };
+  for (const key of settingsKeys)
+    if (key in targetRaw)
+      after[key] = normalizeSettingValue(key, targetRaw[key]);
+  const saved = await persistPolicy(c, db, before, after, "rollback");
+  return c.json({ ok: true, settings: after, revision: saved.revision });
 });
 admin.get("/audit", async (c) => {
+  const denied = await forbidUnlessCan(c, "viewActivity");
+  if (denied) return denied;
   const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500);
   const actor = c.req.query("actor")?.toLowerCase();
   const action = c.req.query("action");
@@ -1503,6 +1951,8 @@ admin.get("/audit", async (c) => {
 });
 
 admin.get("/limit-requests", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageUsers");
+  if (denied) return denied;
   const db = getDb(c.env.DB);
   const rows = await db
     .select()
