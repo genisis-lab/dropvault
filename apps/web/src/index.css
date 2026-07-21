@@ -533,19 +533,6 @@ html.neubrutalism [data-ui="admin-console"] h3 {
   letter-spacing: -0.035em;
   text-transform: uppercase;
 }
-html.neubrutalism .theme-edition-label {
-  display: block;
-  margin-top: 1px;
-  color: #0647ff;
-  font-family: "Archivo Black", Inter, sans-serif;
-  font-size: 9px;
-  letter-spacing: 0.045em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-.theme-edition-label {
-  display: none;
-}
 html.neubrutalism [class*="bg-gradient-to"],
 html.neubrutalism [class*="from-drift"] {
   background-color: #0647ff !important;

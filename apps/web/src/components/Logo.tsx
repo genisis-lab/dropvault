@@ -36,7 +36,6 @@ export default function Logo({ size = 26 }: { size?: number }) {
         <span className="block text-[17px] font-bold tracking-tight text-slate-800">
           Drop<span className="text-gradient">vault</span>
         </span>
-        <span className="theme-edition-label">Neubrutalism</span>
       </span>
     </div>
   );
