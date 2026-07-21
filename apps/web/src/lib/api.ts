@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { getEncryptionKey } from "./encryption";
+import { decryptEncryptedMetadata, getEncryptionKey } from "./encryption";
 
 // /api is same-origin: Vite proxies it to the local Worker in dev, and the Pages
 // proxy (functions/api/[[path]].ts) forwards it to the Worker in prod.
@@ -41,6 +41,31 @@ export type DriftFile = {
   shareIpAllowlist?: string | null;
   shareCountryAllowlist?: string | null;
 };
+
+async function hydrateEncryptedFileMetadata(
+  file: DriftFile,
+): Promise<DriftFile> {
+  if (file.encryptionMode !== "aes-gcm") return file;
+  try {
+    const key = await getEncryptionKey(file.id);
+    if (!key) return file;
+    const metadata = await decryptEncryptedMetadata(
+      key,
+      file.encryptedMetadata,
+    );
+    return {
+      ...file,
+      filename: metadata.filename,
+      contentType: metadata.contentType,
+    };
+  } catch {
+    return file;
+  }
+}
+
+async function hydrateEncryptedFiles(files: DriftFile[]): Promise<DriftFile[]> {
+  return Promise.all(files.map(hydrateEncryptedFileMetadata));
+}
 
 export type Folder = {
   id: string;
@@ -154,7 +179,7 @@ export async function listFiles(opts?: {
 }): Promise<DriftFile[]> {
   const qs = opts?.trash ? "?trash=true" : "";
   const res = await fetch(`${API}/api/files${qs}`, { credentials: "include" });
-  return (await j<{ files: DriftFile[] }>(res)).files;
+  return hydrateEncryptedFiles((await j<{ files: DriftFile[] }>(res)).files);
 }
 
 // Keyset-paginated listing for infinite scroll. Pass the previous nextCursor to
@@ -170,7 +195,8 @@ export async function listFilesPage(opts?: {
   if (opts?.cursor) params.set("cursor", opts.cursor);
   const qs = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`${API}/api/files${qs}`, { credentials: "include" });
-  return j<{ files: DriftFile[]; nextCursor: string | null }>(res);
+  const page = await j<{ files: DriftFile[]; nextCursor: string | null }>(res);
+  return { ...page, files: await hydrateEncryptedFiles(page.files) };
 }
 
 export async function presign(input: {
@@ -630,9 +656,7 @@ function putPart(
         try {
           detail = String(JSON.parse(xhr.responseText || "{}").error || "");
         } catch {}
-        reject(
-          new Error(detail || `part ${partNumber} failed: ${xhr.status}`),
-        );
+        reject(new Error(detail || `part ${partNumber} failed: ${xhr.status}`));
       }
     };
     xhr.onerror = () =>
@@ -949,13 +973,14 @@ export async function adminBulkUsers(
   action: string,
   ids: string[],
   quotaBytes?: number | null,
+  confirmation?: string,
 ) {
   return j<{ ok: true; count: number }>(
     await fetch(`${API}/api/admin/users/bulk`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ids, quotaBytes }),
+      body: JSON.stringify({ action, ids, quotaBytes, confirmation }),
     }),
   );
 }
@@ -1123,13 +1148,14 @@ export async function adminAdmins(): Promise<AdminEntry[]> {
 export async function adminAddAdmin(
   email: string,
   role: AdminRole = "admin",
+  confirmation: string,
 ): Promise<{ ok: true }> {
   return j(
     await fetch(`${API}/api/admin/admins`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email, role, confirmation }),
     }),
   );
 }
@@ -1241,12 +1267,15 @@ export async function adminRollbackPolicy(
   confirmation: string,
 ): Promise<{ ok: true; settings: AdminSettings; revision: string | null }> {
   return j(
-    await fetch(`${API}/api/admin/settings/rollback/${encodeURIComponent(id)}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expectedRevision, confirmation }),
-    }),
+    await fetch(
+      `${API}/api/admin/settings/rollback/${encodeURIComponent(id)}`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRevision, confirmation }),
+      },
+    ),
   );
 }
 

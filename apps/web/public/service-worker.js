@@ -1,5 +1,10 @@
-const CACHE = "dropvault-shell-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/dropvault-icon.svg"];
+const CACHE = "dropvault-shell-v2";
+const SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/dropvault-icon.svg",
+  "/theme-bootstrap.js",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -34,7 +39,9 @@ self.addEventListener("fetch", (event) => {
       fetch(request)
         .then((response) => {
           const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put("/", copy));
+          event.waitUntil(
+            caches.open(CACHE).then((cache) => cache.put("/", copy)),
+          );
           return response;
         })
         .catch(() => caches.match("/")),
@@ -48,7 +55,9 @@ self.addEventListener("fetch", (event) => {
         fetch(request).then((response) => {
           if (response.ok) {
             const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
+            event.waitUntil(
+              caches.open(CACHE).then((cache) => cache.put(request, copy)),
+            );
           }
           return response;
         }),

@@ -9,7 +9,7 @@ import {
   DAY_SECONDS,
   FOREVER_EXPIRES_AT,
 } from "../lib/expiry";
-import { hashSecret } from "../lib/hash";
+import { hashSecret, sha256StreamHex } from "../lib/hash";
 import { clientIp } from "../lib/rateLimit";
 import {
   completeReservation,
@@ -40,6 +40,39 @@ files.use("*", requireAuth);
 function normalizeUploadSize(value: unknown): number | null {
   const n = Math.floor(Number(value));
   return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+function base64UrlByteLength(value: unknown): number | null {
+  const raw = String(value ?? "");
+  if (!raw || !/^[A-Za-z0-9_-]+$/.test(raw)) return null;
+  try {
+    const padded =
+      raw.replace(/-/g, "+").replace(/_/g, "/") +
+      "===".slice((raw.length + 3) % 4);
+    return atob(padded).length;
+  } catch {
+    return null;
+  }
+}
+function validEncryptedEnvelope(
+  sizeBytes: number,
+  nonce: unknown,
+  metadata: unknown,
+): boolean {
+  if (sizeBytes <= 16 || base64UrlByteLength(nonce) !== 12) return false;
+  try {
+    const value = JSON.parse(String(metadata ?? "")) as {
+      nonce?: unknown;
+      ciphertext?: unknown;
+    };
+    const ciphertextBytes = base64UrlByteLength(value.ciphertext);
+    return (
+      base64UrlByteLength(value.nonce) === 12 &&
+      ciphertextBytes != null &&
+      ciphertextBytes >= 16
+    );
+  } catch {
+    return false;
+  }
 }
 function isInlineSafeContentType(type: string | null): boolean {
   return !!type && (type.startsWith("image/") || type.includes("pdf"));
@@ -108,7 +141,7 @@ async function settings(db: ReturnType<typeof getDb>) {
   };
 }
 function roleGetsForever(role: string | null): boolean {
-  return role === "owner" || role === "admin" || role === "moderator";
+  return role === "owner" || role === "admin";
 }
 async function canKeepForever(
   c: any,
@@ -131,9 +164,7 @@ function typeAllowed(type: string | null, allowed: string[]): boolean {
   const t = (type || "").toLowerCase();
   return allowed.some((a) => {
     const v = a.toLowerCase();
-    return v.endsWith("/*")
-      ? t.startsWith(v.slice(0, -1))
-      : t === v || t.includes(v);
+    return v.endsWith("/*") ? t.startsWith(v.slice(0, -1)) : t === v;
   });
 }
 async function logActivity(
@@ -267,11 +298,26 @@ files.post("/presign", async (c) => {
     .get();
   const role = await adminRole(c.env, db, account?.email ?? "");
   const quotaLimit =
-    role != null ? null : (account?.quotaBytes ?? policy.defaultQuotaBytes);
+    role === "owner" || role === "admin"
+      ? null
+      : (account?.quotaBytes ?? policy.defaultQuotaBytes);
   const wantsForever = !!body.keepForever;
   if (wantsForever && !(await canKeepForever(c, db, userId, account?.email)))
     return c.json({ error: "keep-forever permission required" }, 403);
   const encryptionMode = body.encryptionMode === "aes-gcm" ? "aes-gcm" : "none";
+  if (
+    encryptionMode === "aes-gcm" &&
+    !validEncryptedEnvelope(
+      sizeBytes,
+      body.encryptionNonce,
+      body.encryptedMetadata,
+    )
+  )
+    return c.json({ error: "valid AES-GCM encryption metadata required" }, 400);
+  const storedFilename =
+    encryptionMode === "aes-gcm"
+      ? "Encrypted file"
+      : body.filename.trim().slice(0, 255);
   const contentHash = body.contentHash
     ? String(body.contentHash).trim().toLowerCase()
     : null;
@@ -282,6 +328,17 @@ files.post("/presign", async (c) => {
       { error: "SHA-256 contentHash is required for unencrypted uploads" },
       400,
     );
+  const requestedChecksum = body.checksum
+    ? String(body.checksum).trim().toLowerCase()
+    : null;
+  if (requestedChecksum && !/^[a-f0-9]{64}$/.test(requestedChecksum))
+    return c.json({ error: "checksum must be a SHA-256 hex digest" }, 400);
+  if (
+    encryptionMode === "none" &&
+    requestedChecksum &&
+    requestedChecksum !== contentHash
+  )
+    return c.json({ error: "checksum and contentHash must match" }, 400);
   if (contentHash) {
     const banned = await db
       .select()
@@ -326,12 +383,13 @@ files.post("/presign", async (c) => {
     .values({
       id,
       ownerId: userId,
-      filename: body.filename.trim().slice(0, 255),
+      filename: storedFilename,
       r2Key,
       sizeBytes,
       contentType,
       contentHash,
-      checksum: body.checksum?.trim().slice(0, 128) || contentHash,
+      checksum: contentHash,
+      checksumAlgorithm: contentHash ? "sha-256" : null,
       status: "pending",
       folderId,
       versionGroupId: id,
@@ -374,7 +432,7 @@ files.post("/presign", async (c) => {
         ? "file.presign.forever"
         : "file.presign",
     id,
-    body.filename,
+    storedFilename,
   );
   return c.json({
     id,
@@ -446,6 +504,66 @@ async function markReady(
   return c.json({ ok: true });
 }
 
+async function discardPendingUpload(
+  c: any,
+  db: ReturnType<typeof getDb>,
+  row: typeof schema.files.$inferSelect,
+): Promise<void> {
+  await c.env.FILES.delete(row.r2Key).catch(() => {});
+  await releaseReservation(c.env.DB, row.id).catch(() => {});
+  await db
+    .delete(schema.files)
+    .where(eq(schema.files.id, row.id))
+    .run()
+    .catch(() => {});
+}
+
+async function verifyMultipartIntegrity(
+  c: any,
+  db: ReturnType<typeof getDb>,
+  row: typeof schema.files.$inferSelect,
+): Promise<Response | null> {
+  // E2E uploads intentionally omit a server-visible plaintext hash. AES-GCM
+  // authenticates their ciphertext in the browser during decryption.
+  if (row.encryptionMode === "aes-gcm" && !row.contentHash) return null;
+  const object = await c.env.FILES.get(row.r2Key);
+  if (!object) return c.json({ error: "upload missing" }, 409);
+  const actual = await sha256StreamHex(object.body);
+  const expected = String(row.contentHash ?? "").toLowerCase();
+  if (!expected || actual !== expected) {
+    await discardPendingUpload(c, db, row);
+    return c.json(
+      { error: "upload integrity check failed; retry the file" },
+      409,
+    );
+  }
+  if (row.encryptionMode !== "aes-gcm") {
+    const banned = await db
+      .select()
+      .from(schema.bannedFileHashes)
+      .where(eq(schema.bannedFileHashes.hash, actual))
+      .get()
+      .catch(() => null);
+    if (banned) {
+      await discardPendingUpload(c, db, row);
+      return c.json(
+        { error: "This file is blocked by workspace security policy." },
+        451,
+      );
+    }
+  }
+  await db
+    .update(schema.files)
+    .set({
+      contentHash: actual,
+      checksum: actual,
+      checksumAlgorithm: "sha-256",
+    })
+    .where(eq(schema.files.id, row.id))
+    .run();
+  return null;
+}
+
 files.put("/:id/upload", async (c) => {
   const id = c.req.param("id");
   const { db, row } = await loadPendingOwned(c, id);
@@ -461,7 +579,8 @@ files.put("/:id/upload", async (c) => {
   const body = c.req.raw.body;
   if (!body) return c.json({ error: "empty upload" }, 400);
   const declared = c.req.header("Content-Length");
-  if (declared && Number(declared) !== row.sizeBytes)
+  if (!declared) return c.json({ error: "Content-Length is required" }, 411);
+  if (Number(declared) !== row.sizeBytes)
     return c.json(
       { error: "Content-Length does not match reserved upload size" },
       409,
@@ -471,7 +590,18 @@ files.put("/:id/upload", async (c) => {
     putOptions.httpMetadata = { contentType: row.contentType };
   if (row.checksum && /^[a-f0-9]{64}$/i.test(row.checksum))
     putOptions.sha256 = row.checksum;
-  await c.env.FILES.put(row.r2Key, body, putOptions);
+  try {
+    await c.env.FILES.put(row.r2Key, body, putOptions);
+  } catch {
+    // R2 rejects a body whose SHA-256 does not match the presigned digest.
+    // Keep the reservation pending so a legitimate interrupted client can
+    // retry, but never expose the provider exception or mark the file ready.
+    await c.env.FILES.delete(row.r2Key).catch(() => {});
+    return c.json(
+      { error: "upload integrity check failed; retry the file" },
+      409,
+    );
+  }
   const object = await c.env.FILES.head(row.r2Key);
   if (!object || object.size !== row.sizeBytes) {
     try {
@@ -589,7 +719,9 @@ files.put("/:id/multipart/part", async (c) => {
     session.expiresAt <= nowSeconds()
   )
     return c.json({ error: "upload session expired" }, 410);
-  const declared = Number(c.req.header("Content-Length") || 0);
+  const declared = Number(c.req.header("Content-Length"));
+  if (!Number.isSafeInteger(declared) || declared <= 0)
+    return c.json({ error: "valid Content-Length is required" }, 411);
   if (declared > 100 * 1024 * 1024)
     return c.json({ error: "multipart part exceeds 100 MiB" }, 413);
   const body = c.req.raw.body;
@@ -635,14 +767,18 @@ files.post("/:id/multipart/complete", async (c) => {
     !body?.uploadId ||
     !session ||
     session.uploadId !== body.uploadId ||
-    session.status !== "active"
+    session.status !== "active" ||
+    session.expiresAt <= nowSeconds()
   )
     return c.json({ error: "active upload session required" }, 400);
-  const supplied =
-    Array.isArray(body.parts) && body.parts.length
-      ? body.parts
-      : JSON.parse(session.parts || "[]");
-  const parts = supplied
+  // Complete only the parts the Worker itself recorded. Client-provided ETags
+  // are progress hints, not trusted completion authority.
+  const parts = (
+    JSON.parse(session.parts || "[]") as Array<{
+      partNumber: number;
+      etag: string;
+    }>
+  )
     .map((p: { partNumber: number; etag: string }) => ({
       partNumber: Number(p.partNumber),
       etag: String(p.etag),
@@ -677,11 +813,11 @@ files.post("/:id/multipart/complete", async (c) => {
     );
   }
   if (!object || object.size !== row.sizeBytes) {
-    try {
-      await c.env.FILES.delete(row.r2Key);
-    } catch {}
+    await discardPendingUpload(c, db, row);
     return c.json({ error: "upload size mismatch" }, 409);
   }
+  const integrityError = await verifyMultipartIntegrity(c, db, row);
+  if (integrityError) return integrityError;
   return markReady(c, db, row, id);
 });
 files.post("/:id/multipart/abort", async (c) => {
@@ -908,7 +1044,9 @@ files.put("/:id/thumbnail", async (c) => {
   if (!isImageContentType(row.contentType))
     return c.json({ error: "thumbnail only for images" }, 415);
   const declared = Number(c.req.header("Content-Length") || 0);
-  if (declared && declared > THUMB_MAX_BYTES)
+  if (!Number.isSafeInteger(declared) || declared <= 0)
+    return c.json({ error: "valid Content-Length is required" }, 411);
+  if (declared > THUMB_MAX_BYTES)
     return c.json({ error: "thumbnail too large" }, 413);
   const body = c.req.raw.body;
   if (!body) return c.json({ error: "empty thumbnail" }, 400);
@@ -1118,6 +1256,14 @@ files.get("/:id/versions", async (c) => {
 files.put("/:id/versions", async (c) => {
   const { db, row } = await loadReadyOwned(c, c.req.param("id"));
   if (!row) return c.json({ error: "not found" }, 404);
+  if (row.encryptionMode === "aes-gcm")
+    return c.json(
+      {
+        error:
+          "E2E file versions require browser-side encryption and are not supported yet.",
+      },
+      409,
+    );
   const sizeBytes = normalizeUploadSize(c.req.header("Content-Length"));
   if (sizeBytes == null)
     return c.json({ error: "Content-Length is required" }, 411);
@@ -1138,8 +1284,19 @@ files.put("/:id/versions", async (c) => {
   const checksum = (c.req.header("X-Checksum-Sha256") || "")
     .trim()
     .toLowerCase();
-  if (checksum && !/^[a-f0-9]{64}$/.test(checksum))
-    return c.json({ error: "invalid SHA-256 checksum" }, 400);
+  if (!/^[a-f0-9]{64}$/.test(checksum))
+    return c.json({ error: "valid SHA-256 checksum required" }, 400);
+  const banned = await db
+    .select()
+    .from(schema.bannedFileHashes)
+    .where(eq(schema.bannedFileHashes.hash, checksum))
+    .get()
+    .catch(() => null);
+  if (banned)
+    return c.json(
+      { error: "This file is blocked by workspace security policy." },
+      451,
+    );
   const account = await db
     .select()
     .from(schema.user)
@@ -1148,7 +1305,7 @@ files.put("/:id/versions", async (c) => {
   const role = await adminRole(c.env, db, account?.email ?? "");
   const delta = Math.max(0, sizeBytes - row.sizeBytes);
   let reserved = false;
-  if (delta > 0 && role == null) {
+  if (delta > 0 && role !== "owner" && role !== "admin") {
     await db
       .delete(schema.uploadReservations)
       .where(
@@ -1280,7 +1437,7 @@ files.post("/:id/versions/:versionId/restore", async (c) => {
   const role = await adminRole(c.env, db, account?.email ?? "");
   const delta = Math.max(0, version.sizeBytes - row.sizeBytes);
   let reserved = false;
-  if (delta > 0 && role == null) {
+  if (delta > 0 && role !== "owner" && role !== "admin") {
     await db
       .delete(schema.uploadReservations)
       .where(

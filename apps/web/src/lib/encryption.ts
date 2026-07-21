@@ -130,6 +130,20 @@ async function metadataFor(
   }
 }
 
+export async function decryptEncryptedMetadata(
+  encodedKey: string,
+  encryptedMetadata?: string | null,
+): Promise<{ filename: string; contentType: string }> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    fromBase64Url(encodedKey),
+    "AES-GCM",
+    false,
+    ["decrypt"],
+  );
+  return metadataFor(key, encryptedMetadata);
+}
+
 export async function decryptEncryptedPayload(
   payload: ArrayBuffer,
   encodedKey: string,

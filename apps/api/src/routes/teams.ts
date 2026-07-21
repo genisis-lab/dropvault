@@ -267,6 +267,11 @@ teams.get("/:id/files/:fileId/inline", async (c) => {
   const file = await sharedTeamFile(db, access.team.id, c.req.param("fileId"));
   if (!file || file.status !== "ready" || file.deletedAt)
     return c.json({ error: "not found" }, 404);
+  if (file.releaseAt && file.releaseAt > nowSeconds())
+    return c.json(
+      { error: "file is not available yet", releaseAt: file.releaseAt },
+      423,
+    );
   if (!isInlineTeamMedia(file.contentType))
     return c.json({ error: "inline preview not allowed" }, 415);
   if (isExpired(file.expiresAt)) return c.json({ error: "expired" }, 410);
@@ -291,6 +296,11 @@ teams.get("/:id/files/:fileId/download", async (c) => {
   const file = await sharedTeamFile(db, access.team.id, c.req.param("fileId"));
   if (!file || file.status !== "ready" || file.deletedAt)
     return c.json({ error: "not found" }, 404);
+  if (file.releaseAt && file.releaseAt > nowSeconds())
+    return c.json(
+      { error: "file is not available yet", releaseAt: file.releaseAt },
+      423,
+    );
   if (isExpired(file.expiresAt)) return c.json({ error: "expired" }, 410);
   const object = await c.env.FILES.get(file.r2Key);
   if (!object) return c.json({ error: "not found" }, 404);
