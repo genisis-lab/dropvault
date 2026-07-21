@@ -1,3 +1,4 @@
+import { sha256 } from "@noble/hashes/sha2.js";
 import { getEncryptionKey } from "./encryption";
 
 // /api is same-origin: Vite proxies it to the local Worker in dev, and the Pages
@@ -71,10 +72,14 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function sha256Hex(file: File): Promise<string | null> {
-  if (!crypto?.subtle || file.size > 512 * 1024 * 1024) return null;
-  const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return [...new Uint8Array(hash)]
+async function sha256Hex(file: File): Promise<string> {
+  const digest = sha256.create();
+  const chunkSize = 8 * 1024 * 1024;
+  for (let offset = 0; offset < file.size; offset += chunkSize) {
+    const chunk = await file.slice(offset, offset + chunkSize).arrayBuffer();
+    digest.update(new Uint8Array(chunk));
+  }
+  return [...digest.digest()]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
@@ -706,7 +711,7 @@ export async function uploadLargeFile(
   onProgress(100);
 }
 
-export type AdminRole = "owner" | "admin" | "moderator" | "viewer";
+export type AdminRole = "owner" | "admin" | "moderator" | "auditor";
 export type AdminAlert = {
   id: string;
   label: string;
@@ -775,6 +780,12 @@ export type AdminFile = DriftFile & {
   ownerId: string;
   ownerEmail: string | null;
   ownerName: string | null;
+  contentHash?: string | null;
+  checksumAlgorithm?: string | null;
+  encryptionMode?: "none" | "aes-gcm";
+  encrypted?: boolean;
+  adminContentAccessible?: boolean;
+  scanStatus?: string | null;
 };
 export type ActivityEntry = {
   id: string;
@@ -806,6 +817,15 @@ export type AdminFlag = {
   filename: string | null;
   ownerEmail: string | null;
   fileExists: boolean;
+  sizeBytes: number | null;
+  contentType: string | null;
+  contentHash: string | null;
+  checksumAlgorithm: string | null;
+  encryptionMode: "none" | "aes-gcm" | null;
+  adminContentAccessible: boolean;
+  fileStatus: string | null;
+  deletedAt: number | null;
+  expiresAt: number | null;
 };
 export type AdminAuditEntry = {
   id: string;
@@ -824,6 +844,31 @@ export type AdminEntry = {
   createdAt: number | null;
 };
 export type AdminSettings = Record<string, string>;
+export type AdminPolicyState = {
+  settings: AdminSettings;
+  revision: string | null;
+};
+export type PolicyChange = {
+  key: string;
+  before: string;
+  after: string;
+};
+export type PolicyVersion = {
+  id: string;
+  actorEmail: string | null;
+  source: "update" | "rollback" | string;
+  changes: PolicyChange[];
+  settings: AdminSettings;
+  createdAt: number;
+};
+export type BannedFileHash = {
+  hash: string;
+  algorithm: string;
+  reason: string | null;
+  sourceFileId: string | null;
+  createdBy: string | null;
+  createdAt: number;
+};
 export type IpBanEntry = {
   ip: string;
   note: string | null;
@@ -970,11 +1015,14 @@ export async function adminRestoreFile(id: string): Promise<{ ok: true }> {
 }
 export async function adminPermanentDeleteFile(
   id: string,
+  confirmation: string,
 ): Promise<{ ok: true }> {
   return j(
     await fetch(`${API}/api/admin/files/${id}/delete-permanent`, {
       method: "POST",
       credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation }),
     }),
   );
 }
@@ -988,13 +1036,14 @@ export async function adminBulkFiles(
     | "permanentDelete",
   ids: string[],
   days?: number,
+  confirmation?: string,
 ): Promise<{ ok: true; count: number }> {
   return j(
     await fetch(`${API}/api/admin/files/bulk`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ids, days }),
+      body: JSON.stringify({ action, ids, days, confirmation }),
     }),
   );
 }
@@ -1027,13 +1076,42 @@ export async function adminResolveFlag(id: string): Promise<{ ok: true }> {
     }),
   );
 }
-export async function adminDeleteFlag(id: string): Promise<{ ok: true }> {
+export async function adminDeleteFlag(
+  id: string,
+  confirmation: string,
+): Promise<{ ok: true }> {
   return j(
     await fetch(`${API}/api/admin/flags/${id}`, {
       method: "DELETE",
       credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation }),
     }),
   );
+}
+export function adminFlagContentUrl(id: string): string {
+  return `${API}/api/admin/flags/${encodeURIComponent(id)}/content`;
+}
+export async function adminBanFlagHash(
+  id: string,
+  confirmation: string,
+  reason?: string | null,
+): Promise<{ ok: true; hash: string }> {
+  return j(
+    await fetch(`${API}/api/admin/flags/${encodeURIComponent(id)}/ban-hash`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation, reason }),
+    }),
+  );
+}
+export async function adminHashBans(): Promise<BannedFileHash[]> {
+  return (
+    await j<{ bans: BannedFileHash[] }>(
+      await fetch(`${API}/api/admin/hash-bans`, { credentials: "include" }),
+    )
+  ).bans;
 }
 export async function adminAdmins(): Promise<AdminEntry[]> {
   return (
@@ -1055,11 +1133,16 @@ export async function adminAddAdmin(
     }),
   );
 }
-export async function adminRemoveAdmin(email: string): Promise<{ ok: true }> {
+export async function adminRemoveAdmin(
+  email: string,
+  confirmation: string,
+): Promise<{ ok: true }> {
   return j(
     await fetch(`${API}/api/admin/admins/${encodeURIComponent(email)}`, {
       method: "DELETE",
       credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation }),
     }),
   );
 }
@@ -1119,22 +1202,50 @@ export async function myActivity(limit?: number): Promise<ActivityEntry[]> {
     )
   ).entries;
 }
-export async function adminSettings(): Promise<AdminSettings> {
-  return (
-    await j<{ settings: AdminSettings }>(
-      await fetch(`${API}/api/admin/settings`, { credentials: "include" }),
-    )
-  ).settings;
+export async function adminSettings(): Promise<AdminPolicyState> {
+  return j(
+    await fetch(`${API}/api/admin/settings`, { credentials: "include" }),
+  );
 }
 export async function adminSaveSettings(
   settings: AdminSettings,
-): Promise<{ ok: true; settings: AdminSettings }> {
+  expectedRevision: string | null,
+  confirmation?: string,
+): Promise<{ ok: true; settings: AdminSettings; revision: string | null }> {
   return j(
     await fetch(`${API}/api/admin/settings`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
+      body: JSON.stringify({
+        settings,
+        expectedRevision,
+        reviewed: true,
+        confirmation,
+      }),
+    }),
+  );
+}
+export async function adminPolicyHistory(): Promise<PolicyVersion[]> {
+  return (
+    await j<{ versions: PolicyVersion[] }>(
+      await fetch(`${API}/api/admin/settings/history`, {
+        credentials: "include",
+      }),
+    )
+  ).versions;
+}
+export async function adminRollbackPolicy(
+  id: string,
+  expectedRevision: string | null,
+  confirmation: string,
+): Promise<{ ok: true; settings: AdminSettings; revision: string | null }> {
+  return j(
+    await fetch(`${API}/api/admin/settings/rollback/${encodeURIComponent(id)}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision, confirmation }),
     }),
   );
 }
@@ -1418,6 +1529,7 @@ export async function submitPublicMultipart(
             filename: file.name,
             sizeBytes: file.size,
             contentType: file.type,
+            contentHash: await sha256Hex(file),
             ...input,
           }),
         },
