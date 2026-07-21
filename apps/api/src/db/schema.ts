@@ -226,6 +226,38 @@ export const appSettings = sqliteTable("app_settings", {
 
 export type AppSettingRow = typeof appSettings.$inferSelect;
 
+export const policyVersions = sqliteTable(
+  "policy_versions",
+  {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id"),
+    actorEmail: text("actor_email"),
+    source: text("source").notNull().default("update"),
+    beforeJson: text("before_json").notNull(),
+    afterJson: text("after_json").notNull(),
+    changesJson: text("changes_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ createdAtIdx: index("idx_policy_versions_created_at").on(t.createdAt) }),
+);
+
+export type PolicyVersionRow = typeof policyVersions.$inferSelect;
+
+export const bannedFileHashes = sqliteTable(
+  "banned_file_hashes",
+  {
+    hash: text("hash").primaryKey(),
+    algorithm: text("algorithm").notNull().default("sha-256"),
+    reason: text("reason"),
+    sourceFileId: text("source_file_id"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ createdAtIdx: index("idx_banned_hashes_created_at").on(t.createdAt) }),
+);
+
+export type BannedFileHashRow = typeof bannedFileHashes.$inferSelect;
+
 export const activityLog = sqliteTable(
   "activity_log",
   {

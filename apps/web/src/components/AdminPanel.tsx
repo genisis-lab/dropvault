@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
@@ -44,6 +44,9 @@ import {
   adminFlags,
   adminUpdateFlag,
   adminDeleteFlag,
+  adminFlagContentUrl,
+  adminBanFlagHash,
+  adminHashBans,
   adminAdmins,
   adminAddAdmin,
   adminRemoveAdmin,
@@ -54,6 +57,8 @@ import {
   adminActivity,
   adminSettings,
   adminSaveSettings,
+  adminPolicyHistory,
+  adminRollbackPolicy,
   listUploadRequests,
   createUploadRequest,
   revokeUploadRequest,
@@ -66,6 +71,7 @@ import {
   type AdminGrowthPoint,
   type AdminRole,
   type AdminSettings,
+  type PolicyVersion,
   type IpBanEntry,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
@@ -93,20 +99,26 @@ type SortDir = "asc" | "desc";
 type GrowthMetric = "files" | "bytes" | "users";
 const DAY = 86400;
 const GIB = 1024 * 1024 * 1024;
-const ROLES: AdminRole[] = ["owner", "admin", "moderator", "viewer"];
-const CAPABILITIES: { key: string; label: string; def: AdminRole }[] = [
-  {
-    key: "manageUsers",
-    label: "Manage users (quota, suspend, approve)",
-    def: "admin",
-  },
-  {
-    key: "manageFiles",
-    label: "Manage files (revoke, expire, delete)",
-    def: "admin",
-  },
-  { key: "manageFlags", label: "Handle abuse reports", def: "moderator" },
-];
+const ROLES: AdminRole[] = ["owner", "admin", "moderator", "auditor"];
+const SECURITY_POLICY_KEYS = new Set([
+  "defaultExpiryDays",
+  "maxExpiryDays",
+  "maxUploadBytes",
+  "allowedTypes",
+  "defaultQuotaBytes",
+  "adminMaxQuotaBytes",
+  "requirePasswordForShares",
+  "publicSharingEnabled",
+  "signupMode",
+  "trashRetentionDays",
+  "rolePermissions",
+]);
+function ownerConfirmation(phrase: string): string | null {
+  const value = window.prompt(
+    `Owner confirmation required. Type ${phrase} to continue.`,
+  );
+  return value === phrase ? value : null;
+}
 
 function fmtDate(sec: number): string {
   return new Date(sec * 1000).toLocaleDateString(undefined, {
@@ -177,6 +189,11 @@ export default function AdminPanel({
   const [newAdmin, setNewAdmin] = useState("");
   const [newRole, setNewRole] = useState<AdminRole>("admin");
   const [policyDraft, setPolicyDraft] = useState<AdminSettings | null>(null);
+  const [policyReview, setPolicyReview] = useState<{
+    mode: "save" | "rollback";
+    settings: AdminSettings;
+    version?: PolicyVersion;
+  } | null>(null);
   const [requestDraft, setRequestDraft] = useState({
     title: "Upload files",
     instructions: "",
@@ -197,15 +214,27 @@ export default function AdminPanel({
   });
   const role = accessQ.data?.role ?? null;
   const isOwner = role === "owner";
+  const canOperate = role === "owner" || role === "admin";
+  const canModerate = canOperate || role === "moderator";
+  useEffect(() => {
+    const allowed =
+      role === "auditor"
+        ? ["flags", "settings", "activity"]
+        : role === "moderator"
+          ? ["flags", "settings"]
+          : null;
+    if (allowed && !allowed.includes(tab))
+      setTab("flags");
+  }, [role, tab]);
   const statsQ = useQuery({
     queryKey: ["admin-stats"],
     queryFn: adminStats,
-    enabled: open,
+    enabled: open && canOperate,
   });
   const usersQ = useQuery({
     queryKey: ["admin-users"],
     queryFn: adminUsers,
-    enabled: open && tab === "users",
+    enabled: open && tab === "users" && canOperate,
   });
   const ipBansQ = useQuery({
     queryKey: ["admin-ip-bans"],
@@ -215,11 +244,16 @@ export default function AdminPanel({
   const filesQ = useQuery({
     queryKey: ["admin-files"],
     queryFn: adminFiles,
-    enabled: open && tab === "files",
+    enabled: open && tab === "files" && canOperate,
   });
   const flagsQ = useQuery({
     queryKey: ["admin-flags", flagStatus],
     queryFn: () => adminFlags(flagStatus === "all" ? undefined : flagStatus),
+    enabled: open && tab === "flags",
+  });
+  const hashBansQ = useQuery({
+    queryKey: ["admin-hash-bans"],
+    queryFn: adminHashBans,
     enabled: open && tab === "flags",
   });
   const adminsQ = useQuery({
@@ -242,6 +276,11 @@ export default function AdminPanel({
     queryFn: adminSettings,
     enabled: open && (tab === "settings" || tab === "notifications"),
   });
+  const policyHistoryQ = useQuery({
+    queryKey: ["admin-policy-history"],
+    queryFn: adminPolicyHistory,
+    enabled: open && tab === "settings",
+  });
   const requestsQ = useQuery({
     queryKey: ["upload-requests"],
     queryFn: listUploadRequests,
@@ -250,7 +289,7 @@ export default function AdminPanel({
   const limitRequestsQ = useQuery({
     queryKey: ["limit-requests"],
     queryFn: listLimitRequests,
-    enabled: open && tab === "limit-requests",
+    enabled: open && tab === "limit-requests" && canOperate,
   });
 
   function refresh() {
@@ -260,10 +299,12 @@ export default function AdminPanel({
     qc.invalidateQueries({ queryKey: ["admin-ip-bans"] });
     qc.invalidateQueries({ queryKey: ["admin-files"] });
     qc.invalidateQueries({ queryKey: ["admin-flags"] });
+    qc.invalidateQueries({ queryKey: ["admin-hash-bans"] });
     qc.invalidateQueries({ queryKey: ["admin-admins"] });
     qc.invalidateQueries({ queryKey: ["admin-audit"] });
     qc.invalidateQueries({ queryKey: ["admin-activity"] });
     qc.invalidateQueries({ queryKey: ["admin-settings"] });
+    qc.invalidateQueries({ queryKey: ["admin-policy-history"] });
     qc.invalidateQueries({ queryKey: ["upload-requests"] });
     qc.invalidateQueries({ queryKey: ["limit-requests"] });
   }
@@ -323,7 +364,8 @@ export default function AdminPanel({
     onError: onErr("Couldn't restore file"),
   });
   const permanentMut = useMutation({
-    mutationFn: (id: string) => adminPermanentDeleteFile(id),
+    mutationFn: (v: { id: string; confirmation: string }) =>
+      adminPermanentDeleteFile(v.id, v.confirmation),
     onSuccess: () => {
       toastOk("Permanently deleted");
       refresh();
@@ -341,7 +383,8 @@ export default function AdminPanel({
         | "permanentDelete";
       ids: string[];
       days?: number;
-    }) => adminBulkFiles(v.action, v.ids, v.days),
+      confirmation?: string;
+    }) => adminBulkFiles(v.action, v.ids, v.days, v.confirmation),
     onSuccess: (r) => {
       toastOk(`Updated ${r.count} file${r.count === 1 ? "" : "s"}`);
       setSelected(new Set());
@@ -363,12 +406,22 @@ export default function AdminPanel({
     onError: onErr("Couldn't update flag"),
   });
   const deleteFlagMut = useMutation({
-    mutationFn: (id: string) => adminDeleteFlag(id),
+    mutationFn: (v: { id: string; confirmation: string }) =>
+      adminDeleteFlag(v.id, v.confirmation),
     onSuccess: () => {
       toastOk("Flag deleted");
       refresh();
     },
     onError: onErr("Couldn't delete flag"),
+  });
+  const banHashMut = useMutation({
+    mutationFn: (v: { id: string; confirmation: string; reason?: string | null }) =>
+      adminBanFlagHash(v.id, v.confirmation, v.reason),
+    onSuccess: () => {
+      toastOk("File hash permanently banned");
+      refresh();
+    },
+    onError: onErr("Couldn't ban file hash"),
   });
   const addAdminMut = useMutation({
     mutationFn: () => adminAddAdmin(newAdmin.trim(), newRole),
@@ -380,7 +433,8 @@ export default function AdminPanel({
     onError: onErr("Couldn't add admin"),
   });
   const removeAdminMut = useMutation({
-    mutationFn: (email: string) => adminRemoveAdmin(email),
+    mutationFn: (v: { email: string; confirmation: string }) =>
+      adminRemoveAdmin(v.email, v.confirmation),
     onSuccess: () => {
       toastOk("Admin removed");
       refresh();
@@ -407,15 +461,38 @@ export default function AdminPanel({
     onError: onErr("Couldn't remove IP ban"),
   });
   const saveSettingsMut = useMutation({
-    mutationFn: (s: AdminSettings) => adminSaveSettings(s),
+    mutationFn: (v: { settings: AdminSettings; confirmation?: string }) =>
+      adminSaveSettings(
+        v.settings,
+        settingsQ.data?.revision ?? null,
+        v.confirmation,
+      ),
     onSuccess: (result) => {
       if (isTheme(result.settings.defaultTheme))
         announceWorkspaceDefaultTheme(result.settings.defaultTheme);
       toastOk("Settings saved");
       setPolicyDraft(null);
+      setPolicyReview(null);
       refresh();
     },
     onError: onErr("Couldn't save settings"),
+  });
+  const rollbackPolicyMut = useMutation({
+    mutationFn: (v: { versionId: string; confirmation: string }) =>
+      adminRollbackPolicy(
+        v.versionId,
+        settingsQ.data?.revision ?? null,
+        v.confirmation,
+      ),
+    onSuccess: (result) => {
+      if (isTheme(result.settings.defaultTheme))
+        announceWorkspaceDefaultTheme(result.settings.defaultTheme);
+      toastOk("Policy version restored");
+      setPolicyDraft(null);
+      setPolicyReview(null);
+      refresh();
+    },
+    onError: onErr("Couldn't restore policy version"),
   });
   const createReqMut = useMutation({
     mutationFn: () =>
@@ -576,7 +653,20 @@ export default function AdminPanel({
       ? rows
       : rows.filter((r) => r.status === limitFilter);
   }, [limitRequestsQ.data, limitFilter]);
-  const settings = policyDraft ?? settingsQ.data ?? {};
+  const settings = policyDraft ?? settingsQ.data?.settings ?? {};
+  const policyReviewChanges = useMemo(() => {
+    if (!policyReview) return [];
+    const before = settingsQ.data?.settings ?? {};
+    return Array.from(
+      new Set([...Object.keys(before), ...Object.keys(policyReview.settings)]),
+    )
+      .filter((key) => before[key] !== policyReview.settings[key])
+      .map((key) => ({
+        key,
+        before: before[key] ?? "",
+        after: policyReview.settings[key] ?? "",
+      }));
+  }, [policyReview, settingsQ.data?.settings]);
   const selIds = Array.from(selected);
   const userSelIds = Array.from(userSelected);
   const ipBanMap = useMemo(
@@ -585,7 +675,7 @@ export default function AdminPanel({
   );
 
   if (!open) return null;
-  const tabs: { id: Tab; label: string }[] = [
+  const allTabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "users", label: "Users" },
     { id: "files", label: "Files" },
@@ -597,6 +687,13 @@ export default function AdminPanel({
     { id: "activity", label: "Activity" },
     { id: "notifications", label: "Notifications" },
   ];
+  const tabs = allTabs.filter((item) =>
+    canOperate
+      ? true
+      : role === "auditor"
+        ? ["flags", "settings", "activity"].includes(item.id)
+        : ["flags", "settings"].includes(item.id),
+  );
   const s = statsQ.data;
 
   return (
@@ -1287,9 +1384,19 @@ export default function AdminPanel({
                           onExpire={() => expireMut.mutate(f.id)}
                           onDelete={() => deleteMut.mutate(f.id)}
                           onRestore={() => restoreMut.mutate(f.id)}
-                          onPermanent={() =>
-                            window.confirm("Permanently delete this file?") &&
-                            permanentMut.mutate(f.id)
+                          onPermanent={
+                            isOwner
+                              ? () => {
+                                  const confirmation = ownerConfirmation(
+                                    "PERMANENTLY DELETE",
+                                  );
+                                  if (confirmation)
+                                    permanentMut.mutate({
+                                      id: f.id,
+                                      confirmation,
+                                    });
+                                }
+                              : undefined
                           }
                         />
                       ))}
@@ -1345,6 +1452,11 @@ export default function AdminPanel({
                             <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500">
                               {fl.status}
                             </span>
+                            {fl.encryptionMode === "aes-gcm" && (
+                              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
+                                E2E · admin inaccessible
+                              </span>
+                            )}
                           </div>
                           <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-600">
                             {fl.reason}
@@ -1354,6 +1466,26 @@ export default function AdminPanel({
                             {fmtDateTime(fl.createdAt)}
                             {fl.ownerEmail ? " · owner " + fl.ownerEmail : ""}
                           </p>
+                          {fl.fileExists && (
+                            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 rounded-lg bg-slate-50 px-2.5 py-2 text-xs text-slate-500">
+                              <span>{formatBytes(fl.sizeBytes ?? 0)}</span>
+                              <span>{fl.contentType || "Unknown type"}</span>
+                              <span>State: {fl.fileStatus || "unknown"}</span>
+                              {fl.deletedAt && <span>In trash</span>}
+                              {fl.contentHash && (
+                                <code title={fl.contentHash}>
+                                  SHA-256 {fl.contentHash.slice(0, 12)}…
+                                </code>
+                              )}
+                            </div>
+                          )}
+                          {fl.encryptionMode === "aes-gcm" && (
+                            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+                              Dropvault stores only ciphertext. Administrators
+                              cannot preview this file, recover its plaintext,
+                              or derive a stable plaintext hash.
+                            </p>
+                          )}
                           {fl.adminNote && (
                             <p className="mt-1 rounded-lg bg-slate-50 px-2 py-1 text-xs text-slate-500">
                               Note: {fl.adminNote}
@@ -1361,67 +1493,142 @@ export default function AdminPanel({
                           )}
                         </div>
                         <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                          {fl.adminContentAccessible && canOperate && (
+                            <a
+                              href={adminFlagContentUrl(fl.id)}
+                              target="_blank"
+                              rel="noopener"
+                              className="mini"
+                            >
+                              Review file
+                            </a>
+                          )}
                           {fl.token && (
                             <a
                               href={shareUrl(fl.token)}
                               target="_blank"
                               rel="noopener"
                               className="icon-btn"
+                              aria-label="Open public share"
                             >
                               <ExternalLink size={15} />
                             </a>
                           )}
-                          <button
-                            onClick={() =>
-                              flagMut.mutate({
-                                id: fl.id,
-                                status: "investigating",
-                              })
-                            }
-                            className="mini"
-                          >
-                            Investigate
-                          </button>
-                          <button
-                            onClick={() =>
-                              flagMut.mutate({ id: fl.id, status: "resolved" })
-                            }
-                            className="mini-good"
-                          >
-                            Resolve
-                          </button>
-                          <button
-                            onClick={() =>
-                              flagMut.mutate({
-                                id: fl.id,
-                                action: "revoke",
-                                status: "resolved",
-                                note: "Share link revoked from flag.",
-                              })
-                            }
-                            className="mini"
-                          >
-                            Revoke
-                          </button>
-                          <button
-                            onClick={() =>
-                              flagMut.mutate({
-                                id: fl.id,
-                                action: "delete",
-                                status: "resolved",
-                                note: "File moved to trash from flag.",
-                              })
-                            }
-                            className="mini-danger"
-                          >
-                            Trash file
-                          </button>
-                          <button
-                            onClick={() => deleteFlagMut.mutate(fl.id)}
-                            className="icon-danger"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          {canModerate && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  flagMut.mutate({
+                                    id: fl.id,
+                                    status: "investigating",
+                                  })
+                                }
+                                className="mini"
+                              >
+                                Investigate
+                              </button>
+                              <button
+                                onClick={() =>
+                                  flagMut.mutate({ id: fl.id, status: "resolved" })
+                                }
+                                className="mini-good"
+                              >
+                                Resolve
+                              </button>
+                              <button
+                                onClick={() =>
+                                  flagMut.mutate({
+                                    id: fl.id,
+                                    action: "quarantine",
+                                    status: "investigating",
+                                    note: "File quarantined during report review.",
+                                  })
+                                }
+                                className="mini-danger"
+                              >
+                                Quarantine
+                              </button>
+                            </>
+                          )}
+                          {canOperate && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  flagMut.mutate({
+                                    id: fl.id,
+                                    action: "revoke",
+                                    status: "resolved",
+                                    note: "Share link revoked from flag.",
+                                  })
+                                }
+                                className="mini"
+                              >
+                                Revoke
+                              </button>
+                              {fl.deletedAt ? (
+                                <button
+                                  onClick={() =>
+                                    flagMut.mutate({
+                                      id: fl.id,
+                                      action: "restore",
+                                      status: "investigating",
+                                      note: "File restored from trash during review.",
+                                    })
+                                  }
+                                  className="mini-good"
+                                >
+                                  Restore
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() =>
+                                    flagMut.mutate({
+                                      id: fl.id,
+                                      action: "delete",
+                                      status: "resolved",
+                                      note: "File moved to trash from flag.",
+                                    })
+                                  }
+                                  className="mini-danger"
+                                >
+                                  Trash file
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {isOwner && fl.contentHash && fl.encryptionMode !== "aes-gcm" && (
+                            <button
+                              onClick={() => {
+                                const confirmation = ownerConfirmation("BAN HASH");
+                                if (confirmation)
+                                  banHashMut.mutate({
+                                    id: fl.id,
+                                    confirmation,
+                                    reason: fl.reason,
+                                  });
+                              }}
+                              className="mini-danger"
+                            >
+                              Ban hash
+                            </button>
+                          )}
+                          {isOwner && (
+                            <button
+                              onClick={() => {
+                                const confirmation = ownerConfirmation(
+                                  "DELETE REPORT",
+                                );
+                                if (confirmation)
+                                  deleteFlagMut.mutate({
+                                    id: fl.id,
+                                    confirmation,
+                                  });
+                              }}
+                              className="icon-danger"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1429,6 +1636,32 @@ export default function AdminPanel({
                   {(flagsQ.data ?? []).length === 0 && (
                     <Empty label="No reports here." />
                   )}
+                </div>
+                <div className="mt-6 rounded-xl border border-slate-200 p-3">
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Permanently banned file hashes
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Matching SHA-256 uploads are rejected before storage. E2E
+                    files are excluded because administrators never receive a
+                    stable plaintext hash.
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {(hashBansQ.data ?? []).map((ban) => (
+                      <div
+                        key={ban.hash}
+                        className="rounded-lg bg-slate-50 px-2.5 py-2 text-xs text-slate-600"
+                      >
+                        <code>{ban.hash}</code>
+                        <div className="mt-0.5 text-slate-400">
+                          {ban.reason || "No reason"} · {ban.createdBy || "owner"} · {fmtDateTime(ban.createdAt)}
+                        </div>
+                      </div>
+                    ))}
+                    {(hashBansQ.data ?? []).length === 0 && (
+                      <p className="text-xs text-slate-400">No banned hashes.</p>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -1504,7 +1737,14 @@ export default function AdminPanel({
                         )}
                       </div>
                       <button
-                        onClick={() => removeAdminMut.mutate(a.email)}
+                        onClick={() => {
+                          const confirmation = ownerConfirmation("REMOVE ROLE");
+                          if (confirmation)
+                            removeAdminMut.mutate({
+                              email: a.email,
+                              confirmation,
+                            });
+                        }}
                         disabled={
                           !isOwner ||
                           a.source === "env" ||
@@ -1525,7 +1765,8 @@ export default function AdminPanel({
               <Loading />
             ) : (
               <div className="space-y-6">
-                <DefaultThemeEditor
+                <fieldset disabled={!isOwner} className="space-y-6 disabled:opacity-75">
+                  <DefaultThemeEditor
                   value={
                     isTheme(settings.defaultTheme)
                       ? settings.defaultTheme
@@ -1561,6 +1802,13 @@ export default function AdminPanel({
                     settings={settings}
                     setSettings={setPolicyDraft}
                     hint="New users get this much space unless given a custom quota. Stored as bytes."
+                  />
+                  <GbPolicyInput
+                    label="Admin quota adjustment cap (GB)"
+                    k="adminMaxQuotaBytes"
+                    settings={settings}
+                    setSettings={setPolicyDraft}
+                    hint="Admins cannot assign a user quota above this owner-defined limit."
                   />
                   <PolicyInput
                     label="Allowed file types"
@@ -1605,14 +1853,13 @@ export default function AdminPanel({
                     </span>
                   </label>
                 </div>
-                <RolePermsEditor
-                  settings={settings}
-                  setSettings={setPolicyDraft}
-                  isOwner={isOwner}
-                />
+                <RolePermsEditor />
+                </fieldset>
                 <div>
                   <button
-                    onClick={() => saveSettingsMut.mutate(settings)}
+                    onClick={() =>
+                      setPolicyReview({ mode: "save", settings: { ...settings } })
+                    }
                     disabled={!isOwner || saveSettingsMut.isPending}
                     className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
                   >
@@ -1624,6 +1871,66 @@ export default function AdminPanel({
                     </span>
                   )}
                 </div>
+                <section className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">
+                        Policy history and rollback
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Every saved setting records its editor, before/after
+                        values, and timestamp. Restores create a new audit entry.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase text-slate-500">
+                      {settingsQ.data?.revision ? "Versioned" : "No history yet"}
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {(policyHistoryQ.data ?? []).map((version) => (
+                      <div
+                        key={version.id}
+                        className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs text-slate-500">
+                            <b className="text-slate-700">
+                              {version.actorEmail || "Unknown owner"}
+                            </b>{" "}
+                            · {fmtDateTime(version.createdAt)} · {version.source}
+                          </div>
+                          {isOwner && version.id !== settingsQ.data?.revision && (
+                            <button
+                              onClick={() =>
+                                setPolicyReview({
+                                  mode: "rollback",
+                                  settings: version.settings,
+                                  version,
+                                })
+                              }
+                              className="mini"
+                            >
+                              Review restore
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-1.5 space-y-1 text-xs text-slate-500">
+                          {version.changes.map((change) => (
+                            <div key={change.key}>
+                              <code>{change.key}</code>: {change.before || "—"}{" "}
+                              → {change.after || "—"}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {(policyHistoryQ.data ?? []).length === 0 && (
+                      <p className="text-xs text-slate-400">
+                        The first reviewed save will create policy history.
+                      </p>
+                    )}
+                  </div>
+                </section>
               </div>
             ))}
 
@@ -1872,13 +2179,114 @@ export default function AdminPanel({
               <NotificationsForm
                 settings={settings}
                 setSettings={setPolicyDraft}
-                onSave={() => saveSettingsMut.mutate(settings)}
+                onSave={() =>
+                  setPolicyReview({ mode: "save", settings: { ...settings } })
+                }
                 saving={saveSettingsMut.isPending}
                 isOwner={isOwner}
               />
             ))}
         </div>
       </div>
+      {policyReview && (
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">
+                  Review changes
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {policyReview.mode === "rollback"
+                    ? `Restore the workspace to the policy saved ${
+                        policyReview.version
+                          ? fmtDateTime(policyReview.version.createdAt)
+                          : "earlier"
+                      }.`
+                    : "Confirm every before/after value before saving."}
+                </p>
+              </div>
+              <button
+                onClick={() => setPolicyReview(null)}
+                className="icon-btn"
+                aria-label="Close review"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="mt-4 max-h-[55vh] space-y-2 overflow-y-auto">
+              {policyReviewChanges.map((change) => (
+                <div
+                  key={change.key}
+                  className="rounded-xl border border-slate-200 px-3 py-2.5"
+                >
+                  <code className="text-xs font-semibold text-slate-700">
+                    {change.key}
+                  </code>
+                  <div className="mt-1 grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg bg-red-50 px-2 py-1.5 text-red-700">
+                      <span className="block text-[10px] font-semibold uppercase opacity-70">
+                        Before
+                      </span>
+                      <span className="break-all">{change.before || "—"}</span>
+                    </div>
+                    <div className="rounded-lg bg-emerald-50 px-2 py-1.5 text-emerald-700">
+                      <span className="block text-[10px] font-semibold uppercase opacity-70">
+                        After
+                      </span>
+                      <span className="break-all">{change.after || "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {policyReviewChanges.length === 0 && (
+                <p className="rounded-xl bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                  No policy values would change.
+                </p>
+              )}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setPolicyReview(null)} className="mini">
+                Cancel
+              </button>
+              <button
+                disabled={
+                  policyReviewChanges.length === 0 ||
+                  saveSettingsMut.isPending ||
+                  rollbackPolicyMut.isPending
+                }
+                onClick={() => {
+                  if (policyReview.mode === "rollback" && policyReview.version) {
+                    const confirmation = ownerConfirmation("RESTORE POLICY");
+                    if (confirmation)
+                      rollbackPolicyMut.mutate({
+                        versionId: policyReview.version.id,
+                        confirmation,
+                      });
+                    return;
+                  }
+                  const needsConfirmation = policyReviewChanges.some((change) =>
+                    SECURITY_POLICY_KEYS.has(change.key),
+                  );
+                  const confirmation = needsConfirmation
+                    ? ownerConfirmation("APPLY POLICY")
+                    : undefined;
+                  if (needsConfirmation && !confirmation) return;
+                  saveSettingsMut.mutate({
+                    settings: policyReview.settings,
+                    confirmation: confirmation ?? undefined,
+                  });
+                }}
+                className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-semibold text-white hover:bg-drift-600 disabled:opacity-50"
+              >
+                {policyReview.mode === "rollback"
+                  ? "Confirm restore"
+                  : "Save reviewed changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2176,7 +2584,7 @@ function FileRow({
   onExpire: () => void;
   onDelete: () => void;
   onRestore: () => void;
-  onPermanent: () => void;
+  onPermanent?: () => void;
 }) {
   return (
     <tr className={selected ? "bg-drift-500/5" : ""}>
@@ -2239,9 +2647,11 @@ function FileRow({
               <Trash2 size={15} />
             </button>
           )}
-          <button onClick={onPermanent} className="mini-danger">
-            Purge
-          </button>
+          {onPermanent && (
+            <button onClick={onPermanent} className="mini-danger">
+              Purge
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -2486,56 +2896,45 @@ function TogglePolicy({
     </label>
   );
 }
-function RolePermsEditor({
-  settings,
-  setSettings,
-  isOwner,
-}: {
-  settings: AdminSettings;
-  setSettings: (s: AdminSettings) => void;
-  isOwner: boolean;
-}) {
-  let parsed: Record<string, string> = {};
-  try {
-    parsed = settings.rolePermissions
-      ? JSON.parse(settings.rolePermissions)
-      : {};
-  } catch {
-    parsed = {};
-  }
-  const setCap = (key: string, value: string) => {
-    const next = { ...parsed, [key]: value };
-    setSettings({ ...settings, rolePermissions: JSON.stringify(next) });
-  };
+function RolePermsEditor() {
+  const rules = [
+    {
+      role: "Owner",
+      detail:
+        "Global security, encryption, retention, roles, deletion, access policies, and irreversible confirmations.",
+    },
+    {
+      role: "Admin",
+      detail:
+        "Approve users, review unencrypted reports, revoke links, quarantine files, and adjust quotas within the owner cap.",
+    },
+    {
+      role: "Moderator",
+      detail:
+        "Review reports and quarantine content. Cannot open E2E files or change workspace policy.",
+    },
+    {
+      role: "Auditor",
+      detail: "Read-only access to policies, reports, and activity logs.",
+    },
+  ];
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
-      <h3 className="text-sm font-bold text-slate-800">
-        Granular role permissions
-      </h3>
+      <h3 className="text-sm font-bold text-slate-800">Permission rules</h3>
       <p className="mt-1 text-xs text-slate-500">
-        Choose the minimum role required for each capability. Owners and admins
-        always retain full control of settings and roles.
-        {!isOwner && " Only the owner can change these."}
+        These boundaries are enforced by the API and cannot be weakened from
+        the browser.
       </p>
       <div className="mt-3 space-y-2">
-        {CAPABILITIES.map((c) => (
+        {rules.map((rule) => (
           <div
-            key={c.key}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+            key={rule.role}
+            className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
           >
-            <span className="text-sm text-slate-700">{c.label}</span>
-            <select
-              disabled={!isOwner}
-              value={parsed[c.key] ?? c.def}
-              onChange={(e) => setCap(c.key, e.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 disabled:opacity-60"
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {cap(r)} and up
-                </option>
-              ))}
-            </select>
+            <div className="text-sm font-semibold text-slate-700">{rule.role}</div>
+            <div className="mt-0.5 text-xs leading-5 text-slate-500">
+              {rule.detail}
+            </div>
           </div>
         ))}
       </div>

@@ -44,6 +44,7 @@ import {
   uploadToR2,
   uploadUrlFor,
   uploadLargeFile,
+  fileContentHash,
   MULTIPART_THRESHOLD,
   adminAccess,
   createLimitRequest,
@@ -500,12 +501,15 @@ export default function Dashboard({
     toastOk(`Uploading ${arr.length} file${arr.length === 1 ? "" : "s"}…`);
     for (const file of arr) {
       try {
+        const checksum = await fileContentHash(file);
         const { id } = await presign({
           filename: file.name,
           contentType: file.type,
           sizeBytes: file.size,
           expiryDays,
           folderId: currentFolderId,
+          checksum,
+          contentHash: checksum,
         });
         if (file.size > MULTIPART_THRESHOLD)
           await uploadLargeFile(id, file, () => {});
