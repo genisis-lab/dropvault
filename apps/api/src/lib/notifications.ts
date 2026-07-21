@@ -1,6 +1,7 @@
 import { getDb, schema } from "../db";
 import { effectiveAdmins } from "../middleware/admin";
 import type { Bindings } from "../types";
+import { enqueueEvent } from "./delivery";
 import { nowSeconds } from "./expiry";
 
 type NotificationInput = {
@@ -52,6 +53,41 @@ export async function notifyAdmins(
     );
     await Promise.all(
       adminUsers.map((u) => notifyUser(db, { ...input, userId: u.id })),
+    );
+  } catch {}
+}
+
+export async function notifyOwners(
+  env: Bindings,
+  db: ReturnType<typeof getDb>,
+  input: Omit<NotificationInput, "userId">,
+): Promise<void> {
+  try {
+    const admins = await effectiveAdmins(env, db);
+    const ownerEmails = new Set(
+      Array.from(admins.entries())
+        .filter(([, role]) => role === "owner")
+        .map(([email]) => email),
+    );
+    if (!ownerEmails.size) return;
+    const users = await db.select().from(schema.user).all().catch(() => []);
+    const owners = users.filter((u) =>
+      ownerEmails.has(String(u.email ?? "").toLowerCase()),
+    );
+    await Promise.all(
+      owners.map(async (owner) => {
+        await notifyUser(db, { ...input, userId: owner.id });
+        await enqueueEvent(db, {
+          type: input.type,
+          userId: owner.id,
+          payload: {
+            title: input.title,
+            message: input.message ?? null,
+            targetType: input.targetType ?? null,
+            targetId: input.targetId ?? null,
+          },
+        });
+      }),
     );
   } catch {}
 }

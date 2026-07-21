@@ -271,9 +271,30 @@ files.post("/presign", async (c) => {
   const wantsForever = !!body.keepForever;
   if (wantsForever && !(await canKeepForever(c, db, userId, account?.email)))
     return c.json({ error: "keep-forever permission required" }, 403);
+  const encryptionMode = body.encryptionMode === "aes-gcm" ? "aes-gcm" : "none";
   const contentHash = body.contentHash
-    ? String(body.contentHash).trim().slice(0, 128)
+    ? String(body.contentHash).trim().toLowerCase()
     : null;
+  if (contentHash && !/^[a-f0-9]{64}$/.test(contentHash))
+    return c.json({ error: "contentHash must be a SHA-256 hex digest" }, 400);
+  if (encryptionMode === "none" && !contentHash)
+    return c.json(
+      { error: "SHA-256 contentHash is required for unencrypted uploads" },
+      400,
+    );
+  if (contentHash) {
+    const banned = await db
+      .select()
+      .from(schema.bannedFileHashes)
+      .where(eq(schema.bannedFileHashes.hash, contentHash))
+      .get()
+      .catch(() => null);
+    if (banned)
+      return c.json(
+        { error: "This file is blocked by workspace security policy." },
+        451,
+      );
+  }
   const duplicate = contentHash
     ? await db
         .select()
@@ -300,7 +321,6 @@ files.post("/presign", async (c) => {
     Number.isSafeInteger(body.releaseAt) && Number(body.releaseAt) > createdAt
       ? Math.min(Number(body.releaseAt), expiresAt - 1)
       : null;
-  const encryptionMode = body.encryptionMode === "aes-gcm" ? "aes-gcm" : "none";
   await db
     .insert(schema.files)
     .values({

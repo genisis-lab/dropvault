@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, UploadCloud, X } from "lucide-react";
 import {
   MULTIPART_THRESHOLD,
+  fileContentHash,
   publicUploadRequest,
   submitPublicMultipart,
   submitPublicUpload,
@@ -57,7 +58,12 @@ export default function PublicUploadRequest() {
         );
       }
       const form = new FormData();
-      for (const file of files) form.append("files", file);
+      const hashes: string[] = [];
+      for (const file of files) {
+        form.append("files", file);
+        hashes.push(await fileContentHash(file));
+      }
+      form.append("contentHashes", JSON.stringify(hashes));
       form.append("email", email);
       form.append("name", name);
       form.append("password", password);
