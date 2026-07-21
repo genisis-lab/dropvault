@@ -5,6 +5,7 @@ import { DAY_SECONDS, nowSeconds } from "../lib/expiry";
 import {
   hashSecret,
   sha256Hex,
+  sha256StreamHex,
   timingSafeEqualHex,
   verifySecret,
 } from "../lib/hash";
@@ -63,7 +64,7 @@ function allowed(type: string, allowedTypes: string | null): boolean {
   if (!values.length) return true;
   const t = type.toLowerCase();
   return values.some((a) =>
-    a.endsWith("/*") ? t.startsWith(a.slice(0, -1)) : t === a || t.includes(a),
+    a.endsWith("/*") ? t.startsWith(a.slice(0, -1)) : t === a,
   );
 }
 function isUploadFileLike(value: unknown): value is UploadFileLike {
@@ -112,7 +113,9 @@ async function ownerQuota(
     .catch(() => null);
   const role = await adminRole(c.env, db, owner?.email ?? "");
   const quota =
-    role != null ? null : (owner?.quotaBytes ?? policy.defaultQuotaBytes);
+    role === "owner" || role === "admin"
+      ? null
+      : (owner?.quotaBytes ?? policy.defaultQuotaBytes);
   return quota == null || quota <= 0 ? null : quota;
 }
 async function createPublicFile(
@@ -164,14 +167,10 @@ async function createPublicFile(
     throw new Error("the owner's storage is full");
   }
   try {
-    await c.env.FILES.put(
-      r2Key,
-      file.stream(),
-      {
-        httpMetadata: contentType ? { contentType } : undefined,
-        sha256: contentHash,
-      },
-    );
+    await c.env.FILES.put(r2Key, file.stream(), {
+      httpMetadata: contentType ? { contentType } : undefined,
+      sha256: contentHash,
+    });
     const object = await c.env.FILES.head(r2Key);
     if (!object || object.size !== file.size)
       throw new Error("uploaded object size mismatch");
@@ -245,10 +244,18 @@ async function validTurnstile(c: any, token: string): Promise<boolean> {
     "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     { method: "POST", body: form },
   );
-  const result: { success?: boolean } = await response
-    .json<{ success?: boolean }>()
-    .catch(() => ({}) as { success?: boolean });
-  return result.success === true;
+  const result: { success?: boolean; hostname?: string } = await response
+    .json<{ success?: boolean; hostname?: string }>()
+    .catch(() => ({}) as { success?: boolean; hostname?: string });
+  let expectedHostname = "";
+  try {
+    expectedHostname = new URL(c.env.PUBLIC_APP_URL).hostname.toLowerCase();
+  } catch {}
+  return (
+    result.success === true &&
+    !!expectedHostname &&
+    String(result.hostname ?? "").toLowerCase() === expectedHostname
+  );
 }
 
 uploadRequests.get("/", requireAuth, async (c) => {
@@ -694,7 +701,7 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
   if (!(await validTurnstile(c, String(body.turnstileToken || ""))))
     return c.json({ error: "verification required" }, 403);
   const rate = await checkRateLimit(
-    db,
+    c.env.DB,
     `upload:${row.token}:${clientIp(c)}`,
     20,
     3600,
@@ -723,7 +730,9 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
       .slice(0, 120) || null;
   if (!filename || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)
     return c.json({ error: "valid file metadata required" }, 400);
-  const contentHash = String(body.contentHash || "").trim().toLowerCase();
+  const contentHash = String(body.contentHash || "")
+    .trim()
+    .toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(contentHash))
     return c.json({ error: "valid SHA-256 contentHash required" }, 400);
   const banned = await db
@@ -750,6 +759,14 @@ uploadRequests.post("/public/:token/multipart/start", async (c) => {
     !allowed(contentType, policy.allowedTypes)
   )
     return c.json({ error: "file type is not allowed" }, 415);
+  const suspension = await db
+    .select()
+    .from(schema.userSuspensions)
+    .where(eq(schema.userSuspensions.userId, row.ownerId))
+    .get()
+    .catch(() => null);
+  if (suspension)
+    return c.json({ error: "uploads are currently unavailable" }, 403);
   const claim = await c.env.DB.prepare(
     `UPDATE upload_requests SET upload_count = upload_count + 1, reserved_bytes = reserved_bytes + ? WHERE id = ? AND status = 'open' AND revoked_at IS NULL AND (upload_limit IS NULL OR upload_count + 1 <= upload_limit) AND (total_max_bytes IS NULL OR reserved_bytes + ? <= total_max_bytes)`,
   )
@@ -884,7 +901,9 @@ uploadRequests.put("/public/:token/multipart/:sessionId/part", async (c) => {
     loaded.file.r2Key,
     loaded.session.uploadId,
   );
-  const part = await multipart.uploadPart(partNumber, c.req.raw.body!);
+  const partBody = c.req.raw.body;
+  if (!partBody) return c.json({ error: "empty part" }, 400);
+  const part = await multipart.uploadPart(partNumber, partBody);
   const previous = JSON.parse(loaded.session.parts || "[]") as Array<{
     partNumber: number;
     etag: string;
@@ -933,8 +952,55 @@ uploadRequests.post(
         ).complete(parts);
         object = await c.env.FILES.head(loaded.file.r2Key);
       }
-      if (!object || object.size !== loaded.file.sizeBytes)
-        throw new Error("uploaded object size mismatch");
+      if (!object || object.size !== loaded.file.sizeBytes) {
+        await c.env.FILES.delete(loaded.file.r2Key).catch(() => {});
+        await releaseReservation(c.env.DB, loaded.file.id).catch(() => {});
+        await db
+          .delete(schema.files)
+          .where(eq(schema.files.id, loaded.file.id))
+          .run()
+          .catch(() => {});
+        await c.env.DB.prepare(
+          "UPDATE upload_requests SET upload_count = MAX(0, upload_count - 1), reserved_bytes = MAX(0, reserved_bytes - ?) WHERE id = ?",
+        )
+          .bind(loaded.file.sizeBytes, loaded.request.id)
+          .run()
+          .catch(() => {});
+        return c.json({ error: "uploaded object size mismatch" }, 409);
+      }
+      const stored = await c.env.FILES.get(loaded.file.r2Key);
+      if (!stored) return c.json({ error: "uploaded object missing" }, 409);
+      const actualHash = await sha256StreamHex(stored.body);
+      const claimedHash = String(loaded.file.contentHash ?? "").toLowerCase();
+      const banned = await db
+        .select()
+        .from(schema.bannedFileHashes)
+        .where(eq(schema.bannedFileHashes.hash, actualHash))
+        .get()
+        .catch(() => null);
+      if (actualHash !== claimedHash || banned) {
+        await c.env.FILES.delete(loaded.file.r2Key).catch(() => {});
+        await releaseReservation(c.env.DB, loaded.file.id).catch(() => {});
+        await db
+          .delete(schema.files)
+          .where(eq(schema.files.id, loaded.file.id))
+          .run()
+          .catch(() => {});
+        await c.env.DB.prepare(
+          "UPDATE upload_requests SET upload_count = MAX(0, upload_count - 1), reserved_bytes = MAX(0, reserved_bytes - ?) WHERE id = ?",
+        )
+          .bind(loaded.file.sizeBytes, loaded.request.id)
+          .run()
+          .catch(() => {});
+        return c.json(
+          {
+            error: banned
+              ? "This file is blocked by workspace security policy."
+              : "upload integrity check failed; retry the file",
+          },
+          banned ? 451 : 409,
+        );
+      }
       const status =
         loaded.request.moderationMode === "manual" ? "quarantined" : "ready";
       const now = nowSeconds();
@@ -1072,8 +1138,17 @@ uploadRequests.post("/public/:token", async (c) => {
     return c.json({ error: "expired" }, 410);
   if (row.uploadLimit && row.uploadCount >= row.uploadLimit)
     return c.json({ error: "upload limit reached" }, 410);
+  const requestLength = Number(c.req.header("Content-Length"));
+  const maxDirectRequestBytes = 34 * 1024 * 1024;
+  if (!Number.isSafeInteger(requestLength) || requestLength <= 0)
+    return c.json({ error: "valid Content-Length is required" }, 411);
+  if (requestLength > maxDirectRequestBytes)
+    return c.json(
+      { error: "direct upload request is too large; use resumable upload" },
+      413,
+    );
   const uploadRate = await checkRateLimit(
-    db,
+    c.env.DB,
     `upload:${token}:${clientIp(c)}`,
     20,
     3600,
@@ -1087,7 +1162,12 @@ uploadRequests.post("/public/:token", async (c) => {
     return c.json({ error: "verification required" }, 403);
   const password = String(form.get("password") || "");
   if (row.password) {
-    const rl = await checkRateLimit(db, `upw:${token}:${clientIp(c)}`, 20, 600);
+    const rl = await checkRateLimit(
+      c.env.DB,
+      `upw:${token}:${clientIp(c)}`,
+      20,
+      600,
+    );
     if (!rl.allowed)
       return c.json(
         { error: "too many attempts, please wait a few minutes and try again" },

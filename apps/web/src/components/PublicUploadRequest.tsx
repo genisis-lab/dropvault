@@ -37,6 +37,8 @@ export default function PublicUploadRequest() {
   const fileLimitExceeded =
     !!maxFileSize && files.some((f) => f.size > maxFileSize);
   const totalLimitExceeded = !!totalMaxBytes && totalBytes > totalMaxBytes;
+  const directBatchTooLarge =
+    files.length > 1 && totalBytes > MULTIPART_THRESHOLD;
   const remainingUploads = q.data?.uploadLimit
     ? Math.max(0, q.data.uploadLimit - q.data.uploadCount)
     : null;
@@ -97,6 +99,7 @@ export default function PublicUploadRequest() {
     files.length > 0 &&
     !fileLimitExceeded &&
     !totalLimitExceeded &&
+    !directBatchTooLarge &&
     !tooManyFiles &&
     !mut.isPending &&
     (!siteKey || !!turnstileToken);
@@ -273,6 +276,12 @@ export default function PublicUploadRequest() {
               <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
                 Select one large file at a time. Its multipart upload is saved
                 in this browser and resumes after a refresh or connection loss.
+              </p>
+            )}
+            {directBatchTooLarge && (
+              <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                Select a smaller batch (32 MB total or less), or upload one
+                large file at a time with resumable upload.
               </p>
             )}
             {siteKey && (

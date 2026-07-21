@@ -95,6 +95,13 @@ export function createAuth(env: Bindings) {
     baseURL: env.PUBLIC_APP_URL,
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: [env.PUBLIC_APP_URL],
+    advanced: {
+      // Trust only Cloudflare's canonical single-value client header for auth
+      // rate limiting/session telemetry. X-Forwarded-For is client-spoofable
+      // when the Worker origin is called directly.
+      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
+      useSecureCookies: new URL(env.PUBLIC_APP_URL).protocol === "https:",
+    },
     database: drizzleAdapter(db, {
       provider: "sqlite",
       schema: {

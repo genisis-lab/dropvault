@@ -1,5 +1,3 @@
-import { eq } from "drizzle-orm";
-import { getDb, schema } from "../db";
 import { nowSeconds } from "./expiry";
 import { normalizeIp } from "./ipAccess";
 
@@ -11,12 +9,12 @@ export type ClientIpInfo = {
   all: string[];
 };
 
-// Fixed-window rate limiter backed by the rate_limits D1 table. Best-effort:
-// on any DB error it fails OPEN so a transient issue never locks legitimate
-// visitors out of a share link. Windows are keyed by caller-provided strings
-// (typically route + token + client IP).
+// Fixed-window rate limiter backed by D1. The upsert is a single atomic SQLite
+// statement so concurrent password guesses cannot all observe and overwrite
+// the same count. Protected public endpoints fail closed on a database error;
+// silently disabling brute-force protection is the less safe failure mode.
 export async function checkRateLimit(
-  db: ReturnType<typeof getDb>,
+  db: D1Database,
   key: string,
   limit: number,
   windowSeconds: number,
@@ -24,32 +22,30 @@ export async function checkRateLimit(
   const now = nowSeconds();
   try {
     const row = await db
-      .select()
-      .from(schema.rateLimits)
-      .where(eq(schema.rateLimits.key, key))
-      .get();
-    if (!row || row.resetAt <= now) {
-      await db
-        .delete(schema.rateLimits)
-        .where(eq(schema.rateLimits.key, key))
-        .run()
-        .catch(() => {});
-      await db
-        .insert(schema.rateLimits)
-        .values({ key, count: 1, resetAt: now + windowSeconds })
-        .run();
-      return { allowed: true, retryAfter: 0 };
-    }
-    if (row.count >= limit)
-      return { allowed: false, retryAfter: Math.max(1, row.resetAt - now) };
-    await db
-      .update(schema.rateLimits)
-      .set({ count: row.count + 1 })
-      .where(eq(schema.rateLimits.key, key))
-      .run();
-    return { allowed: true, retryAfter: 0 };
+      .prepare(
+        `
+          INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)
+          ON CONFLICT(key) DO UPDATE SET
+            count = CASE
+              WHEN rate_limits.reset_at <= ? THEN 1
+              ELSE MIN(rate_limits.count + 1, ?)
+            END,
+            reset_at = CASE
+              WHEN rate_limits.reset_at <= ? THEN excluded.reset_at
+              ELSE rate_limits.reset_at
+            END
+          RETURNING count, reset_at AS resetAt
+        `,
+      )
+      .bind(key, now + windowSeconds, now, limit + 1, now)
+      .first<{ count: number; resetAt: number }>();
+    if (!row) throw new Error("rate limit state unavailable");
+    return {
+      allowed: row.count <= limit,
+      retryAfter: row.count <= limit ? 0 : Math.max(1, row.resetAt - now),
+    };
   } catch {
-    return { allowed: true, retryAfter: 0 };
+    return { allowed: false, retryAfter: windowSeconds };
   }
 }
 
@@ -81,6 +77,21 @@ function headerCandidates(c: {
 export function clientIpInfo(c: {
   req: { header: (name: string) => string | undefined };
 }): ClientIpInfo {
+  // Cloudflare overwrites CF-Connecting-IP at the edge. If it is present, do
+  // not mix it with client-controlled forwarding headers: a forged IPv4 XFF
+  // value could otherwise outrank a real IPv6 address and bypass rate limits.
+  const cloudflareHeader = c.req.header("CF-Connecting-IP");
+  if (cloudflareHeader !== undefined) {
+    const ip = normalizeIp(cloudflareHeader);
+    if (!ip) return { primary: "unknown", ipv4: null, ipv6: null, all: [] };
+    const ipv4 = ip.includes(".") ? ip : null;
+    const ipv6 = ip.includes(":") ? ip : null;
+    return { primary: ip, ipv4, ipv6, all: [ip] };
+  }
+
+  // These fallbacks support local development and deployments behind a
+  // trusted non-Cloudflare reverse proxy. Production Workers always receive
+  // CF-Connecting-IP and therefore never reach this branch.
   const seen = new Set<string>();
   const all: string[] = [];
   let ipv4: string | null = null;
