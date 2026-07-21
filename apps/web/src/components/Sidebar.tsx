@@ -139,7 +139,16 @@ function SidebarContent({
   return (
     <>
       <div className="flex items-center justify-between px-2">
-        <Logo />
+        <button
+          type="button"
+          onClick={run(() => setFilter("all"))}
+          aria-label="Go to My Drive"
+          title="Go to My Drive"
+          className="cursor-pointer rounded-xl text-left transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-drift-500 focus-visible:ring-offset-2"
+          data-ui="home-link"
+        >
+          <Logo />
+        </button>
         {onClose && (
           <button
             onClick={onClose}
