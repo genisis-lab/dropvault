@@ -59,7 +59,7 @@ async function ensureKeepForeverSchema(env: Bindings) {
 }
 
 function roleGetsForever(role: string | null): boolean {
-  return role === "owner" || role === "admin" || role === "moderator";
+  return role === "owner" || role === "admin";
 }
 
 type RawKeepForeverRequest = {
@@ -279,7 +279,7 @@ keepForever.post(
   },
 );
 
-keepForever.post("/users/:id", requireAdminRole("moderator"), async (c) => {
+keepForever.post("/users/:id", requireAdminRole("admin"), async (c) => {
   await ensureKeepForeverSchema(c.env);
   const id = c.req.param("id");
   const body = await c.req

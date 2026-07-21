@@ -58,8 +58,9 @@ function isBlockedHost(host: string): boolean {
   return false;
 }
 
-// Returns true only for a plain http(s) URL on a standard web port pointing at a
-// public host, with no embedded credentials.
+// Returns true only for HTTPS on the standard port pointing at a public host,
+// with no embedded credentials. Notification payloads can contain password
+// reset links and guest codes, so plaintext HTTP is never acceptable.
 export function isSafeWebhookUrl(raw: string | null | undefined): boolean {
   if (!raw) return false;
   let u: URL;
@@ -68,10 +69,10 @@ export function isSafeWebhookUrl(raw: string | null | undefined): boolean {
   } catch {
     return false;
   }
-  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  if (u.protocol !== "https:") return false;
   if (u.username || u.password) return false;
-  const port = u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80;
-  if (port !== 80 && port !== 443) return false;
+  const port = u.port ? Number(u.port) : 443;
+  if (port !== 443) return false;
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   return !isBlockedHost(host);
 }

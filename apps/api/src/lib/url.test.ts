@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { isSafeWebhookUrl } from "./url";
 
 describe("webhook URL safety", () => {
-  it("allows public HTTP(S) webhook targets on standard ports", () => {
+  it("allows public HTTPS webhook targets on the standard port", () => {
     expect(isSafeWebhookUrl("https://hooks.example.com/dropvault")).toBe(true);
     expect(isSafeWebhookUrl("https://203.0.113.10:443/events")).toBe(true);
-    expect(isSafeWebhookUrl("http://example.com:80/events")).toBe(true);
   });
 
-  it("blocks credentials, non-web protocols, and unusual ports", () => {
+  it("blocks plaintext HTTP, credentials, non-web protocols, and unusual ports", () => {
+    expect(isSafeWebhookUrl("http://example.com:80/events")).toBe(false);
     expect(isSafeWebhookUrl("https://user:pass@example.com/hook")).toBe(false);
     expect(isSafeWebhookUrl("file:///etc/passwd")).toBe(false);
     expect(isSafeWebhookUrl("https://example.com:8443/hook")).toBe(false);

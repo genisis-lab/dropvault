@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { createAuth } from "../auth";
 import { getDb, schema } from "../db";
 import { requireAuth } from "../middleware/auth";
@@ -42,7 +42,18 @@ sessions.get("/", async (c) => {
 sessions.delete("/:id", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
-  await db.delete(schema.session).where(eq(schema.session.id, id)).run();
+  // Session ids are opaque but are not authorization credentials. Always
+  // scope revocation to the signed-in user so a leaked/guessed id cannot be
+  // used to sign another account out.
+  await db
+    .delete(schema.session)
+    .where(
+      and(
+        eq(schema.session.id, id),
+        eq(schema.session.userId, c.get("userId")),
+      ),
+    )
+    .run();
   return c.json({ ok: true });
 });
 

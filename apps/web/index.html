@@ -13,26 +13,7 @@
       href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <script>
-      // Apply a personal choice or the last-known workspace default before the
-      // app loads. The workspace value is refreshed from the API after mount.
-      (function () {
-        try {
-          var allowed = ["neubrutalism", "quiet", "light", "dark", "sunset"];
-          var t =
-            localStorage.getItem("dropvault-theme") ||
-            localStorage.getItem("dropvault-workspace-theme") ||
-            "neubrutalism";
-          if (allowed.indexOf(t) === -1) t = "neubrutalism";
-          if (t !== "light") {
-            document.documentElement.classList.add(t);
-          }
-          document.documentElement.dataset.theme = t;
-          document.documentElement.style.colorScheme =
-            t === "dark" || t === "sunset" ? "dark" : "light";
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-bootstrap.js"></script>
   </head>
   <body class="overscroll-none">
     <div id="root"></div>
