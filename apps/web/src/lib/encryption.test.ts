@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decryptEncryptedMetadata,
   decryptEncryptedPayload,
   encryptForUpload,
   MAX_BROWSER_ENCRYPTION_BYTES,
@@ -28,6 +29,12 @@ describe("client-side encryption", () => {
       new TextDecoder().decode(await encrypted.file.arrayBuffer()),
     ).not.toContain("top secret");
     expect(encrypted.encryptedMetadata).not.toContain("private-note.txt");
+    await expect(
+      decryptEncryptedMetadata(encrypted.key, encrypted.encryptedMetadata),
+    ).resolves.toEqual({
+      filename: "private-note.txt",
+      contentType: "text/plain",
+    });
   });
 
   it("rejects files above the browser encryption limit", async () => {

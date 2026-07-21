@@ -78,11 +78,7 @@ import { formatBytes } from "../lib/format";
 import { setUserKeepForever } from "../lib/keepForever";
 import { useToast } from "./Toast";
 import { announceWorkspaceDefaultTheme } from "../lib/theme";
-import {
-  isTheme,
-  THEME_OPTIONS,
-  type Theme,
-} from "../lib/theme-config";
+import { isTheme, THEME_OPTIONS, type Theme } from "../lib/theme-config";
 
 type Tab =
   | "overview"
@@ -223,8 +219,7 @@ export default function AdminPanel({
         : role === "moderator"
           ? ["flags", "settings"]
           : null;
-    if (allowed && !allowed.includes(tab))
-      setTab("flags");
+    if (allowed && !allowed.includes(tab)) setTab("flags");
   }, [role, tab]);
   const statsQ = useQuery({
     queryKey: ["admin-stats"],
@@ -415,8 +410,11 @@ export default function AdminPanel({
     onError: onErr("Couldn't delete flag"),
   });
   const banHashMut = useMutation({
-    mutationFn: (v: { id: string; confirmation: string; reason?: string | null }) =>
-      adminBanFlagHash(v.id, v.confirmation, v.reason),
+    mutationFn: (v: {
+      id: string;
+      confirmation: string;
+      reason?: string | null;
+    }) => adminBanFlagHash(v.id, v.confirmation, v.reason),
     onSuccess: () => {
       toastOk("File hash permanently banned");
       refresh();
@@ -424,7 +422,8 @@ export default function AdminPanel({
     onError: onErr("Couldn't ban file hash"),
   });
   const addAdminMut = useMutation({
-    mutationFn: () => adminAddAdmin(newAdmin.trim(), newRole),
+    mutationFn: (confirmation: string) =>
+      adminAddAdmin(newAdmin.trim(), newRole, confirmation),
     onSuccess: () => {
       toastOk("Admin added");
       setNewAdmin("");
@@ -560,8 +559,8 @@ export default function AdminPanel({
     onError: onErr("Couldn't revoke shares"),
   });
   const bulkUserMut = useMutation({
-    mutationFn: (v: { action: string; ids: string[] }) =>
-      adminBulkUsers(v.action, v.ids),
+    mutationFn: (v: { action: string; ids: string[]; confirmation?: string }) =>
+      adminBulkUsers(v.action, v.ids, undefined, v.confirmation),
     onSuccess: (r) => {
       toastOk(`Updated ${r.count} user${r.count === 1 ? "" : "s"}`);
       setUserSelected(new Set());
@@ -957,20 +956,23 @@ export default function AdminPanel({
                     >
                       Revoke shares
                     </button>
-                    <button
-                      onClick={() =>
-                        window.confirm(
-                          "Expire all files for the selected users?",
-                        ) &&
-                        bulkUserMut.mutate({
-                          action: "expireFiles",
-                          ids: userSelIds,
-                        })
-                      }
-                      className="pill-danger"
-                    >
-                      Expire files
-                    </button>
+                    {isOwner && (
+                      <button
+                        onClick={() => {
+                          const confirmation =
+                            ownerConfirmation("EXPIRE USER FILES");
+                          if (confirmation)
+                            bulkUserMut.mutate({
+                              action: "expireFiles",
+                              ids: userSelIds,
+                              confirmation,
+                            });
+                        }}
+                        className="pill-danger"
+                      >
+                        Expire files
+                      </button>
+                    )}
                     <button
                       onClick={() => setUserSelected(new Set())}
                       className="text-slate-400"
@@ -1387,9 +1389,8 @@ export default function AdminPanel({
                           onPermanent={
                             isOwner
                               ? () => {
-                                  const confirmation = ownerConfirmation(
-                                    "PERMANENTLY DELETE",
-                                  );
+                                  const confirmation =
+                                    ownerConfirmation("PERMANENTLY DELETE");
                                   if (confirmation)
                                     permanentMut.mutate({
                                       id: f.id,
@@ -1529,7 +1530,10 @@ export default function AdminPanel({
                               </button>
                               <button
                                 onClick={() =>
-                                  flagMut.mutate({ id: fl.id, status: "resolved" })
+                                  flagMut.mutate({
+                                    id: fl.id,
+                                    status: "resolved",
+                                  })
                                 }
                                 className="mini-good"
                               >
@@ -1596,28 +1600,30 @@ export default function AdminPanel({
                               )}
                             </>
                           )}
-                          {isOwner && fl.contentHash && fl.encryptionMode !== "aes-gcm" && (
-                            <button
-                              onClick={() => {
-                                const confirmation = ownerConfirmation("BAN HASH");
-                                if (confirmation)
-                                  banHashMut.mutate({
-                                    id: fl.id,
-                                    confirmation,
-                                    reason: fl.reason,
-                                  });
-                              }}
-                              className="mini-danger"
-                            >
-                              Ban hash
-                            </button>
-                          )}
+                          {isOwner &&
+                            fl.contentHash &&
+                            fl.encryptionMode !== "aes-gcm" && (
+                              <button
+                                onClick={() => {
+                                  const confirmation =
+                                    ownerConfirmation("BAN HASH");
+                                  if (confirmation)
+                                    banHashMut.mutate({
+                                      id: fl.id,
+                                      confirmation,
+                                      reason: fl.reason,
+                                    });
+                                }}
+                                className="mini-danger"
+                              >
+                                Ban hash
+                              </button>
+                            )}
                           {isOwner && (
                             <button
                               onClick={() => {
-                                const confirmation = ownerConfirmation(
-                                  "DELETE REPORT",
-                                );
+                                const confirmation =
+                                  ownerConfirmation("DELETE REPORT");
                                 if (confirmation)
                                   deleteFlagMut.mutate({
                                     id: fl.id,
@@ -1654,12 +1660,16 @@ export default function AdminPanel({
                       >
                         <code>{ban.hash}</code>
                         <div className="mt-0.5 text-slate-400">
-                          {ban.reason || "No reason"} · {ban.createdBy || "owner"} · {fmtDateTime(ban.createdAt)}
+                          {ban.reason || "No reason"} ·{" "}
+                          {ban.createdBy || "owner"} ·{" "}
+                          {fmtDateTime(ban.createdAt)}
                         </div>
                       </div>
                     ))}
                     {(hashBansQ.data ?? []).length === 0 && (
-                      <p className="text-xs text-slate-400">No banned hashes.</p>
+                      <p className="text-xs text-slate-400">
+                        No banned hashes.
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1674,7 +1684,9 @@ export default function AdminPanel({
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (newAdmin.trim()) addAdminMut.mutate();
+                    if (!newAdmin.trim()) return;
+                    const confirmation = ownerConfirmation("GRANT ROLE");
+                    if (confirmation) addAdminMut.mutate(confirmation);
                   }}
                   className="flex flex-wrap items-center gap-2"
                 >
@@ -1765,100 +1777,106 @@ export default function AdminPanel({
               <Loading />
             ) : (
               <div className="space-y-6">
-                <fieldset disabled={!isOwner} className="space-y-6 disabled:opacity-75">
-                  <DefaultThemeEditor
-                  value={
-                    isTheme(settings.defaultTheme)
-                      ? settings.defaultTheme
-                      : "neubrutalism"
-                  }
-                  onChange={(defaultTheme) =>
-                    setPolicyDraft({ ...settings, defaultTheme })
-                  }
+                <fieldset
                   disabled={!isOwner}
-                />
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <PolicyInput
-                    label="Default expiry days"
-                    k="defaultExpiryDays"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
+                  className="space-y-6 disabled:opacity-75"
+                >
+                  <DefaultThemeEditor
+                    value={
+                      isTheme(settings.defaultTheme)
+                        ? settings.defaultTheme
+                        : "neubrutalism"
+                    }
+                    onChange={(defaultTheme) =>
+                      setPolicyDraft({ ...settings, defaultTheme })
+                    }
+                    disabled={!isOwner}
                   />
-                  <PolicyInput
-                    label="Max expiry days"
-                    k="maxExpiryDays"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                  />
-                  <PolicyInput
-                    label="Max upload bytes"
-                    k="maxUploadBytes"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                  />
-                  <GbPolicyInput
-                    label="Default quota (GB)"
-                    k="defaultQuotaBytes"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                    hint="New users get this much space unless given a custom quota. Stored as bytes."
-                  />
-                  <GbPolicyInput
-                    label="Admin quota adjustment cap (GB)"
-                    k="adminMaxQuotaBytes"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                    hint="Admins cannot assign a user quota above this owner-defined limit."
-                  />
-                  <PolicyInput
-                    label="Allowed file types"
-                    k="allowedTypes"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                    hint="Comma-separated, e.g. image/*,application/pdf"
-                  />
-                  <PolicyInput
-                    label="Trash retention (days)"
-                    k="trashRetentionDays"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                    hint="Trashed files are permanently purged after this many days. Default 30."
-                  />
-                  <TogglePolicy
-                    label="Require passwords for public links"
-                    k="requirePasswordForShares"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                  />
-                  <TogglePolicy
-                    label="Public sharing enabled"
-                    k="publicSharingEnabled"
-                    settings={settings}
-                    setSettings={setPolicyDraft}
-                  />
-                  <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
-                    <input
-                      type="checkbox"
-                      checked={settings.signupMode === "approval"}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...settings,
-                          signupMode: e.target.checked ? "approval" : "open",
-                        })
-                      }
-                    />{" "}
-                    <span>
-                      Invite-only signups — require admin approval before new
-                      accounts can be used
-                    </span>
-                  </label>
-                </div>
-                <RolePermsEditor />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <PolicyInput
+                      label="Default expiry days"
+                      k="defaultExpiryDays"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                    />
+                    <PolicyInput
+                      label="Max expiry days"
+                      k="maxExpiryDays"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                    />
+                    <PolicyInput
+                      label="Max upload bytes"
+                      k="maxUploadBytes"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                    />
+                    <GbPolicyInput
+                      label="Default quota (GB)"
+                      k="defaultQuotaBytes"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                      hint="New users get this much space unless given a custom quota. Stored as bytes."
+                    />
+                    <GbPolicyInput
+                      label="Admin quota adjustment cap (GB)"
+                      k="adminMaxQuotaBytes"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                      hint="Admins cannot assign a user quota above this owner-defined limit."
+                    />
+                    <PolicyInput
+                      label="Allowed file types"
+                      k="allowedTypes"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                      hint="Comma-separated, e.g. image/*,application/pdf"
+                    />
+                    <PolicyInput
+                      label="Trash retention (days)"
+                      k="trashRetentionDays"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                      hint="Trashed files are permanently purged after this many days. Default 30."
+                    />
+                    <TogglePolicy
+                      label="Require passwords for public links"
+                      k="requirePasswordForShares"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                    />
+                    <TogglePolicy
+                      label="Public sharing enabled"
+                      k="publicSharingEnabled"
+                      settings={settings}
+                      setSettings={setPolicyDraft}
+                    />
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={settings.signupMode === "approval"}
+                        onChange={(e) =>
+                          setPolicyDraft({
+                            ...settings,
+                            signupMode: e.target.checked ? "approval" : "open",
+                          })
+                        }
+                      />{" "}
+                      <span>
+                        Invite-only signups — require admin approval before new
+                        accounts can be used
+                      </span>
+                    </label>
+                  </div>
+                  <RolePermsEditor />
                 </fieldset>
                 <div>
                   <button
                     onClick={() =>
-                      setPolicyReview({ mode: "save", settings: { ...settings } })
+                      setPolicyReview({
+                        mode: "save",
+                        settings: { ...settings },
+                      })
                     }
                     disabled={!isOwner || saveSettingsMut.isPending}
                     className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
@@ -1879,11 +1897,14 @@ export default function AdminPanel({
                       </h3>
                       <p className="mt-1 text-xs text-slate-500">
                         Every saved setting records its editor, before/after
-                        values, and timestamp. Restores create a new audit entry.
+                        values, and timestamp. Restores create a new audit
+                        entry.
                       </p>
                     </div>
                     <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase text-slate-500">
-                      {settingsQ.data?.revision ? "Versioned" : "No history yet"}
+                      {settingsQ.data?.revision
+                        ? "Versioned"
+                        : "No history yet"}
                     </span>
                   </div>
                   <div className="mt-3 space-y-2">
@@ -1897,22 +1918,24 @@ export default function AdminPanel({
                             <b className="text-slate-700">
                               {version.actorEmail || "Unknown owner"}
                             </b>{" "}
-                            · {fmtDateTime(version.createdAt)} · {version.source}
+                            · {fmtDateTime(version.createdAt)} ·{" "}
+                            {version.source}
                           </div>
-                          {isOwner && version.id !== settingsQ.data?.revision && (
-                            <button
-                              onClick={() =>
-                                setPolicyReview({
-                                  mode: "rollback",
-                                  settings: version.settings,
-                                  version,
-                                })
-                              }
-                              className="mini"
-                            >
-                              Review restore
-                            </button>
-                          )}
+                          {isOwner &&
+                            version.id !== settingsQ.data?.revision && (
+                              <button
+                                onClick={() =>
+                                  setPolicyReview({
+                                    mode: "rollback",
+                                    settings: version.settings,
+                                    version,
+                                  })
+                                }
+                                className="mini"
+                              >
+                                Review restore
+                              </button>
+                            )}
                         </div>
                         <div className="mt-1.5 space-y-1 text-xs text-slate-500">
                           {version.changes.map((change) => (
@@ -2256,7 +2279,10 @@ export default function AdminPanel({
                   rollbackPolicyMut.isPending
                 }
                 onClick={() => {
-                  if (policyReview.mode === "rollback" && policyReview.version) {
+                  if (
+                    policyReview.mode === "rollback" &&
+                    policyReview.version
+                  ) {
                     const confirmation = ownerConfirmation("RESTORE POLICY");
                     if (confirmation)
                       rollbackPolicyMut.mutate({
@@ -2351,7 +2377,7 @@ function UserDetail({
   });
   const bannedSet = new Set(bannedIps.map((ban) => ban.ip));
   const keepByRole = q.data
-    ? ["owner", "admin", "moderator"].includes(q.data.user.role ?? "")
+    ? ["owner", "admin"].includes(q.data.user.role ?? "")
     : false;
   return (
     <div>
@@ -2753,7 +2779,10 @@ function DefaultThemeEditor({
   disabled: boolean;
 }) {
   return (
-    <section className="rounded-2xl border border-slate-200 p-4" data-ui="default-theme-editor">
+    <section
+      className="rounded-2xl border border-slate-200 p-4"
+      data-ui="default-theme-editor"
+    >
       <div className="flex items-start gap-3">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-drift-500/10 text-drift-600">
           <Palette size={18} />
@@ -2922,8 +2951,8 @@ function RolePermsEditor() {
     <div className="rounded-2xl border border-slate-200 p-4">
       <h3 className="text-sm font-bold text-slate-800">Permission rules</h3>
       <p className="mt-1 text-xs text-slate-500">
-        These boundaries are enforced by the API and cannot be weakened from
-        the browser.
+        These boundaries are enforced by the API and cannot be weakened from the
+        browser.
       </p>
       <div className="mt-3 space-y-2">
         {rules.map((rule) => (
@@ -2931,7 +2960,9 @@ function RolePermsEditor() {
             key={rule.role}
             className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
           >
-            <div className="text-sm font-semibold text-slate-700">{rule.role}</div>
+            <div className="text-sm font-semibold text-slate-700">
+              {rule.role}
+            </div>
             <div className="mt-0.5 text-xs leading-5 text-slate-500">
               {rule.detail}
             </div>

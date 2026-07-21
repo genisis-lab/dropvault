@@ -10,6 +10,7 @@ import { deliverPendingEvents, enqueueEvent } from "../lib/delivery";
 import { ipMatchesAllowlist } from "../lib/ipAccess";
 import { checkRateLimit, clientIp } from "../lib/rateLimit";
 import { makeZip, zipResponse } from "../lib/zip";
+import { contentSecurityNonce, jsonForInlineScript } from "../lib/html";
 import { hasRole } from "../middleware/admin";
 import type { Bindings, Variables } from "../types";
 
@@ -326,14 +327,15 @@ function encryptedFilePage(
   nonce: string | null,
   encryptedMetadata: string | null,
   downloadDisabled: boolean,
+  scriptNonce: string,
 ): string {
-  const config = JSON.stringify({ token, nonce, encryptedMetadata });
+  const config = jsonForInlineScript({ token, nonce, encryptedMetadata });
   const action = downloadDisabled
     ? `<p class="muted">This link is preview-only, but encrypted files cannot be previewed without downloading and decrypting them.</p>`
     : `<button id="decrypt" class="btn primary" type="button">Decrypt &amp; download</button><p id="status" class="muted" style="margin-top:14px">The key stays in your browser and is never sent to Dropvault.</p>`;
   return pageShell(
     name,
-    `<div class="card"><div class="fic">🔐</div><h1>${esc(name)}</h1><p class="muted">${esc(meta)} · end-to-end encrypted</p><div class="btns">${action}</div></div><script>(()=>{const config=${config};const status=document.getElementById("status");const button=document.getElementById("decrypt");if(!button)return;const decode=(value)=>{value=value.replace(/-/g,"+").replace(/_/g,"/");while(value.length%4)value+="=";return Uint8Array.from(atob(value),c=>c.charCodeAt(0))};const fail=(message)=>{status.textContent=message;button.disabled=false};button.addEventListener("click",async()=>{button.disabled=true;status.textContent="Downloading encrypted bytes…";try{const encodedKey=new URLSearchParams(location.hash.slice(1)).get("key");if(!encodedKey)throw new Error("This link is missing its decryption key. Ask the sender for the complete URL.");if(!config.nonce)throw new Error("This encrypted file has no nonce.");const key=await crypto.subtle.importKey("raw",decode(encodedKey),"AES-GCM",false,["decrypt"]);const response=await fetch("/api/share/"+config.token+"?dl=1");if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||"Download failed");status.textContent="Decrypting in this browser…";const clear=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(config.nonce)},key,await response.arrayBuffer());let filename="Decrypted file",contentType="application/octet-stream";try{const metadata=JSON.parse(config.encryptedMetadata);const decoded=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(metadata.nonce)},key,decode(metadata.ciphertext));const parsed=JSON.parse(new TextDecoder().decode(decoded));filename=parsed.filename||filename;contentType=parsed.contentType||contentType}catch{}const url=URL.createObjectURL(new Blob([clear],{type:contentType}));const link=document.createElement("a");link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status.textContent="Decrypted download ready."}catch(error){fail(error instanceof Error?error.message:"Could not decrypt this file")}})})()</script>`,
+    `<div class="card"><div class="fic">🔐</div><h1>${esc(name)}</h1><p class="muted">${esc(meta)} · end-to-end encrypted</p><div class="btns">${action}</div></div><script nonce="${scriptNonce}">(()=>{const config=${config};const status=document.getElementById("status");const button=document.getElementById("decrypt");if(!button)return;const decode=(value)=>{value=value.replace(/-/g,"+").replace(/_/g,"/");while(value.length%4)value+="=";return Uint8Array.from(atob(value),c=>c.charCodeAt(0))};const fail=(message)=>{status.textContent=message;button.disabled=false};button.addEventListener("click",async()=>{button.disabled=true;status.textContent="Downloading encrypted bytes…";try{const encodedKey=new URLSearchParams(location.hash.slice(1)).get("key");if(!encodedKey)throw new Error("This link is missing its decryption key. Ask the sender for the complete URL.");if(!config.nonce)throw new Error("This encrypted file has no nonce.");const key=await crypto.subtle.importKey("raw",decode(encodedKey),"AES-GCM",false,["decrypt"]);const response=await fetch("/api/share/"+config.token+"?dl=1");if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||"Download failed");status.textContent="Decrypting in this browser…";const clear=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(config.nonce)},key,await response.arrayBuffer());let filename="Decrypted file",contentType="application/octet-stream";try{const metadata=JSON.parse(config.encryptedMetadata);const decoded=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(metadata.nonce)},key,decode(metadata.ciphertext));const parsed=JSON.parse(new TextDecoder().decode(decoded));filename=parsed.filename||filename;contentType=parsed.contentType||contentType}catch{}const url=URL.createObjectURL(new Blob([clear],{type:contentType}));const link=document.createElement("a");link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status.textContent="Decrypted download ready."}catch(error){fail(error instanceof Error?error.message:"Could not decrypt this file")}})})()</script>`,
   );
 }
 function imageFilePage(
@@ -642,7 +644,7 @@ share.post("/guest/:token/request", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
   const rl = await checkRateLimit(
-    db,
+    c.env.DB,
     `guest-code:${token}:${clientIp(c)}`,
     5,
     3600,
@@ -953,7 +955,12 @@ share.post("/folder/:token/unlock", async (c) => {
     );
   if (!folder.sharePassword)
     return c.redirect(`/api/share/folder/${token}`, 302);
-  const rl = await checkRateLimit(db, `pwf:${token}:${clientIp(c)}`, 10, 600);
+  const rl = await checkRateLimit(
+    c.env.DB,
+    `pwf:${token}:${clientIp(c)}`,
+    10,
+    600,
+  );
   if (!rl.allowed)
     return c.html(
       infoPage(
@@ -1073,7 +1080,12 @@ share.post("/:token/unlock", async (c) => {
       404,
     );
   if (!row.sharePassword) return c.redirect(`/api/share/${token}`, 302);
-  const rl = await checkRateLimit(db, `pw:${token}:${clientIp(c)}`, 10, 600);
+  const rl = await checkRateLimit(
+    c.env.DB,
+    `pw:${token}:${clientIp(c)}`,
+    10,
+    600,
+  );
   if (!rl.allowed)
     return c.html(
       infoPage(
@@ -1116,7 +1128,12 @@ share.get("/:token/report", (c) =>
 share.post("/:token/flag", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
-  const rl = await checkRateLimit(db, `flag:${token}:${clientIp(c)}`, 5, 3600);
+  const rl = await checkRateLimit(
+    c.env.DB,
+    `flag:${token}:${clientIp(c)}`,
+    5,
+    3600,
+  );
   if (!rl.allowed)
     return c.html(
       infoPage(
@@ -1316,9 +1333,10 @@ share.get("/:token", async (c) => {
       : row.expiresAt;
   const meta = `${fmtBytes(row.sizeBytes)} \u00b7 ${adminReview ? "report investigation" : humanLeft(effExpiry)}`;
   if (row.encryptionMode === "aes-gcm") {
+    const scriptNonce = contentSecurityNonce();
     c.header(
       "Content-Security-Policy",
-      "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      `default-src 'none'; script-src 'nonce-${scriptNonce}'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     );
     return c.html(
       encryptedFilePage(
@@ -1328,6 +1346,7 @@ share.get("/:token", async (c) => {
         row.encryptionNonce,
         row.encryptedMetadata,
         row.shareAccessMode === "preview",
+        scriptNonce,
       ),
     );
   }

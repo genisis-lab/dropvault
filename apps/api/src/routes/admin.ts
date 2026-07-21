@@ -51,6 +51,7 @@ type BulkUserBody = {
   action?: string;
   ids?: unknown[];
   quotaBytes?: number | null;
+  confirmation?: string;
 };
 type BulkFileBody = {
   action?: string;
@@ -444,7 +445,8 @@ async function persistPolicy(
   source: "update" | "rollback",
 ) {
   const changes = policyChanges(before, after);
-  if (!changes.length) return { changes, revision: await latestPolicyRevision(db) };
+  if (!changes.length)
+    return { changes, revision: await latestPolicyRevision(db) };
   const now = nowSeconds();
   for (const change of changes) {
     await db
@@ -490,7 +492,10 @@ async function persistPolicy(
   if (changes.some((change) => SECURITY_SETTING_KEYS.has(change.key)))
     await notifyOwners(c.env, db, {
       type: "security.policy_changed",
-      title: source === "rollback" ? "Security policy restored" : "Security policy changed",
+      title:
+        source === "rollback"
+          ? "Security policy restored"
+          : "Security policy changed",
       message: `${c.get("userEmail") ?? "The owner"} ${
         source === "rollback" ? "restored" : "changed"
       } ${changes.map((change) => change.key).join(", ")}.`,
@@ -772,9 +777,7 @@ admin.get("/users", async (c) => {
       role: admins.get(u.email.toLowerCase()) ?? null,
       keepFilesForever:
         !!u.keepFilesForever ||
-        ["owner", "admin", "moderator"].includes(
-          admins.get(u.email.toLowerCase()) ?? "",
-        ),
+        ["owner", "admin"].includes(admins.get(u.email.toLowerCase()) ?? ""),
       keepFilesForeverGranted: !!u.keepFilesForever,
       suspended: suspended.has(u.id),
       pendingApproval: reasonByUser.get(u.id) === PENDING_APPROVAL_REASON,
@@ -874,8 +877,7 @@ admin.get("/users/:id", async (c) => {
       isAdmin: admins.has(u.email.toLowerCase()),
       role: targetRole,
       keepFilesForever:
-        !!u.keepFilesForever ||
-        ["owner", "admin", "moderator"].includes(targetRole ?? ""),
+        !!u.keepFilesForever || ["owner", "admin"].includes(targetRole ?? ""),
       keepFilesForeverGranted: !!u.keepFilesForever,
       suspended: !!suspension,
       suspensionReason: suspension?.reason ?? null,
@@ -906,11 +908,11 @@ admin.post("/users/:id/quota", async (c) => {
     .get();
   if (!u) return c.json({ error: "not found" }, 404);
   const targetRole = await adminRole(c.env, db, u.email);
-  if (targetRole != null)
+  if (targetRole === "owner" || targetRole === "admin")
     return c.json(
       {
         error:
-          "Admins and the owner have unlimited storage and can't be assigned a limit.",
+          "Owners and administrators have unlimited storage and can't be assigned a limit.",
       },
       400,
     );
@@ -964,6 +966,12 @@ admin.post("/users/:id/suspend", async (c) => {
   if (targetRole === "owner")
     return c.json(
       { error: "The owner account is root and can't be suspended." },
+      403,
+    );
+  const actorRole = await adminRole(c.env, db, c.get("userEmail"));
+  if (targetRole != null && actorRole !== "owner")
+    return c.json(
+      { error: "Only the owner can suspend another privileged account." },
       403,
     );
   await db
@@ -1053,7 +1061,10 @@ admin.post("/users/bulk", async (c) => {
       .where(inArray(schema.user.id, ids))
       .all();
     const settable = targets
-      .filter((u) => !admins.has(u.email.toLowerCase()))
+      .filter((u) => {
+        const role = admins.get(u.email.toLowerCase());
+        return role !== "owner" && role !== "admin";
+      })
       .map((u) => u.id);
     if (settable.length)
       await db
@@ -1074,6 +1085,12 @@ admin.post("/users/bulk", async (c) => {
       .where(inArray(schema.files.ownerId, ids))
       .run();
   } else if (body.action === "expireFiles") {
+    const confirmationDenied = await requireOwnerConfirmation(
+      c,
+      body.confirmation,
+      "EXPIRE USER FILES",
+    );
+    if (confirmationDenied) return confirmationDenied;
     await db
       .update(schema.files)
       .set({ expiresAt: nowSeconds() })
@@ -1564,7 +1581,11 @@ admin.post("/flags/:id/ban-hash", async (c) => {
   const body = await c.req
     .json<{ confirmation?: string; reason?: string }>()
     .catch(() => ({}) as { confirmation?: string; reason?: string });
-  const denied = await requireOwnerConfirmation(c, body.confirmation, "BAN HASH");
+  const denied = await requireOwnerConfirmation(
+    c,
+    body.confirmation,
+    "BAN HASH",
+  );
   if (denied) return denied;
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
@@ -1590,7 +1611,10 @@ admin.post("/flags/:id/ban-hash", async (c) => {
     );
   const hash = String(file.contentHash ?? file.checksum ?? "").toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(hash))
-    return c.json({ error: "This file does not have a verified SHA-256 hash." }, 409);
+    return c.json(
+      { error: "This file does not have a verified SHA-256 hash." },
+      409,
+    );
   await db
     .insert(schema.bannedFileHashes)
     .values({
@@ -1604,7 +1628,8 @@ admin.post("/flags/:id/ban-hash", async (c) => {
     .onConflictDoUpdate({
       target: schema.bannedFileHashes.hash,
       set: {
-        reason: body.reason?.slice(0, 500) ?? flag.reason?.slice(0, 500) ?? null,
+        reason:
+          body.reason?.slice(0, 500) ?? flag.reason?.slice(0, 500) ?? null,
         sourceFileId: file.id,
         createdBy: c.get("userEmail") ?? null,
         createdAt: nowSeconds(),
@@ -1687,11 +1712,22 @@ admin.get("/admins", async (c) => {
   return c.json({ admins });
 });
 admin.post("/admins", async (c) => {
-  const denied = await forbidUnless(c, "owner");
-  if (denied) return denied;
   const body = await c.req
-    .json<{ email?: string; role?: AdminRole }>()
-    .catch(() => ({}) as { email?: string; role?: AdminRole });
+    .json<{ email?: string; role?: AdminRole; confirmation?: string }>()
+    .catch(
+      () =>
+        ({}) as {
+          email?: string;
+          role?: AdminRole;
+          confirmation?: string;
+        },
+    );
+  const denied = await requireOwnerConfirmation(
+    c,
+    body.confirmation,
+    "GRANT ROLE",
+  );
+  if (denied) return denied;
   const email = String(body.email ?? "")
     .trim()
     .toLowerCase();
@@ -1840,7 +1876,9 @@ admin.post("/settings", async (c) => {
   const revision = await latestPolicyRevision(db);
   if ((body.expectedRevision ?? null) !== revision)
     return c.json(
-      { error: "Policies changed in another session. Reload and review again." },
+      {
+        error: "Policies changed in another session. Reload and review again.",
+      },
       409,
     );
   const before = await settingsMap(db);
@@ -1886,8 +1924,7 @@ admin.post("/settings/rollback/:id", async (c) => {
   const body = await c.req
     .json<{ confirmation?: string; expectedRevision?: string | null }>()
     .catch(
-      () =>
-        ({}) as { confirmation?: string; expectedRevision?: string | null },
+      () => ({}) as { confirmation?: string; expectedRevision?: string | null },
     );
   const denied = await requireOwnerConfirmation(
     c,
@@ -1899,7 +1936,9 @@ admin.post("/settings/rollback/:id", async (c) => {
   const revision = await latestPolicyRevision(db);
   if ((body.expectedRevision ?? null) !== revision)
     return c.json(
-      { error: "Policies changed in another session. Reload and review again." },
+      {
+        error: "Policies changed in another session. Reload and review again.",
+      },
       409,
     );
   const version = await db
@@ -1908,7 +1947,10 @@ admin.post("/settings/rollback/:id", async (c) => {
     .where(eq(schema.policyVersions.id, c.req.param("id")))
     .get();
   if (!version) return c.json({ error: "policy version not found" }, 404);
-  const targetRaw = JSON.parse(version.afterJson || "{}") as Record<string, unknown>;
+  const targetRaw = JSON.parse(version.afterJson || "{}") as Record<
+    string,
+    unknown
+  >;
   const before = await settingsMap(db);
   const after = { ...before };
   for (const key of settingsKeys)
@@ -1981,6 +2023,19 @@ admin.post("/limit-requests/:id/approve", async (c) => {
     .get();
   if (!req || req.status !== "pending")
     return c.json({ error: "not found or already handled" }, 404);
+  const actorRole = await adminRole(c.env, db, c.get("userEmail"));
+  const policy = await settingsMap(db);
+  const adminMaxQuotaBytes = Math.max(
+    0,
+    Number(policy.adminMaxQuotaBytes) || 10737418240,
+  );
+  if (actorRole === "admin" && req.requestedBytes > adminMaxQuotaBytes)
+    return c.json(
+      {
+        error: `Admin quota approvals are capped at ${adminMaxQuotaBytes} bytes by the owner.`,
+      },
+      403,
+    );
   await db
     .update(schema.uploadLimitRequests)
     .set({

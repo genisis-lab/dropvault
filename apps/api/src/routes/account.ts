@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { createAuth } from "../auth";
 import { getDb, schema } from "../db";
 import { adminRole } from "../middleware/admin";
+import { requireAuth } from "../middleware/auth";
 import { deleteFileObjects } from "../lib/fileObjects";
 import { nowSeconds } from "../lib/expiry";
 import { isSafeWebhookUrl } from "../lib/url";
@@ -13,8 +14,16 @@ import type { Bindings, Variables } from "../types";
 // everything else with a 403).
 const account = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
+// /me remains available so suspended users can see why they are blocked, and
+// DELETE /me remains available so they can erase their account. Every other
+// account action must pass the same suspension check as the rest of the app.
+account.use("/activity", requireAuth);
+account.use("/export", requireAuth);
+account.use("/notifications/*", requireAuth);
+account.use("/portal", requireAuth);
+
 function roleGetsForever(role: string | null): boolean {
-  return role === "owner" || role === "admin" || role === "moderator";
+  return role === "owner" || role === "admin";
 }
 
 account.get("/me", async (c) => {
