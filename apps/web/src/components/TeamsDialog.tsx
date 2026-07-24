@@ -8,6 +8,7 @@ import {
   Film,
   Folder,
   Image as ImageIcon,
+  LockKeyhole,
   PlayCircle,
   Plus,
   Trash2,
@@ -20,6 +21,7 @@ import {
   type DriftFile,
   type Folder as VaultFolder,
 } from "../lib/api";
+import { downloadOwnedFile } from "../lib/encryption";
 import {
   addTeamItems,
   addTeamMember,
@@ -475,6 +477,7 @@ export default function TeamsDialog({
                                   teamId={selectedTeam.id}
                                   file={f}
                                   onPreview={() =>
+                                    f.encryptionMode !== "aes-gcm" &&
                                     isMedia(f.contentType)
                                       ? setPreviewFile(f)
                                       : undefined
@@ -752,13 +755,31 @@ function TeamFileCard({
   onPreview: () => void;
   onRemove: () => void;
 }) {
-  const media = isMedia(file.contentType);
+  const { error } = useToast();
+  const [downloading, setDownloading] = useState(false);
+  const encrypted = file.encryptionMode === "aes-gcm";
+  const media = !encrypted && isMedia(file.contentType);
   const src = media ? teamFileInlineUrl(teamId, file.id) : "";
   const dl = teamFileDownloadUrl(teamId, file.id);
+  async function download() {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadOwnedFile(file, dl);
+    } catch (e) {
+      error((e as Error)?.message || "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
   const body = (
     <div className="group relative flex h-full min-h-[180px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-drift-200 hover:shadow-md">
       <div className="relative h-28 overflow-hidden bg-slate-100">
-        {isImage(file.contentType) ? (
+        {encrypted ? (
+          <div className="grid h-full place-items-center text-drift-600">
+            <LockKeyhole size={34} />
+          </div>
+        ) : isImage(file.contentType) ? (
           <img
             src={src}
             alt={file.filename}
@@ -785,7 +806,7 @@ function TeamFileCard({
           </div>
         )}
         <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
-          {mediaLabel(file.contentType)}
+          {encrypted ? "E2E encrypted" : mediaLabel(file.contentType)}
         </span>
         {media && (
           <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 text-slate-600 shadow-sm">
@@ -805,13 +826,22 @@ function TeamFileCard({
           {file.sizeBytes ? formatBytes(file.sizeBytes) : "—"}
         </p>
         <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-          <a
-            href={dl}
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={(e) => {
+              e.stopPropagation();
+              void download();
+            }}
             className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
           >
-            <Download size={13} /> Download
-          </a>
+            {encrypted ? (
+              <LockKeyhole size={13} />
+            ) : (
+              <Download size={13} />
+            )}
+            {encrypted ? "Decrypt" : "Download"}
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();

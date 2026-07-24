@@ -1,3 +1,8 @@
+import {
+  decryptEncryptedMetadata,
+  getEncryptionKey,
+} from "./encryption";
+
 const API = import.meta.env.VITE_API_URL ?? "";
 
 async function j<T>(res: Response): Promise<T> {
@@ -25,6 +30,9 @@ export type TeamFile = {
   ownerEmail?: string | null;
   sizeBytes?: number;
   contentType?: string | null;
+  encryptionMode?: "none" | "aes-gcm";
+  encryptionNonce?: string | null;
+  encryptedMetadata?: string | null;
   createdAt: number;
   teamId?: string | null;
 };
@@ -81,10 +89,30 @@ export async function loadTeam(id: string): Promise<Team> {
     files?: TeamFile[];
     folders?: TeamFolder[];
   }>(await fetch(`${API}/api/teams/${id}`, { credentials: "include" }));
+  const files = await Promise.all(
+    (res.files ?? res.team.files ?? []).map(async (file) => {
+      if (file.encryptionMode !== "aes-gcm") return file;
+      try {
+        const key = await getEncryptionKey(file.id);
+        if (!key) return file;
+        const metadata = await decryptEncryptedMetadata(
+          key,
+          file.encryptedMetadata,
+        );
+        return {
+          ...file,
+          filename: metadata.filename,
+          contentType: metadata.contentType,
+        };
+      } catch {
+        return file;
+      }
+    }),
+  );
   return {
     ...res.team,
     members: res.members ?? res.team.members ?? [],
-    files: res.files ?? res.team.files ?? [],
+    files,
     folders: res.folders ?? res.team.folders ?? [],
     memberCount: res.members?.length ?? res.team.memberCount,
     fileCount: res.files?.length ?? res.team.fileCount,

@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Download, X } from "lucide-react";
+import { Download, LockKeyhole, LoaderCircle, X } from "lucide-react";
 import { downloadUrl, inlineUrl, type DriftFile } from "../lib/api";
+import { downloadOwnedFile } from "../lib/encryption";
+import { useToast } from "./Toast";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.97 };
@@ -16,6 +18,8 @@ export default function PreviewModal({
   file: DriftFile | null;
   onClose: () => void;
 }) {
+  const { error: toastError } = useToast();
+  const [downloading, setDownloading] = useState(false);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -27,6 +31,19 @@ export default function PreviewModal({
   const type = file?.contentType || "";
   const isImage = type.startsWith("image/");
   const isPdf = type.includes("pdf");
+  const encrypted = file?.encryptionMode === "aes-gcm";
+
+  async function download() {
+    if (!file || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadOwnedFile(file, downloadUrl(file.id));
+    } catch (error) {
+      toastError((error as Error)?.message || "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -50,12 +67,21 @@ export default function PreviewModal({
               {file.filename}
             </p>
             <div className="flex items-center gap-2">
-              <a
-                href={downloadUrl(file.id)}
+              <button
+                type="button"
+                disabled={downloading}
+                onClick={() => void download()}
                 className="flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium hover:bg-white/25"
               >
-                <Download size={15} /> Download
-              </a>
+                {downloading ? (
+                  <LoaderCircle className="animate-spin" size={15} />
+                ) : encrypted ? (
+                  <LockKeyhole size={15} />
+                ) : (
+                  <Download size={15} />
+                )}
+                {encrypted ? "Decrypt & download" : "Download"}
+              </button>
               <button
                 onClick={onClose}
                 aria-label="Close preview"
@@ -71,7 +97,21 @@ export default function PreviewModal({
             onClick={(e) => e.stopPropagation()}
             className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-2xl"
           >
-            {isImage ? (
+            {encrypted ? (
+              <div className="max-w-md rounded-2xl bg-white px-8 py-12 text-center text-sm text-slate-500">
+                <LockKeyhole
+                  className="mx-auto mb-3 text-drift-600"
+                  size={28}
+                />
+                <p className="font-semibold text-slate-700">
+                  End-to-end encrypted
+                </p>
+                <p className="mt-1 leading-5">
+                  Dropvault stores only ciphertext. Decrypt and download this
+                  file with the key saved in this browser.
+                </p>
+              </div>
+            ) : isImage ? (
               <img
                 src={inlineUrl(file.id)}
                 alt={file.filename}
