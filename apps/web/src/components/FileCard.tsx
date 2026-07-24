@@ -31,7 +31,10 @@ import {
 } from "lucide-react";
 import type { DriftFile } from "../lib/api";
 import { downloadUrl, shareUrlForFile, thumbUrl } from "../lib/api";
-import { downloadDecryptedFile } from "../lib/encryption";
+import {
+  downloadDecryptedFile,
+  isEndToEndEncrypted,
+} from "../lib/encryption";
 import { copyTextFrom } from "../lib/clipboard";
 import { formatBytes, timeLeft } from "../lib/format";
 import { useToast } from "./Toast";
@@ -127,8 +130,11 @@ export default function FileCard({
   const { error } = useToast();
   const { Icon, tint } = kindOf(file.contentType);
   const tone = TINT[tint];
-  const isImage = (file.contentType || "").startsWith("image/");
-  const canPreview = isImage || (file.contentType || "").includes("pdf");
+  const encrypted = isEndToEndEncrypted(file);
+  const isImage =
+    !encrypted && (file.contentType || "").startsWith("image/");
+  const canPreview =
+    !encrypted && (isImage || (file.contentType || "").includes("pdf"));
   const [left, setLeft] = useState(() => timeLeft(file.expiresAt));
   const [menuOpen, setMenuOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
