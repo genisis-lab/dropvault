@@ -1,5 +1,10 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { decryptEncryptedMetadata, getEncryptionKey } from "./encryption";
+import {
+  decryptEncryptedMetadata,
+  getEncryptionKey,
+  getEncryptionKeys,
+  isEndToEndEncrypted,
+} from "./encryption";
 
 // /api is same-origin: Vite proxies it to the local Worker in dev, and the Pages
 // proxy (functions/api/[[path]].ts) forwards it to the Worker in prod.
@@ -44,27 +49,35 @@ export type DriftFile = {
 
 async function hydrateEncryptedFileMetadata(
   file: DriftFile,
+  encodedKey?: string,
 ): Promise<DriftFile> {
-  if (file.encryptionMode !== "aes-gcm") return file;
+  if (!isEndToEndEncrypted(file) && !encodedKey) return file;
+  const encryptedFile = { ...file, encryptionMode: "aes-gcm" as const };
+  if (!encodedKey || !file.encryptionNonce) return encryptedFile;
   try {
-    const key = await getEncryptionKey(file.id);
-    if (!key) return file;
     const metadata = await decryptEncryptedMetadata(
-      key,
+      encodedKey,
       file.encryptedMetadata,
     );
     return {
-      ...file,
+      ...encryptedFile,
       filename: metadata.filename,
       contentType: metadata.contentType,
     };
   } catch {
-    return file;
+    return encryptedFile;
   }
 }
 
 async function hydrateEncryptedFiles(files: DriftFile[]): Promise<DriftFile[]> {
-  return Promise.all(files.map(hydrateEncryptedFileMetadata));
+  const keys = await getEncryptionKeys(files.map((file) => file.id)).catch(
+    () => new Map<string, string>(),
+  );
+  return Promise.all(
+    files.map((file) =>
+      hydrateEncryptedFileMetadata(file, keys.get(file.id)),
+    ),
+  );
 }
 
 export type Folder = {
@@ -227,6 +240,15 @@ export async function presign(input: {
     keepForever?: boolean;
     duplicateOf?: string | null;
   }>(res);
+}
+
+export async function fileCapabilities(): Promise<{
+  e2eEncryption: boolean;
+}> {
+  const res = await fetch(`${API}/api/files/capabilities`, {
+    credentials: "include",
+  });
+  return j<{ e2eEncryption: boolean }>(res);
 }
 
 export function uploadUrlFor(id: string) {

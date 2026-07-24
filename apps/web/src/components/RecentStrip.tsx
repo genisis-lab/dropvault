@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { DriftFile } from "../lib/api";
 import { inlineUrl } from "../lib/api";
+import { isEndToEndEncrypted } from "../lib/encryption";
 import { formatBytes } from "../lib/format";
 
 type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
@@ -55,7 +56,9 @@ export default function RecentStrip({
         {files.map((f) => {
           const { Icon, tint } = kindOf(f.contentType);
           const tone = TINT[tint];
-          const isImage = (f.contentType || "").startsWith("image/");
+          const isImage =
+            !isEndToEndEncrypted(f) &&
+            (f.contentType || "").startsWith("image/");
           return (
             <motion.button
               layout

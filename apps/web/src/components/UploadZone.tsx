@@ -18,6 +18,7 @@ import {
 import {
   complete,
   fileContentHash,
+  fileCapabilities,
   generateAndUploadThumbnail,
   MULTIPART_THRESHOLD,
   presign,
@@ -167,6 +168,9 @@ export default function UploadZone({
   const [canKeepForever, setCanKeepForever] = useState(false);
   const [keepForeverChoice, setKeepForeverChoice] = useState(keepForever);
   const [encryptChoice, setEncryptChoice] = useState(false);
+  const [e2eCapability, setE2eCapability] = useState<
+    "checking" | "available" | "unavailable"
+  >("checking");
   const [batchError, setBatchError] = useState<string | null>(null);
   const [releaseAtInput, setReleaseAtInput] = useState("");
   const [expireAfterDownloadChoice, setExpireAfterDownloadChoice] =
@@ -191,6 +195,25 @@ export default function UploadZone({
         if (!allowed) setKeepForeverChoice(false);
       })
       .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fileCapabilities()
+      .then((capabilities) => {
+        if (!alive) return;
+        const available = capabilities.e2eEncryption === true;
+        setE2eCapability(available ? "available" : "unavailable");
+        if (!available) setEncryptChoice(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setE2eCapability("unavailable");
+        setEncryptChoice(false);
+      });
     return () => {
       alive = false;
     };
@@ -258,7 +281,11 @@ export default function UploadZone({
               }),
             )
           ).id;
-        if (encrypted) await saveEncryptionKey(id, encrypted.key);
+        if (encrypted)
+          await saveEncryptionKey(id, encrypted.key, {
+            nonce: encrypted.nonce,
+            encryptedMetadata: encrypted.encryptedMetadata,
+          });
         if (payload.size > MULTIPART_THRESHOLD) {
           if (!encrypted) await saveUploadCheckpoint(file, id).catch(() => {});
           await withRetry(() => uploadLargeFile(id, payload, setPct));
@@ -343,6 +370,12 @@ export default function UploadZone({
       if (!incoming) return;
       const files = Array.from(incoming);
       if (!files.length) return;
+      if (encryptChoice && e2eCapability !== "available") {
+        setBatchError(
+          "E2E upload is unavailable because the production backend has not confirmed encryption support.",
+        );
+        return;
+      }
       const batchActive =
         batchRunningRef.current ||
         Object.values(jobsRef.current).some(
@@ -380,7 +413,7 @@ export default function UploadZone({
       });
       await runJobs(entries);
     },
-    [runJobs],
+    [e2eCapability, encryptChoice, runJobs],
   );
 
   const retryJob = useCallback(
@@ -494,11 +527,17 @@ export default function UploadZone({
           <input
             type="checkbox"
             checked={encryptChoice}
-            disabled={activeCount > 0}
+            disabled={activeCount > 0 || e2eCapability !== "available"}
             onChange={(e) => setEncryptChoice(e.target.checked)}
           />
-          <LockKeyhole size={13} /> End-to-end encrypt (up to{" "}
-          {formatBytes(MAX_BROWSER_ENCRYPTION_BYTES)})
+          <LockKeyhole size={13} />{" "}
+          {e2eCapability === "checking"
+            ? "Checking E2E support…"
+            : e2eCapability === "unavailable"
+              ? "E2E unavailable — backend upgrade required"
+              : `End-to-end encrypt (up to ${formatBytes(
+                  MAX_BROWSER_ENCRYPTION_BYTES,
+                )})`}
         </label>
         {encryptChoice && (
           <p

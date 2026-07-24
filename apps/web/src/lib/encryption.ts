@@ -1,6 +1,11 @@
 export const MAX_BROWSER_ENCRYPTION_BYTES = 256 * 1024 * 1024;
 
-type StoredKey = { key: string; savedAt: number };
+type StoredKey = {
+  key: string;
+  savedAt: number;
+  nonce?: string;
+  encryptedMetadata?: string;
+};
 type EncryptedMetadata = { nonce: string; ciphertext: string };
 
 function base64Url(bytes: ArrayBuffer | Uint8Array): string {
@@ -34,12 +39,18 @@ function openKeys(): Promise<IDBDatabase> {
 export async function saveEncryptionKey(
   fileId: string,
   key: string,
+  envelope?: { nonce?: string | null; encryptedMetadata?: string | null },
 ): Promise<void> {
   const db = await openKeys();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction("keys", "readwrite");
     tx.objectStore("keys").put(
-      { key, savedAt: Date.now() } satisfies StoredKey,
+      {
+        key,
+        savedAt: Date.now(),
+        nonce: envelope?.nonce ?? undefined,
+        encryptedMetadata: envelope?.encryptedMetadata ?? undefined,
+      } satisfies StoredKey,
       fileId,
     );
     tx.oncomplete = () => resolve();
@@ -48,7 +59,9 @@ export async function saveEncryptionKey(
   db.close();
 }
 
-export async function getEncryptionKey(fileId: string): Promise<string | null> {
+async function getStoredEncryptionKey(
+  fileId: string,
+): Promise<StoredKey | null> {
   const db = await openKeys();
   const value = await new Promise<StoredKey | undefined>((resolve, reject) => {
     const request = db.transaction("keys").objectStore("keys").get(fileId);
@@ -56,7 +69,53 @@ export async function getEncryptionKey(fileId: string): Promise<string | null> {
     request.onerror = () => reject(request.error);
   });
   db.close();
-  return value?.key ?? null;
+  return value ?? null;
+}
+
+export async function getEncryptionKey(fileId: string): Promise<string | null> {
+  return (await getStoredEncryptionKey(fileId))?.key ?? null;
+}
+
+export async function getEncryptionKeys(
+  fileIds: string[],
+): Promise<Map<string, string>> {
+  if (!fileIds.length) return new Map();
+  const wanted = new Set(fileIds);
+  const db = await openKeys();
+  const tx = db.transaction("keys");
+  const store = tx.objectStore("keys");
+  const [ids, values] = await Promise.all([
+    new Promise<IDBValidKey[]>((resolve, reject) => {
+      const request = store.getAllKeys();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    }),
+    new Promise<StoredKey[]>((resolve, reject) => {
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result as StoredKey[]);
+      request.onerror = () => reject(request.error);
+    }),
+  ]);
+  db.close();
+  const result = new Map<string, string>();
+  ids.forEach((id, index) => {
+    const fileId = String(id);
+    const key = values[index]?.key;
+    if (wanted.has(fileId) && key) result.set(fileId, key);
+  });
+  return result;
+}
+
+export function isEndToEndEncrypted(file: {
+  encryptionMode?: string | null;
+  encryptionNonce?: string | null;
+  encryptedMetadata?: string | null;
+}): boolean {
+  return (
+    file.encryptionMode === "aes-gcm" ||
+    !!file.encryptionNonce ||
+    !!file.encryptedMetadata
+  );
 }
 
 export async function encryptForUpload(source: File): Promise<{
@@ -177,18 +236,26 @@ export async function downloadDecryptedFile(
   },
   downloadUrl: string,
 ): Promise<void> {
-  const encodedKey = await getEncryptionKey(file.id);
-  if (!encodedKey || !file.encryptionNonce)
+  const stored = await getStoredEncryptionKey(file.id);
+  const encodedKey = stored?.key;
+  const nonce = file.encryptionNonce ?? stored?.nonce;
+  const encryptedMetadata =
+    file.encryptedMetadata ?? stored?.encryptedMetadata;
+  if (!encodedKey)
     throw new Error(
       "This browser does not have the encryption key for this file",
+    );
+  if (!nonce)
+    throw new Error(
+      "This legacy E2E upload is missing its encryption nonce because the production backend was not upgraded when it was uploaded. It cannot be decrypted; upload the original file again.",
     );
   const response = await fetch(downloadUrl, { credentials: "include" });
   if (!response.ok) throw new Error("Encrypted download failed");
   const clear = await decryptEncryptedPayload(
     await response.arrayBuffer(),
     encodedKey,
-    file.encryptionNonce,
-    file.encryptedMetadata,
+    nonce,
+    encryptedMetadata,
   );
   const url = URL.createObjectURL(
     new Blob([clear.bytes], { type: clear.contentType }),
@@ -215,7 +282,7 @@ export async function downloadOwnedFile(
   },
   url: string,
 ): Promise<void> {
-  if (file.encryptionMode === "aes-gcm") {
+  if (isEndToEndEncrypted(file)) {
     await downloadDecryptedFile(file, url);
     return;
   }
