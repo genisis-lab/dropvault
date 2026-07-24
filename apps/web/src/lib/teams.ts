@@ -1,6 +1,7 @@
 import {
   decryptEncryptedMetadata,
   getEncryptionKey,
+  isEndToEndEncrypted,
 } from "./encryption";
 
 const API = import.meta.env.VITE_API_URL ?? "";
@@ -91,21 +92,25 @@ export async function loadTeam(id: string): Promise<Team> {
   }>(await fetch(`${API}/api/teams/${id}`, { credentials: "include" }));
   const files = await Promise.all(
     (res.files ?? res.team.files ?? []).map(async (file) => {
-      if (file.encryptionMode !== "aes-gcm") return file;
+      const key = await getEncryptionKey(file.id).catch(() => null);
+      if (!isEndToEndEncrypted(file) && !key) return file;
+      const encryptedFile = {
+        ...file,
+        encryptionMode: "aes-gcm" as const,
+      };
+      if (!key || !file.encryptionNonce) return encryptedFile;
       try {
-        const key = await getEncryptionKey(file.id);
-        if (!key) return file;
         const metadata = await decryptEncryptedMetadata(
           key,
           file.encryptedMetadata,
         );
         return {
-          ...file,
+          ...encryptedFile,
           filename: metadata.filename,
           contentType: metadata.contentType,
         };
       } catch {
-        return file;
+        return encryptedFile;
       }
     }),
   );
