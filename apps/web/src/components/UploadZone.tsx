@@ -51,6 +51,7 @@ type Job = {
 // How many files upload in parallel. Bounded so we don't flood the Worker / R2
 // (which is what caused large batches to partially fail before).
 const UPLOAD_CONCURRENCY = 3;
+const MAX_BATCH_FILES = 100;
 const MAX_ATTEMPTS = 3;
 
 const zoneIdle = { borderColor: "#cbd5e1", backgroundColor: "#ffffff" };
@@ -166,6 +167,7 @@ export default function UploadZone({
   const [canKeepForever, setCanKeepForever] = useState(false);
   const [keepForeverChoice, setKeepForeverChoice] = useState(keepForever);
   const [encryptChoice, setEncryptChoice] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [releaseAtInput, setReleaseAtInput] = useState("");
   const [expireAfterDownloadChoice, setExpireAfterDownloadChoice] =
     useState(false);
@@ -174,6 +176,7 @@ export default function UploadZone({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const ref = inputRef ?? localRef;
   const jobsRef = useRef(jobs);
+  const batchRunningRef = useRef(false);
   useEffect(() => {
     jobsRef.current = jobs;
   }, [jobs]);
@@ -280,15 +283,6 @@ export default function UploadZone({
         );
         await clearUploadCheckpoint(file).catch(() => {});
         onUploaded();
-        setTimeout(
-          () =>
-            setJobs((j) => {
-              const n = { ...j };
-              delete n[key];
-              return n;
-            }),
-          1600,
-        );
       } catch (e) {
         const msg = (e as Error)?.message?.trim() || "Upload failed";
         // The server removes expired/aborted multipart sessions. Drop the local
@@ -321,6 +315,7 @@ export default function UploadZone({
   const runJobs = useCallback(
     async (entries: Array<{ key: string; file: File }>) => {
       if (!entries.length) return;
+      batchRunningRef.current = true;
       let cursor = 0;
       const worker = async () => {
         while (cursor < entries.length) {
@@ -329,12 +324,16 @@ export default function UploadZone({
         }
       };
       const concurrency = encryptChoice ? 1 : UPLOAD_CONCURRENCY;
-      await Promise.all(
-        Array.from(
-          { length: Math.min(concurrency, entries.length) },
-          () => worker(),
-        ),
-      );
+      try {
+        await Promise.all(
+          Array.from(
+            { length: Math.min(concurrency, entries.length) },
+            () => worker(),
+          ),
+        );
+      } finally {
+        batchRunningRef.current = false;
+      }
     },
     [encryptChoice, uploadOne],
   );
@@ -344,12 +343,30 @@ export default function UploadZone({
       if (!incoming) return;
       const files = Array.from(incoming);
       if (!files.length) return;
+      const batchActive =
+        batchRunningRef.current ||
+        Object.values(jobsRef.current).some(
+          (job) => job.state === "queued" || job.state === "uploading",
+        );
+      if (batchActive) {
+        setBatchError(
+          "Wait for the current batch to finish before adding more files.",
+        );
+        return;
+      }
+      if (files.length > MAX_BATCH_FILES) {
+        setBatchError(
+          `A batch can contain up to ${MAX_BATCH_FILES} files. Select fewer files and try again.`,
+        );
+        return;
+      }
+      setBatchError(null);
       const entries = files.map((file) => ({
-        key: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        key: crypto.randomUUID(),
         file,
       }));
-      setJobs((j) => {
-        const next = { ...j };
+      setJobs(() => {
+        const next: Record<string, Job> = {};
         for (const { key, file } of entries)
           next[key] = {
             name: file.name,
@@ -358,6 +375,7 @@ export default function UploadZone({
             state: "queued",
             file,
           };
+        jobsRef.current = next;
         return next;
       });
       await runJobs(entries);
@@ -367,6 +385,7 @@ export default function UploadZone({
 
   const retryJob = useCallback(
     (key: string) => {
+      if (batchRunningRef.current) return;
       const job = jobsRef.current[key];
       if (!job?.file) return;
       setJobs((j) =>
@@ -383,6 +402,7 @@ export default function UploadZone({
   );
 
   const retryAllFailed = useCallback(() => {
+    if (batchRunningRef.current) return;
     const failed = Object.entries(jobsRef.current).filter(
       ([, job]) => job.state === "error" && job.file,
     );
@@ -408,6 +428,13 @@ export default function UploadZone({
     ([, j]) => j.state === "uploading" || j.state === "queued",
   ).length;
   const doneCount = jobList.filter(([, j]) => j.state === "done").length;
+  const totalBytes = jobList.reduce((sum, [, job]) => sum + job.size, 0);
+  const completedBytes = jobList.reduce(
+    (sum, [, job]) => sum + job.size * (job.pct / 100),
+    0,
+  );
+  const batchPct =
+    totalBytes > 0 ? Math.round((completedBytes / totalBytes) * 100) : 0;
 
   return (
     <div data-ui="upload-zone">
@@ -441,10 +468,10 @@ export default function UploadZone({
           <p className="font-semibold text-slate-700">
             {folderName
               ? `Drop files or folders into “${folderName}”`
-              : "Drop files or folders here, or click to browse"}
+              : "Drop a batch here, or click to choose files"}
           </p>
           <p className="mt-0.5 text-sm text-slate-400">
-            {expiryText} · extend or delete anytime
+            Up to {MAX_BATCH_FILES} files per batch · {expiryText}
           </p>
         </div>
         {canKeepForever && (
@@ -467,6 +494,7 @@ export default function UploadZone({
           <input
             type="checkbox"
             checked={encryptChoice}
+            disabled={activeCount > 0}
             onChange={(e) => setEncryptChoice(e.target.checked)}
           />
           <LockKeyhole size={13} /> End-to-end encrypt (up to{" "}
@@ -479,7 +507,8 @@ export default function UploadZone({
           >
             Encryption happens in this browser before upload. Downloads in this
             browser decrypt automatically, and encrypted share links include the
-            decryption key after the # symbol.
+            decryption key after the # symbol. E2E batches encrypt and upload one
+            file at a time to limit memory use.
           </p>
         )}
         <div
@@ -552,25 +581,46 @@ export default function UploadZone({
         />
       </motion.div>
 
+      {batchError && (
+        <div
+          role="alert"
+          className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+        >
+          <AlertCircle className="mt-0.5 shrink-0" size={14} />
+          <span>{batchError}</span>
+        </div>
+      )}
+
       {jobList.length > 0 && (
-        <div className="mt-3 flex items-center justify-between gap-3 px-1 text-xs text-slate-500">
-          <span>
-            {activeCount > 0
-              ? `Uploading — ${doneCount} done, ${activeCount} left`
-              : `${doneCount} uploaded`}
-            {errorCount > 0 && (
-              <span className="text-red-500">{` · ${errorCount} failed`}</span>
-            )}
-          </span>
-          {errorCount > 0 && (
-            <button
-              type="button"
-              onClick={retryAllFailed}
-              className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 font-medium text-red-600 transition hover:bg-red-100"
-            >
-              <RotateCw size={13} /> Retry {errorCount} failed
-            </button>
-          )}
+        <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 drive-shadow">
+          <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+            <span>
+              {activeCount > 0
+                ? `Batch upload — ${doneCount} done, ${activeCount} left`
+                : `${doneCount} uploaded`}
+              {errorCount > 0 && (
+                <span className="text-red-500">{` · ${errorCount} failed`}</span>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-600">{batchPct}%</span>
+              {errorCount > 0 && (
+                <button
+                  type="button"
+                  onClick={retryAllFailed}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 font-medium text-red-600 transition hover:bg-red-100"
+                >
+                  <RotateCw size={13} /> Retry {errorCount} failed
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+            <motion.div
+              className="h-full rounded-full bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500"
+              animate={{ width: `${batchPct}%` }}
+            />
+          </div>
         </div>
       )}
 
@@ -626,8 +676,9 @@ export default function UploadZone({
                   <button
                     type="button"
                     onClick={() => retryJob(key)}
+                    disabled={activeCount > 0}
                     title="Retry upload"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-100"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
                   >
                     <RotateCw size={13} /> Retry
                   </button>

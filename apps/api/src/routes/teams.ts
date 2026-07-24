@@ -272,6 +272,8 @@ teams.get("/:id/files/:fileId/inline", async (c) => {
       { error: "file is not available yet", releaseAt: file.releaseAt },
       423,
     );
+  if (file.encryptionMode === "aes-gcm")
+    return c.json({ error: "encrypted files require client decryption" }, 415);
   if (!isInlineTeamMedia(file.contentType))
     return c.json({ error: "inline preview not allowed" }, 415);
   if (isExpired(file.expiresAt)) return c.json({ error: "expired" }, 410);
