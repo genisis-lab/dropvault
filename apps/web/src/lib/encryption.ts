@@ -199,3 +199,28 @@ export async function downloadDecryptedFile(
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
+
+/**
+ * Download an owner-visible file without ever handing stored E2E ciphertext to
+ * the browser's native download navigation. Encrypted files must pass through
+ * the local key store and AES-GCM decryptor first.
+ */
+export async function downloadOwnedFile(
+  file: {
+    id: string;
+    filename: string;
+    encryptionMode?: "none" | "aes-gcm";
+    encryptionNonce?: string | null;
+    encryptedMetadata?: string | null;
+  },
+  url: string,
+): Promise<void> {
+  if (file.encryptionMode === "aes-gcm") {
+    await downloadDecryptedFile(file, url);
+    return;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.filename;
+  anchor.click();
+}

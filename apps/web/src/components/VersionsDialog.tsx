@@ -10,6 +10,7 @@ import {
   type DriftFile,
   type FileVersion,
 } from "../lib/api";
+import { downloadOwnedFile } from "../lib/encryption";
 import { formatBytes } from "../lib/format";
 import { useToast } from "./Toast";
 
@@ -37,6 +38,8 @@ export default function VersionsDialog({
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [uploading, setUploading] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const encrypted = file?.encryptionMode === "aes-gcm";
   async function load(active = true) {
     if (!file) return;
     setVersions(null);
@@ -91,6 +94,18 @@ export default function VersionsDialog({
     }
   }
 
+  async function downloadCurrent() {
+    if (!file || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadOwnedFile(file, downloadUrl(file.id));
+    } catch (e) {
+      toastError((e as Error)?.message || "Couldn't download file");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <AnimatePresence>
       {file && (
@@ -135,22 +150,30 @@ export default function VersionsDialog({
               </button>
             </div>
             <div className="border-b border-slate-100 px-5 py-3">
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-drift-300 bg-drift-50 px-3 py-2 text-xs font-semibold text-drift-700 hover:bg-drift-100">
-                <Upload size={15} />{" "}
-                {uploading == null
-                  ? "Upload a new version"
-                  : `Uploading ${uploading}%`}
-                <input
-                  type="file"
-                  className="sr-only"
-                  disabled={uploading != null}
-                  onChange={(event) => {
-                    const next = event.target.files?.[0];
-                    if (next) void replace(next);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
+              {encrypted ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs leading-5 text-amber-800">
+                  Version replacement and restore are unavailable for E2E files
+                  because the server cannot safely create or inspect plaintext
+                  versions.
+                </p>
+              ) : (
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-drift-300 bg-drift-50 px-3 py-2 text-xs font-semibold text-drift-700 hover:bg-drift-100">
+                  <Upload size={15} />{" "}
+                  {uploading == null
+                    ? "Upload a new version"
+                    : `Uploading ${uploading}%`}
+                  <input
+                    type="file"
+                    className="sr-only"
+                    disabled={uploading != null}
+                    onChange={(event) => {
+                      const next = event.target.files?.[0];
+                      if (next) void replace(next);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              )}
             </div>
             <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
               {error ? (
@@ -186,22 +209,34 @@ export default function VersionsDialog({
                           {when(v.createdAt)}
                         </p>
                       </div>
-                      <a
-                        href={
-                          i === 0
-                            ? downloadUrl(file.id)
-                            : versionDownloadUrl(file.id, v.id)
-                        }
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-drift-600"
-                        title={
-                          i === 0
-                            ? "Download current version"
-                            : `Download v${v.versionNumber}`
-                        }
-                      >
-                        <Download size={15} />
-                      </a>
-                      {i !== 0 && (
+                      {i === 0 && encrypted ? (
+                        <button
+                          type="button"
+                          disabled={downloading}
+                          onClick={() => void downloadCurrent()}
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-drift-600 disabled:opacity-50"
+                          title="Decrypt and download current version"
+                        >
+                          <Download size={15} />
+                        </button>
+                      ) : (
+                        <a
+                          href={
+                            i === 0
+                              ? downloadUrl(file.id)
+                              : versionDownloadUrl(file.id, v.id)
+                          }
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-drift-600"
+                          title={
+                            i === 0
+                              ? "Download current version"
+                              : `Download v${v.versionNumber}`
+                          }
+                        >
+                          <Download size={15} />
+                        </a>
+                      )}
+                      {i !== 0 && !encrypted && (
                         <button
                           disabled={restoring === v.id}
                           onClick={() => restore(v)}
