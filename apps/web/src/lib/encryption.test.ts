@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decryptEncryptedMetadata,
   decryptEncryptedPayload,
+  downloadDecryptedFile,
   downloadOwnedFile,
   encryptForUpload,
   MAX_BROWSER_ENCRYPTION_BYTES,
@@ -25,6 +26,8 @@ function installMemoryKeyStore() {
         objectStore: () => {
           put: (value: unknown, key: IDBValidKey) => void;
           get: (key: IDBValidKey) => IDBRequest;
+          getAllKeys: () => IDBRequest;
+          getAll: () => IDBRequest;
         };
       } = {
         error: null,
@@ -37,6 +40,22 @@ function installMemoryKeyStore() {
             const request = { result: undefined } as unknown as IDBRequest;
             queueMicrotask(() => {
               Object.assign(request, { result: keys.get(key) });
+              request.onsuccess?.(new Event("success"));
+            });
+            return request;
+          },
+          getAllKeys: () => {
+            const request = { result: undefined } as unknown as IDBRequest;
+            queueMicrotask(() => {
+              Object.assign(request, { result: Array.from(keys.keys()) });
+              request.onsuccess?.(new Event("success"));
+            });
+            return request;
+          },
+          getAll: () => {
+            const request = { result: undefined } as unknown as IDBRequest;
+            queueMicrotask(() => {
+              Object.assign(request, { result: Array.from(keys.values()) });
               request.onsuccess?.(new Event("success"));
             });
             return request;
@@ -118,7 +137,10 @@ describe("client-side encryption", () => {
       type: "text/plain",
     });
     const encrypted = await encryptForUpload(source);
-    await saveEncryptionKey("file-1", encrypted.key);
+    await saveEncryptionKey("file-1", encrypted.key, {
+      nonce: encrypted.nonce,
+      encryptedMetadata: encrypted.encryptedMetadata,
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -146,8 +168,6 @@ describe("client-side encryption", () => {
         id: "file-1",
         filename: "Encrypted file",
         encryptionMode: "aes-gcm",
-        encryptionNonce: encrypted.nonce,
-        encryptedMetadata: encrypted.encryptedMetadata,
       },
       "/api/files/file-1/download",
     );
@@ -166,5 +186,23 @@ describe("client-side encryption", () => {
     });
     expect(savedText).toBe("download me");
     expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("explains why a legacy ciphertext upload without a nonce is unrecoverable", async () => {
+    installMemoryKeyStore();
+    const encrypted = await encryptForUpload(
+      new File(["legacy"], "legacy.txt"),
+    );
+    await saveEncryptionKey("legacy-file", encrypted.key);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      downloadDecryptedFile(
+        { id: "legacy-file" },
+        "/api/files/legacy-file/download",
+      ),
+    ).rejects.toThrow("production backend was not upgraded");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

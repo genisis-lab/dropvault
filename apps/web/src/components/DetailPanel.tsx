@@ -20,7 +20,10 @@ import {
 import type { DriftFile } from "../lib/api";
 import { downloadUrl, inlineUrl, shareUrlForFile } from "../lib/api";
 import { formatBytes, timeLeft } from "../lib/format";
-import { downloadDecryptedFile } from "../lib/encryption";
+import {
+  downloadDecryptedFile,
+  isEndToEndEncrypted,
+} from "../lib/encryption";
 import { copyTextFrom } from "../lib/clipboard";
 import { useToast } from "./Toast";
 
@@ -119,8 +122,11 @@ function DetailBody({
   const { error } = useToast();
   const { Icon, tint } = kindOf(file.contentType);
   const tone = TINT[tint];
-  const isImage = (file.contentType || "").startsWith("image/");
-  const canPreview = isImage || (file.contentType || "").includes("pdf");
+  const encrypted = isEndToEndEncrypted(file);
+  const isImage =
+    !encrypted && (file.contentType || "").startsWith("image/");
+  const canPreview =
+    !encrypted && (isImage || (file.contentType || "").includes("pdf"));
   const left = timeLeft(file.expiresAt);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);

@@ -235,6 +235,17 @@ function safeFile(row: any) {
   };
 }
 
+files.get("/capabilities", async (c) => {
+  try {
+    await c.env.DB.prepare(
+      "SELECT encryption_mode, encryption_nonce, encrypted_metadata FROM files LIMIT 0",
+    ).run();
+    return c.json({ e2eEncryption: true });
+  } catch {
+    return c.json({ e2eEncryption: false });
+  }
+});
+
 files.post("/presign", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json<{
