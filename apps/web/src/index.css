@@ -622,7 +622,7 @@ html.neubrutalism [data-ui="storage-card"] {
 html.neubrutalism [data-ui="upload-target"] {
   display: grid !important;
   grid-template-columns: 4.5rem minmax(18rem, 1fr) minmax(16rem, auto) auto;
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto auto;
   justify-content: stretch;
   gap: 0.5rem 1.25rem;
   border: 2px dashed #111 !important;
@@ -632,36 +632,45 @@ html.neubrutalism [data-ui="upload-target"] {
   padding: 1.25rem !important;
   text-align: left;
 }
-html.neubrutalism [data-ui="upload-target"] > div:first-child {
+html.neubrutalism [data-ui="upload-icon"] {
   grid-column: 1;
-  grid-row: 1 / 3;
+  grid-row: 1 / 5;
   border: 2px solid #111;
   border-radius: 0 !important;
   box-shadow: 5px 5px 0 #111 !important;
 }
-html.neubrutalism [data-ui="upload-target"] > div:nth-of-type(2) {
+html.neubrutalism [data-ui="upload-copy"] {
   grid-column: 2;
   grid-row: 1;
   align-self: end;
 }
-html.neubrutalism [data-ui="upload-target"] > label {
+html.neubrutalism [data-ui="upload-encryption"] {
   grid-column: 2;
   grid-row: 2;
   justify-self: start;
 }
-html.neubrutalism [data-ui="upload-target"] > div:nth-of-type(3) {
+html.neubrutalism [data-ui="upload-lifetime"],
+html.neubrutalism [data-ui="upload-lifetime-help"] {
   grid-column: 3;
   grid-row: 1 / 3;
   align-self: center;
   justify-content: flex-start;
 }
-html.neubrutalism [data-ui="upload-target"] > button {
-  grid-column: 4;
-  grid-row: 1 / 3;
-  align-self: center;
+html.neubrutalism [data-ui="upload-encryption-help"] {
+  grid-column: 2 / 4;
+  grid-row: 3;
+  justify-self: start;
+  text-align: left;
 }
-html.neubrutalism [data-ui="upload-target"] > p {
-  grid-column: 2 / -1;
+html.neubrutalism [data-ui="upload-schedule"] {
+  grid-column: 2 / 4;
+  grid-row: 4;
+  justify-content: flex-start;
+}
+html.neubrutalism [data-ui="upload-folder"] {
+  grid-column: 4;
+  grid-row: 1 / 5;
+  align-self: center;
 }
 html.neubrutalism [data-ui="upload-target"] label,
 html.neubrutalism [data-ui="upload-target"] button,
