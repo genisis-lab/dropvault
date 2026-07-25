@@ -17,6 +17,7 @@ import {
   reserveUpload,
 } from "../lib/quota";
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
+import { chunkValues } from "../lib/batch";
 import { scanFile } from "../lib/scanner";
 import { requireAuth } from "../middleware/auth";
 import { adminRole } from "../middleware/admin";
@@ -1636,57 +1637,69 @@ files.post("/bulk", async (c) => {
     if (!folder) return c.json({ error: "folder not found" }, 404);
     targetFolderId = body.folderId;
   }
-  // Restrict to files this user actually owns in a single query, then apply the
-  // mutation with one batched query so the request scales no matter how many
-  // files are selected (a per-item loop blew past the Worker subrequest limit).
-  const owned = await db
-    .select()
-    .from(schema.files)
-    .where(and(eq(schema.files.ownerId, userId), inArray(schema.files.id, ids)))
-    .all()
-    .catch(() => []);
+  // D1 limits the variables available to one prepared statement. Keep each
+  // ownership lookup and mutation bounded while still avoiding per-file
+  // queries/subrequests.
+  const owned: schema.FileRow[] = [];
+  for (const idBatch of chunkValues(ids)) {
+    owned.push(
+      ...(await db
+        .select()
+        .from(schema.files)
+        .where(
+          and(
+            eq(schema.files.ownerId, userId),
+            inArray(schema.files.id, idBatch),
+          ),
+        )
+        .all()),
+    );
+  }
   const ownedIds = owned.map((r) => r.id);
   if (ownedIds.length === 0) return c.json({ ok: true, count: 0 });
-  const scope = and(
-    eq(schema.files.ownerId, userId),
-    inArray(schema.files.id, ownedIds),
-  );
-  if (action === "trash") {
-    await db
-      .update(schema.files)
-      .set({
-        deletedAt: nowSeconds(),
-        shareToken: null,
-        sharePassword: null,
-        shareDownloadLimit: null,
-        shareDownloadCount: 0,
-        shareExpiresAt: null,
-      })
-      .where(scope)
-      .run();
-  } else if (action === "restore") {
-    await db.update(schema.files).set({ deletedAt: null }).where(scope).run();
-  } else if (action === "permanentDelete") {
-    await deleteFileObjects(c.env.FILES, db, owned).catch(() => {});
-    await db.delete(schema.files).where(scope).run();
-  } else if (action === "favorite" || action === "unfavorite") {
-    await db
-      .update(schema.files)
-      .set({ favorite: action === "favorite" })
-      .where(scope)
-      .run();
-  } else if (action === "move") {
-    await db
-      .update(schema.files)
-      .set({ folderId: targetFolderId })
-      .where(scope)
-      .run();
-  } else if (action === "tags") {
-    await db
-      .update(schema.files)
-      .set({ tags: serializeTags(body.tags) })
-      .where(scope)
-      .run();
+  if (action === "permanentDelete")
+    await deleteFileObjects(c.env.FILES, db, owned);
+  for (const idBatch of chunkValues(ownedIds)) {
+    const scope = and(
+      eq(schema.files.ownerId, userId),
+      inArray(schema.files.id, idBatch),
+    );
+    if (action === "trash") {
+      await db
+        .update(schema.files)
+        .set({
+          deletedAt: nowSeconds(),
+          shareToken: null,
+          sharePassword: null,
+          shareDownloadLimit: null,
+          shareDownloadCount: 0,
+          shareExpiresAt: null,
+        })
+        .where(scope)
+        .run();
+    } else if (action === "restore") {
+      await db.update(schema.files).set({ deletedAt: null }).where(scope).run();
+    } else if (action === "permanentDelete") {
+      await db.delete(schema.files).where(scope).run();
+    } else if (action === "favorite" || action === "unfavorite") {
+      await db
+        .update(schema.files)
+        .set({ favorite: action === "favorite" })
+        .where(scope)
+        .run();
+    } else if (action === "move") {
+      await db
+        .update(schema.files)
+        .set({ folderId: targetFolderId })
+        .where(scope)
+        .run();
+    } else if (action === "tags") {
+      await db
+        .update(schema.files)
+        .set({ tags: serializeTags(body.tags) })
+        .where(scope)
+        .run();
+    }
   }
   const count = ownedIds.length;
   await logActivity(

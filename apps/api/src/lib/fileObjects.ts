@@ -1,5 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "../db";
+import { chunkValues } from "./batch";
 
 export async function deleteFileObjects(
   bucket: R2Bucket,
@@ -7,13 +8,16 @@ export async function deleteFileObjects(
   files: Array<{ id: string; r2Key: string }>,
 ): Promise<void> {
   if (!files.length) return;
-  const ids = files.map((file) => file.id);
-  const versions = await db
-    .select({ r2Key: schema.fileVersions.r2Key })
-    .from(schema.fileVersions)
-    .where(inArray(schema.fileVersions.fileId, ids))
-    .all()
-    .catch(() => []);
+  const versions: Array<{ r2Key: string }> = [];
+  for (const ids of chunkValues(files.map((file) => file.id))) {
+    versions.push(
+      ...(await db
+        .select({ r2Key: schema.fileVersions.r2Key })
+        .from(schema.fileVersions)
+        .where(inArray(schema.fileVersions.fileId, ids))
+        .all()),
+    );
+  }
   const keys = Array.from(
     new Set([
       ...files.flatMap((file) => [file.r2Key, `${file.r2Key}/thumb`]),
