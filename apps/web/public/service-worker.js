@@ -1,4 +1,4 @@
-const CACHE = "dropvault-shell-v3";
+const CACHE = "dropvault-shell-v4";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -35,20 +35,31 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/"))
     return;
+  // Hashed build assets are immutable and already cached by the browser/CDN.
+  // Do not put them in Cache Storage: during a deployment edge propagation can
+  // briefly return the SPA HTML fallback for a new asset path, and caching that
+  // response would make the app fail with a JavaScript MIME-type error.
+  if (url.pathname.startsWith("/assets/")) return;
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          event.waitUntil(
-            caches.open(CACHE).then((cache) => cache.put("/", copy)),
-          );
+          if (
+            response.ok &&
+            response.headers.get("content-type")?.includes("text/html")
+          ) {
+            const copy = response.clone();
+            event.waitUntil(
+              caches.open(CACHE).then((cache) => cache.put("/", copy)),
+            );
+          }
           return response;
         })
         .catch(() => caches.match("/")),
     );
     return;
   }
+  if (!SHELL.includes(url.pathname)) return;
   event.respondWith(
     caches.match(request).then(
       (cached) =>
