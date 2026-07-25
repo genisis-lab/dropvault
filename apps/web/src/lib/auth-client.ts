@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/react";
 import { twoFactorClient } from "better-auth/client/plugins";
+import { markTwoFactorPending } from "./two-factor-state";
 
 // /api is same-origin in both dev (Vite proxy) and prod (Pages proxy), so the
 // auth client talks to the current origin. Override with VITE_API_URL if you
@@ -10,7 +11,7 @@ export const authClient = createAuthClient({
     twoFactorClient({
       onTwoFactorRedirect() {
         try {
-          sessionStorage.setItem("dropvault:two-factor-required", "1");
+          markTwoFactorPending(sessionStorage);
           window.dispatchEvent(
             new CustomEvent("dropvault:two-factor-required"),
           );
