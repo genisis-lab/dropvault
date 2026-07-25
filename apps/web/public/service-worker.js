@@ -1,8 +1,9 @@
-const CACHE = "dropvault-shell-v2";
+const CACHE = "dropvault-shell-v3";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
-  "/dropvault-icon.svg",
+  "/favicon.svg",
+  "/apple-touch-icon.png",
   "/theme-bootstrap.js",
 ];
 

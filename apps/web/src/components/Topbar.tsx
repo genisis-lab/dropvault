@@ -8,10 +8,16 @@ import {
   Plus,
   Search,
   ShieldCheck,
+  Sparkles,
   Users,
 } from "lucide-react";
-import { ThemeToggle } from "../lib/theme";
-import { LayoutToggle } from "../lib/layout";
+import {
+  THEME_OPTIONS,
+  ThemeToggle,
+  useTheme,
+  type Theme,
+} from "../lib/theme";
+import { LayoutToggle, useLayout, type Layout } from "../lib/layout";
 import NotificationsBell from "./NotificationsBell";
 
 export type ViewMode = "grid" | "list";
@@ -40,7 +46,28 @@ export default function Topbar({
   onOpenTeams?: () => void;
 }) {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const { layout, setLayout } = useLayout();
+  const {
+    theme,
+    workspaceDefault,
+    followsWorkspaceDefault,
+    setTheme,
+    useWorkspaceDefault,
+  } = useTheme();
   const initial = (userEmail?.[0] ?? "U").toUpperCase();
+  const currentTheme = THEME_OPTIONS.find((option) => option.id === theme);
+  const workspaceTheme = THEME_OPTIONS.find(
+    (option) => option.id === workspaceDefault,
+  );
+  function chooseMobileLayout(next: Layout) {
+    setLayout(next);
+    setMobileActionsOpen(false);
+  }
+  function chooseMobileTheme(value: string) {
+    if (value === "workspace") useWorkspaceDefault();
+    else setTheme(value as Theme);
+    setMobileActionsOpen(false);
+  }
   const viewButton = (mode: ViewMode, label: string) => (
     <button
       onClick={() => setView(mode)}
@@ -112,7 +139,10 @@ export default function Topbar({
                 aria-label="Close actions"
                 onClick={() => setMobileActionsOpen(false)}
               />
-              <div className="absolute right-0 top-11 z-50 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-200/60">
+              <div
+                className="absolute right-0 top-11 z-50 max-h-[calc(100vh-5rem)] w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-200/60"
+                data-ui="mobile-actions"
+              >
                 <div className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   Quick actions
                 </div>
@@ -125,14 +155,76 @@ export default function Topbar({
                     {viewButton("list", "List view")}
                   </div>
                 </div>
-                <div className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    Display
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <LayoutToggle />
-                    <ThemeToggle />
+                <div
+                  className="mb-2 rounded-xl bg-slate-50 px-3 py-2.5"
+                  data-ui="mobile-display-controls"
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Workspace
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => chooseMobileLayout("calm")}
+                      aria-pressed={layout === "calm"}
+                      className={
+                        "min-w-0 rounded-lg border px-2.5 py-2 text-left transition " +
+                        (layout === "calm"
+                          ? "border-drift-300 bg-white text-drift-700"
+                          : "border-slate-200 bg-white text-slate-600")
+                      }
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Sparkles size={14} /> Calm
+                      </span>
+                      <span className="mt-0.5 block whitespace-normal text-[11px] leading-4 text-slate-400">
+                        Spacious home
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => chooseMobileLayout("classic")}
+                      aria-pressed={layout === "classic"}
+                      className={
+                        "min-w-0 rounded-lg border px-2.5 py-2 text-left transition " +
+                        (layout === "classic"
+                          ? "border-drift-300 bg-white text-drift-700"
+                          : "border-slate-200 bg-white text-slate-600")
+                      }
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        <LayoutGrid size={14} /> Classic
+                      </span>
+                      <span className="mt-0.5 block whitespace-normal text-[11px] leading-4 text-slate-400">
+                        Original layout
+                      </span>
+                    </button>
                   </div>
+                  <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Theme
+                    <select
+                      value={
+                        followsWorkspaceDefault ? "workspace" : theme
+                      }
+                      onChange={(event) =>
+                        chooseMobileTheme(event.target.value)
+                      }
+                      aria-label="Mobile theme"
+                      className="mt-1.5 block w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-drift-400"
+                    >
+                      <option value="workspace">Workspace default</option>
+                      {THEME_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="mt-1.5 whitespace-normal break-words text-[11px] leading-4 text-slate-400">
+                    {followsWorkspaceDefault
+                      ? `Workspace default: ${workspaceTheme?.label ?? "Default"}`
+                      : `${currentTheme?.label ?? "Theme"}: ${currentTheme?.description ?? ""}`}
+                  </p>
                 </div>
                 <button
                   onClick={() => {
