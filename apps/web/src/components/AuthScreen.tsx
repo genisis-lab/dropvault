@@ -1,7 +1,18 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { motion } from "framer-motion";
 import { KeyRound, Lock, Mail, User as UserIcon } from "lucide-react";
 import { authClient, signIn, signUp } from "../lib/auth-client";
+import {
+  clearTwoFactorPending,
+  hasFreshTwoFactorPending,
+  markTwoFactorPending,
+} from "../lib/two-factor-state";
 import Logo from "./Logo";
 import Turnstile from "./Turnstile";
 
@@ -47,6 +58,7 @@ export default function AuthScreen() {
   const [code, setCode] = useState("");
   const [trustDevice, setTrustDevice] = useState(true);
   const [useBackup, setUseBackup] = useState(false);
+  const verifyInFlight = useRef(false);
 
   function showTwoFactor() {
     setTwoFactor(true);
@@ -58,8 +70,7 @@ export default function AuthScreen() {
   useEffect(() => {
     const handler = () => showTwoFactor();
     window.addEventListener("dropvault:two-factor-required", handler);
-    if (sessionStorage.getItem("dropvault:two-factor-required") === "1")
-      showTwoFactor();
+    if (hasFreshTwoFactorPending(sessionStorage)) showTwoFactor();
     return () =>
       window.removeEventListener("dropvault:two-factor-required", handler);
   }, []);
@@ -73,13 +84,18 @@ export default function AuthScreen() {
       return;
     }
     setLoading(true);
+    if (mode === "in") {
+      try {
+        clearTwoFactorPending(sessionStorage);
+      } catch {}
+    }
     let promptedFor2FA = false;
     const authOptions: any = {
       onSuccess(context: any) {
         if (needsTwoFactor(context?.data)) {
           promptedFor2FA = true;
           try {
-            sessionStorage.setItem("dropvault:two-factor-required", "1");
+            markTwoFactorPending(sessionStorage);
           } catch {}
           showTwoFactor();
         }
@@ -100,7 +116,7 @@ export default function AuthScreen() {
       if (promptedFor2FA || needsTwoFactor(res)) {
         showTwoFactor();
         try {
-          sessionStorage.setItem("dropvault:two-factor-required", "1");
+          markTwoFactorPending(sessionStorage);
         } catch {}
         return;
       }
@@ -165,6 +181,8 @@ export default function AuthScreen() {
 
   async function verifyTwoFactor(e: FormEvent) {
     e.preventDefault();
+    if (verifyInFlight.current) return;
+    verifyInFlight.current = true;
     setErrorMsg(null);
     setLoading(true);
     try {
@@ -176,11 +194,25 @@ export default function AuthScreen() {
             trustDevice,
           })
         : await api.verifyTotp({ code: code.trim(), trustDevice });
-      if (res?.error)
-        setErrorMsg(authErrorMessage(res, "Invalid verification code"));
-      else {
+      if (res?.error) {
+        const code = String(
+          res.error.code || res.error.status || res.error.message || "",
+        ).toUpperCase();
+        if (code.includes("INVALID_TWO_FACTOR_COOKIE")) {
+          try {
+            clearTwoFactorPending(sessionStorage);
+          } catch {}
+          setTwoFactor(false);
+          setCode("");
+          setErrorMsg(
+            "Your two-factor sign-in expired. Enter your password and try again.",
+          );
+        } else {
+          setErrorMsg(authErrorMessage(res, "Invalid verification code"));
+        }
+      } else {
         try {
-          sessionStorage.removeItem("dropvault:two-factor-required");
+          clearTwoFactorPending(sessionStorage);
         } catch {}
         window.location.reload();
       }
@@ -189,6 +221,7 @@ export default function AuthScreen() {
         err instanceof Error ? err.message : "Invalid verification code",
       );
     } finally {
+      verifyInFlight.current = false;
       setLoading(false);
     }
   }
@@ -270,7 +303,7 @@ export default function AuthScreen() {
                 setCode("");
                 setErrorMsg(null);
                 try {
-                  sessionStorage.removeItem("dropvault:two-factor-required");
+                  clearTwoFactorPending(sessionStorage);
                 } catch {}
               }}
               className="text-slate-500 hover:text-slate-700"
