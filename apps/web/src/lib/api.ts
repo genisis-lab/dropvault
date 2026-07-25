@@ -86,6 +86,11 @@ export type Folder = {
   shareToken: string | null;
   createdAt: number;
   fileCount: number;
+  folderCount?: number;
+  itemCount?: number;
+  totalFileCount?: number;
+  totalFolderCount?: number;
+  totalItemCount?: number;
   parentId?: string | null;
   color?: string | null;
   teamId?: string | null;
@@ -553,7 +558,7 @@ export async function updateFolder(
   );
 }
 export async function deleteFolder(id: string) {
-  return j<{ ok: true }>(
+  return j<{ ok: true; fileCount: number; folderCount: number }>(
     await fetch(`${API}/api/folders/${id}`, {
       method: "DELETE",
       credentials: "include",

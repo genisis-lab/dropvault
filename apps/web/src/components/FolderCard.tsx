@@ -96,7 +96,8 @@ export default function FolderCard({
     }
   }
 
-  const meta = `${folder.fileCount} item${folder.fileCount === 1 ? "" : "s"}`;
+  const itemCount = folder.itemCount ?? folder.fileCount;
+  const meta = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
 
   const menu = (
     <AnimatePresence>
