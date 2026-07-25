@@ -8,6 +8,7 @@ export type Bindings = {
   // vars
   API_URL: string;
   PUBLIC_APP_URL: string;
+  TRUSTED_ORIGINS?: string;
   DEFAULT_EXPIRY_DAYS: string;
   MAX_EXPIRY_DAYS: string;
   // Comma/space-separated list of admin emails (see wrangler.jsonc vars).

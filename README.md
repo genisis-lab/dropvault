@@ -133,7 +133,8 @@ wrangler d1 create dropvault
 Then open `apps/api/wrangler.jsonc` and fill in:
 
 - `database_id` (from the step above)
-- `PUBLIC_APP_URL` (your Pages URL, e.g. `https://dropvault.pages.dev`)
+- `PUBLIC_APP_URL` (your canonical web origin, e.g. `https://drive.example.com`)
+- `TRUSTED_ORIGINS` (comma-separated exact web origins, including any `pages.dev` alias)
 - `ADMIN_EMAILS` (comma-separated list of admin accounts, optional)
 
 ### 3. Apply the database schema
@@ -164,7 +165,7 @@ Set `VITE_TURNSTILE_SITE_KEY` in the web build environment when the Worker Turns
 In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create an OAuth 2.0 Client (type: Web application) and add this **Authorized redirect URI**:
 
 ```
-https://<your-app>.pages.dev/api/auth/callback/google
+https://<your-canonical-domain>/api/auth/callback/google
 ```
 
 (For local dev also add `http://localhost:8787/api/auth/callback/google`.)

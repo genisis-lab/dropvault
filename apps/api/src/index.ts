@@ -19,13 +19,14 @@ import { sweepExpired, reconcileOrphans } from "./lib/sweep";
 import { cleanupMetadata, scheduleExpiryWarnings } from "./lib/retention";
 import { deliverPendingEvents } from "./lib/delivery";
 import { workspaceDefaultTheme } from "./lib/theme";
+import { trustedAppOrigins } from "./lib/origins";
 import type { Bindings, Variables } from "./types";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.use("*", async (c, next) => {
   const handler = cors({
-    origin: c.env.PUBLIC_APP_URL,
+    origin: trustedAppOrigins(c.env),
     credentials: true,
     allowHeaders: [
       "Content-Type",

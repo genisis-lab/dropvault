@@ -1,11 +1,11 @@
 // Cloudflare Pages Function: proxy every /api/* request to the DropVault Worker.
 //
-// The whole app assumes the API is same-origin with the web app
-// (https://drop-vault.pages.dev). better-auth is configured with
-// baseURL = PUBLIC_APP_URL, so its session cookie is first-party to the Pages
-// domain and login works in every browser. Without this proxy, /api/* requests
-// hit the static SPA instead of the Worker and auth requests come back as HTML,
-// which surfaces in the UI as "Authentication failed".
+// The whole app assumes the API is same-origin with the web app, including its
+// custom domain. better-auth is configured with baseURL = PUBLIC_APP_URL, so
+// its session cookie is first-party to the browser's web origin. Without this
+// proxy, /api/* requests hit the static SPA instead of the Worker and auth
+// requests come back as HTML, which surfaces in the UI as
+// "Authentication failed".
 //
 // The Worker URL comes from the API_URL variable on the Pages project, with a
 // fallback to the deployed Worker so it works even if the var is unset.

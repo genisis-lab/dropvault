@@ -6,12 +6,12 @@ Dropvault runs as two Cloudflare services, both built and deployed from this rep
 
 | Part                 | URL                                        | Lives on               | How it deploys                          |
 | -------------------- | ------------------------------------------ | ---------------------- | --------------------------------------- |
-| Web app (`apps/web`) | `https://drop-vault.pages.dev`             | Cloudflare **Pages**   | Pages ↔ GitHub integration              |
+| Web app (`apps/web`) | `https://drive.builtwai.com`                | Cloudflare **Pages**   | Pages ↔ GitHub integration              |
 | API (`apps/api`)     | `https://dropvault-api.neil27.workers.dev` | Cloudflare **Workers** | **Workers Builds** ↔ GitHub integration |
 
 ### Same-origin via the Pages proxy
 
-The browser only ever talks to the **Pages** origin. A Pages Function at `functions/api/[[path]].ts` reverse-proxies every `/api/*` request to the API Worker. This keeps the session cookie **first-party** (`SameSite=Lax`), so login works in every browser — no cross-site cookie issues between `*.pages.dev` and `*.workers.dev`. Accordingly, better-auth's `baseURL` is the **Pages** URL (`PUBLIC_APP_URL`), and the frontend calls `/api` on its own origin (no `VITE_API_URL` needed).
+The browser only ever talks to the web app's **Pages/custom-domain** origin. A Pages Function at `functions/api/[[path]].ts` reverse-proxies every `/api/*` request to the API Worker. This keeps the session cookie **first-party** (`SameSite=Lax`), so login works in every browser — no cross-site cookie issues between the web origin and `*.workers.dev`. Accordingly, better-auth's `baseURL` is the canonical web URL (`PUBLIC_APP_URL`), exact aliases are listed in `TRUSTED_ORIGINS`, and the frontend calls `/api` on its own origin (no `VITE_API_URL` needed).
 
 ---
 
@@ -52,13 +52,14 @@ These values are already committed — just confirm they match your account:
   ],
   "vars": {
     "API_URL": "https://<your-worker>.workers.dev",
-    "PUBLIC_APP_URL": "https://<your-app>.pages.dev",
+    "PUBLIC_APP_URL": "https://drive.builtwai.com",
+    "TRUSTED_ORIGINS": "https://drive.builtwai.com,https://drop-vault.pages.dev",
     "ADMIN_EMAILS": "admin@example.com",
   },
 }
 ```
 
-> If either URL changes (e.g. you add a custom domain), update both the proxy target in `functions/api/[[path]].ts` and these vars, then redeploy.
+> `PUBLIC_APP_URL` is the canonical origin used for auth callbacks and generated links. Keep only exact `http://` or `https://` origins in `TRUSTED_ORIGINS`; do not use wildcards. The proxy target changes only when the API Worker URL changes.
 
 ---
 
@@ -118,10 +119,10 @@ After adding secrets, redeploy once (push any commit, or **Deployments → Retry
 
 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → **Create Credentials** → **OAuth client ID** → **Web application**.
 
-Because the browser talks to the Pages origin (and the proxy forwards to the Worker), the redirect URI uses the **Pages** URL:
+Because the browser talks to the custom domain (and the proxy forwards to the Worker), the redirect URI uses the canonical custom-domain URL:
 
 ```
-https://drop-vault.pages.dev/api/auth/callback/google
+https://drive.builtwai.com/api/auth/callback/google
 ```
 
 (For local dev also add `http://localhost:5173/api/auth/callback/google`.)
@@ -158,7 +159,8 @@ R2 → **dropvault-files** → **Settings** → **Object lifecycle rules** → d
 
 ## Troubleshooting
 
-- **Sign in succeeds, then bounces back to the sign-in page** → the session cookie isn't first-party. Confirm the Pages proxy deployed (`functions/api/[[path]].ts`), that `better-auth` `baseURL` is the Pages URL, and that the Google redirect URI is the Pages URL.
+- **Invalid origin** → add the exact browser origin to `TRUSTED_ORIGINS`, keep the preferred origin in `PUBLIC_APP_URL`, and redeploy the API Worker.
+- **Sign in succeeds, then bounces back to the sign-in page** → the session cookie isn't first-party. Confirm the Pages proxy deployed (`functions/api/[[path]].ts`), that `better-auth` `baseURL` is the canonical web URL, and that the Google redirect URI uses the same canonical origin.
 - **Uploads remain quarantined** → confirm the optional `SCANNER` service binding exists and that its response reports a clean verdict.
 - **API calls return HTML / JSON parse errors** → the Pages proxy isn't catching `/api/*`; confirm `functions/api/[[path]].ts` exists at the repo root and Pages redeployed.
 - **`command not found: wrangler` locally** → use the repository-pinned CLI through `pnpm --filter @dropvault/api exec wrangler ...`.
