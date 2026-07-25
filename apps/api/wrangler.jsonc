@@ -23,7 +23,8 @@
   },
   "vars": {
     "API_URL": "https://dropvault-api.neil27.workers.dev",
-    "PUBLIC_APP_URL": "https://drop-vault.pages.dev",
+    "PUBLIC_APP_URL": "https://drive.builtwai.com",
+    "TRUSTED_ORIGINS": "https://drive.builtwai.com,https://drop-vault.pages.dev",
     "DEFAULT_EXPIRY_DAYS": "7",
     "MAX_EXPIRY_DAYS": "30",
     "ADMIN_EMAILS": "ot.robinson2@gmail.com",
