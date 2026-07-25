@@ -490,6 +490,7 @@ export default function UploadZone({
         <motion.div
           animate={dragging ? iconUp : iconDown}
           className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-drift-500 via-glow-500 to-blush-500 text-white shadow-lg shadow-glow-500/25 sm:h-16 sm:w-16"
+          data-ui="upload-icon"
         >
           {effectiveKeepForever ? (
             <Infinity size={28} />
@@ -497,7 +498,7 @@ export default function UploadZone({
             <UploadCloud size={28} />
           )}
         </motion.div>
-        <div>
+        <div data-ui="upload-copy">
           <p className="font-semibold text-slate-700">
             {folderName
               ? `Drop files or folders into “${folderName}”`
@@ -530,7 +531,10 @@ export default function UploadZone({
           </div>
         )}
         {!canKeepForever && (
-          <p className="max-w-xl text-center text-xs leading-5 text-slate-500">
+          <p
+            className="max-w-xl text-center text-xs leading-5 text-slate-500"
+            data-ui="upload-lifetime-help"
+          >
             These files will expire in {expiryDays} day
             {expiryDays === 1 ? "" : "s"}. Change the upload lifetime before
             choosing files, or adjust it later from file details.
@@ -539,6 +543,7 @@ export default function UploadZone({
         <label
           onClick={(e) => e.stopPropagation()}
           className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"
+          data-ui="upload-encryption"
         >
           <input
             type="checkbox"
@@ -559,6 +564,7 @@ export default function UploadZone({
           <p
             onClick={(e) => e.stopPropagation()}
             className="max-w-xl text-center text-xs leading-5 text-slate-500"
+            data-ui="upload-encryption-help"
           >
             Encryption happens in this browser before upload. Downloads in this
             browser decrypt automatically, and encrypted share links include the
@@ -568,7 +574,8 @@ export default function UploadZone({
         )}
         <div
           onClick={(e) => e.stopPropagation()}
-          className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-600"
+          className="flex min-w-0 flex-wrap items-center justify-center gap-2 text-xs text-slate-600"
+          data-ui="upload-schedule"
         >
           <label className="inline-flex items-center gap-2">
             <input
@@ -578,13 +585,13 @@ export default function UploadZone({
             />{" "}
             Expire after first download
           </label>
-          <label className="inline-flex items-center gap-1.5">
+          <label className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
             Release at{" "}
             <input
               type="datetime-local"
               value={releaseAtInput}
               onChange={(e) => setReleaseAtInput(e.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1 outline-none focus:border-drift-400"
+              className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2 py-1 outline-none focus:border-drift-400"
             />
           </label>
         </div>
@@ -595,6 +602,7 @@ export default function UploadZone({
             folderInputRef.current?.click();
           }}
           className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
+          data-ui="upload-folder"
         >
           <FolderUp size={14} /> Upload a folder
         </button>

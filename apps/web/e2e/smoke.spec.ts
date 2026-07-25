@@ -17,7 +17,7 @@ test("mounts something into the root element", async ({ page }) => {
   expect(childCount).toBeGreaterThan(0)
 })
 
-test("mobile workspace and theme controls apply without clipped wording", async ({
+test("responsive controls and upload scheduling fit their layouts", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -140,6 +140,29 @@ test("mobile workspace and theme controls apply without clipped wording", async 
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true)
+
+  await page.getByRole("button", { name: "More actions" }).click()
+  await page.getByLabel("Mobile theme").selectOption("neubrutalism")
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const uploadTarget = page.locator('[data-ui="upload-target"]')
+  const uploadSchedule = page.locator('[data-ui="upload-schedule"]')
+  await expect(uploadSchedule.getByText("Release at")).toBeVisible()
+  await expect(uploadSchedule.locator('input[type="datetime-local"]')).toBeVisible()
+  await expect
+    .poll(() =>
+      Promise.all([
+        uploadTarget.boundingBox(),
+        uploadSchedule.boundingBox(),
+      ]).then(([target, schedule]) =>
+        Boolean(
+          target &&
+            schedule &&
+            schedule.x >= target.x &&
+            schedule.x + schedule.width <= target.x + target.width,
+        ),
+      ),
+    )
+    .toBe(true)
 
   const favicon = page.locator('link[rel="icon"]')
   await expect(favicon).toHaveAttribute("href", "/favicon.svg")
