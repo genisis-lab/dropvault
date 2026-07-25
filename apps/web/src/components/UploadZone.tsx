@@ -192,13 +192,13 @@ export default function UploadZone({
         if (!alive) return;
         const allowed = !!status.canKeepFilesForever;
         setCanKeepForever(allowed);
-        if (!allowed) setKeepForeverChoice(false);
+        setKeepForeverChoice(allowed || keepForever);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, []);
+  }, [keepForever]);
 
   useEffect(() => {
     let alive = true;
@@ -508,17 +508,33 @@ export default function UploadZone({
           </p>
         </div>
         {canKeepForever && (
-          <label
+          <div
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-drift-200 bg-drift-50 px-3 py-1.5 text-xs font-medium text-drift-700"
+            className="max-w-xl rounded-xl border border-drift-200 bg-drift-50 px-3 py-2 text-left text-xs text-drift-800"
+            data-ui="upload-lifetime"
           >
-            <input
-              type="checkbox"
-              checked={keepForeverChoice}
-              onChange={(e) => setKeepForeverChoice(e.target.checked)}
-            />
-            Keep these uploads forever
-          </label>
+            <label className="flex cursor-pointer items-start gap-2 font-semibold">
+              <input
+                type="checkbox"
+                checked={keepForeverChoice}
+                onChange={(e) => setKeepForeverChoice(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>Keep these uploads forever</span>
+            </label>
+            <p className="mt-1 leading-5 text-drift-700">
+              This is enabled by default with your permission. Turn it off to
+              use the {expiryDays}-day expiration. You can change expiration
+              later from the file details.
+            </p>
+          </div>
+        )}
+        {!canKeepForever && (
+          <p className="max-w-xl text-center text-xs leading-5 text-slate-500">
+            These files will expire in {expiryDays} day
+            {expiryDays === 1 ? "" : "s"}. Change the upload lifetime before
+            choosing files, or adjust it later from file details.
+          </p>
         )}
         <label
           onClick={(e) => e.stopPropagation()}

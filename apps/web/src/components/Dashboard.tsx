@@ -786,10 +786,21 @@ export default function Dashboard({
   }
   function deleteFolderConfirm(id: string) {
     const f = folders.find((x) => x.id === id);
-    const msg =
-      f && f.fileCount > 0
-        ? `Delete “${f.name}”? Its ${f.fileCount} file${f.fileCount === 1 ? "" : "s"} will move back to the parent folder (not deleted).`
-        : "Delete this folder?";
+    const fileCount = f?.totalFileCount ?? f?.fileCount ?? 0;
+    const childCount = f?.totalFolderCount ?? 0;
+    const contents = [
+      fileCount
+        ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
+        : "",
+      childCount
+        ? `${childCount} subfolder${childCount === 1 ? "" : "s"}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" and ");
+    const msg = f
+      ? `Delete “${f.name}”${contents ? ` and its ${contents}` : ""}? Contained files will move to Trash and the folder tree will be removed.`
+      : "Delete this folder and move its contained files to Trash?";
     ask({
       title: "Delete folder",
       message: msg,
@@ -871,7 +882,7 @@ export default function Dashboard({
     dialog && dialog.mode !== "create" ? dialog.current : "";
   const dialogConfirm = dialog?.mode === "create" ? "Create" : "Rename";
   return (
-    <div data-ui="dashboard-shell">
+    <div data-ui="dashboard-shell" data-layout={layout}>
       <Sidebar
         onNew={() => uploadInputRef.current?.click()}
         onNewFolder={() => setDialog({ mode: "create" })}
@@ -971,6 +982,7 @@ export default function Dashboard({
               <select
                 value={expiryDays}
                 onChange={(e) => setExpiryDays(Number(e.target.value))}
+                aria-label="Upload expiration"
                 className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
               >
                 {EXPIRY_OPTIONS.map((d) => (
@@ -1030,6 +1042,7 @@ export default function Dashboard({
           {filter !== "trash" && (
             <UploadZone
               expiryDays={expiryDays}
+              keepForever={canKeepForever}
               onUploaded={invalidate}
               inputRef={uploadInputRef}
               folderId={currentFolderId}

@@ -313,8 +313,13 @@ files.post("/presign", async (c) => {
     role === "owner" || role === "admin"
       ? null
       : (account?.quotaBytes ?? policy.defaultQuotaBytes);
-  const wantsForever = !!body.keepForever;
-  if (wantsForever && !(await canKeepForever(c, db, userId, account?.email)))
+  const foreverAllowed =
+    roleGetsForever(role) || !!account?.keepFilesForever;
+  const wantsForever =
+    body.keepForever === undefined
+      ? foreverAllowed
+      : body.keepForever === true;
+  if (wantsForever && !foreverAllowed)
     return c.json({ error: "keep-forever permission required" }, 403);
   const encryptionMode = body.encryptionMode === "aes-gcm" ? "aes-gcm" : "none";
   if (
