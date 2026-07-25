@@ -11,7 +11,7 @@ const queryClient = new QueryClient();
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () =>
-    navigator.serviceWorker.register("/service-worker.js").catch(() => {}),
+    navigator.serviceWorker.register("/service-worker.js?v=4").catch(() => {}),
   );
 }
 
