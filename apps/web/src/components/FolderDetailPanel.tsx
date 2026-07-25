@@ -113,7 +113,8 @@ function Body({
               {folder.name}
             </p>
             <p className="text-xs text-slate-400">
-              {folder.fileCount} item{folder.fileCount === 1 ? "" : "s"}
+              {folder.itemCount ?? folder.fileCount} item
+              {(folder.itemCount ?? folder.fileCount) === 1 ? "" : "s"}
             </p>
           </div>
         </div>

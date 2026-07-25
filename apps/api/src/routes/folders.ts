@@ -1,7 +1,12 @@
 import { Hono } from "hono";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "../db";
+import { chunkValues } from "../lib/batch";
 import { DAY_SECONDS, nowSeconds } from "../lib/expiry";
+import {
+  descendantFolderIds,
+  summarizeFolderContents,
+} from "../lib/folderTree";
 import { hashSecret } from "../lib/hash";
 import { makeZip, zipResponse } from "../lib/zip";
 import { requireAuth } from "../middleware/auth";
@@ -56,17 +61,7 @@ async function childFolderIds(
     .from(schema.folders)
     .where(eq(schema.folders.ownerId, ownerId))
     .all();
-  const out = new Set<string>([rootId]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const f of all)
-      if (f.parentId && out.has(f.parentId) && !out.has(f.id)) {
-        out.add(f.id);
-        changed = true;
-      }
-  }
-  return Array.from(out);
+  return descendantFolderIds(all, rootId);
 }
 
 folders.get("/", async (c) => {
@@ -91,19 +86,28 @@ folders.get("/", async (c) => {
       ),
     )
     .all();
-  const counts = new Map<string, number>();
-  for (const f of live)
-    if (f.folderId) counts.set(f.folderId, (counts.get(f.folderId) ?? 0) + 1);
+  const counts = summarizeFolderContents(
+    rows,
+    live.map((file) => file.folderId),
+  );
   const filtered =
     parentId === undefined
       ? rows
       : rows.filter((r) => (r.parentId ?? "") === (parentId || ""));
   return c.json({
-    folders: filtered.map(({ sharePassword, ...r }) => ({
-      ...r,
-      fileCount: counts.get(r.id) ?? 0,
-      shareHasPassword: !!sharePassword,
-    })),
+    folders: filtered.map(({ sharePassword, ...r }) => {
+      const summary = counts.get(r.id);
+      return {
+        ...r,
+        fileCount: summary?.fileCount ?? 0,
+        folderCount: summary?.folderCount ?? 0,
+        itemCount: summary?.itemCount ?? 0,
+        totalFileCount: summary?.totalFileCount ?? 0,
+        totalFolderCount: summary?.totalFolderCount ?? 0,
+        totalItemCount: summary?.totalItemCount ?? 0,
+        shareHasPassword: !!sharePassword,
+      };
+    }),
   });
 });
 folders.post("/", async (c) => {
@@ -429,20 +433,69 @@ folders.delete("/:id", async (c) => {
     .where(and(eq(schema.folders.id, id), eq(schema.folders.ownerId, userId)))
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
-  await db
-    .update(schema.files)
-    .set({ folderId: row.parentId ?? null })
-    .where(and(eq(schema.files.folderId, id), eq(schema.files.ownerId, userId)))
-    .run();
-  await db
-    .update(schema.folders)
-    .set({ parentId: row.parentId ?? null })
-    .where(
-      and(eq(schema.folders.parentId, id), eq(schema.folders.ownerId, userId)),
-    )
-    .run()
-    .catch(() => {});
-  await db.delete(schema.folders).where(eq(schema.folders.id, id)).run();
-  return c.json({ ok: true });
+  const subtreeIds = await childFolderIds(db, userId, id);
+  const deletedAt = nowSeconds();
+  let fileCount = 0;
+  for (const idBatch of chunkValues(subtreeIds)) {
+    const affected = await db
+      .select({ id: schema.files.id })
+      .from(schema.files)
+      .where(
+        and(
+          eq(schema.files.ownerId, userId),
+          inArray(schema.files.folderId, idBatch),
+          isNull(schema.files.deletedAt),
+        ),
+      )
+      .all();
+    fileCount += affected.length;
+    await db
+      .update(schema.files)
+      .set({
+        deletedAt,
+        folderId: null,
+        shareToken: null,
+        sharePassword: null,
+        shareDownloadLimit: null,
+        shareDownloadCount: 0,
+        shareExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(schema.files.ownerId, userId),
+          inArray(schema.files.folderId, idBatch),
+          isNull(schema.files.deletedAt),
+        ),
+      )
+      .run();
+    // Files that were already in Trash should not keep a reference to a folder
+    // that no longer exists; restoring them will place them in My Drive.
+    await db
+      .update(schema.files)
+      .set({ folderId: null })
+      .where(
+        and(
+          eq(schema.files.ownerId, userId),
+          inArray(schema.files.folderId, idBatch),
+        ),
+      )
+      .run();
+  }
+  for (const idBatch of chunkValues(subtreeIds)) {
+    await db
+      .delete(schema.folders)
+      .where(
+        and(
+          eq(schema.folders.ownerId, userId),
+          inArray(schema.folders.id, idBatch),
+        ),
+      )
+      .run();
+  }
+  return c.json({
+    ok: true,
+    fileCount,
+    folderCount: subtreeIds.length,
+  });
 });
 export default folders;
