@@ -6,6 +6,10 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import { adminEmailSet } from "./middleware/admin";
 import { deliverPendingEvents, enqueueEvent } from "./lib/delivery";
+import {
+  canonicalAppOrigin,
+  trustedAppOrigins,
+} from "./lib/origins";
 import type { Bindings } from "./types";
 
 function nowSec() {
@@ -52,6 +56,7 @@ async function notifySignup(
 // better-auth must be created per request because D1 is only bound at request time.
 export function createAuth(env: Bindings) {
   const db = getDb(env.DB);
+  const canonicalOrigin = canonicalAppOrigin(env);
   const queueAuthMessage = (
     type: string,
     user: { id?: string; email: string; name?: string },
@@ -92,15 +97,15 @@ export function createAuth(env: Bindings) {
     // so from the browser everything is same-origin on PUBLIC_APP_URL. Using it
     // as baseURL keeps the Google OAuth callback and the session cookie
     // first-party to the web app domain, which works in every browser.
-    baseURL: env.PUBLIC_APP_URL,
+    baseURL: canonicalOrigin,
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: [env.PUBLIC_APP_URL],
+    trustedOrigins: trustedAppOrigins(env),
     advanced: {
       // Trust only Cloudflare's canonical single-value client header for auth
       // rate limiting/session telemetry. X-Forwarded-For is client-spoofable
       // when the Worker origin is called directly.
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
-      useSecureCookies: new URL(env.PUBLIC_APP_URL).protocol === "https:",
+      useSecureCookies: new URL(canonicalOrigin).protocol === "https:",
     },
     database: drizzleAdapter(db, {
       provider: "sqlite",
