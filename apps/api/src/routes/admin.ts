@@ -24,6 +24,7 @@ import {
 import { isSafeWebhookUrl } from "../lib/url";
 import { normalizeTheme } from "../lib/theme";
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
+import { applyRequestedSettingChanges } from "../lib/settings";
 import type { Bindings, Variables } from "../types";
 
 type SettingsKey =
@@ -1882,11 +1883,13 @@ admin.post("/settings", async (c) => {
       409,
     );
   const before = await settingsMap(db);
-  const after = { ...before };
   const requested = body.settings ?? {};
-  for (const key of settingsKeys)
-    if (key in requested)
-      after[key] = normalizeSettingValue(key, requested[key]);
+  const after = applyRequestedSettingChanges(
+    before,
+    requested,
+    settingsKeys,
+    normalizeSettingValue,
+  );
   const changes = policyChanges(before, after);
   if (
     changes.some((change) => SECURITY_SETTING_KEYS.has(change.key)) &&
