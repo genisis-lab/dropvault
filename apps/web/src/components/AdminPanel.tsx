@@ -79,6 +79,10 @@ import { setUserKeepForever } from "../lib/keepForever";
 import { useToast } from "./Toast";
 import { announceWorkspaceDefaultTheme } from "../lib/theme";
 import { isTheme, THEME_OPTIONS, type Theme } from "../lib/theme-config";
+import {
+  changedPolicySettings,
+  policySettingChanges,
+} from "../lib/policy-settings";
 
 type Tab =
   | "overview"
@@ -656,15 +660,7 @@ export default function AdminPanel({
   const policyReviewChanges = useMemo(() => {
     if (!policyReview) return [];
     const before = settingsQ.data?.settings ?? {};
-    return Array.from(
-      new Set([...Object.keys(before), ...Object.keys(policyReview.settings)]),
-    )
-      .filter((key) => before[key] !== policyReview.settings[key])
-      .map((key) => ({
-        key,
-        before: before[key] ?? "",
-        after: policyReview.settings[key] ?? "",
-      }));
+    return policySettingChanges(before, policyReview.settings);
   }, [policyReview, settingsQ.data?.settings]);
   const selIds = Array.from(selected);
   const userSelIds = Array.from(userSelected);
@@ -2298,8 +2294,12 @@ export default function AdminPanel({
                     ? ownerConfirmation("APPLY POLICY")
                     : undefined;
                   if (needsConfirmation && !confirmation) return;
+                  const changedSettings = changedPolicySettings(
+                    settingsQ.data?.settings ?? {},
+                    policyReview.settings,
+                  );
                   saveSettingsMut.mutate({
-                    settings: policyReview.settings,
+                    settings: changedSettings,
                     confirmation: confirmation ?? undefined,
                   });
                 }}
