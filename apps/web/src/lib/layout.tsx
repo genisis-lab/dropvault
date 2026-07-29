@@ -10,7 +10,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Check, LayoutGrid, Sparkles, type LucideIcon } from "lucide-react";
 
 // The layout (or "experience") is orthogonal to the color theme in theme.tsx.
-// Themes control colors (light/dark/sunset); the layout controls the overall
+// Themes control visual language (including Pressroom); the layout controls the overall
 // shape of the dashboard. "calm" is the Calm Workspace (Concept A) and is the
 // default; "classic" preserves the original Dropvault layout so users can
 // switch back to it.

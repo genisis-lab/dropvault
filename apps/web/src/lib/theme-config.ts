@@ -1,5 +1,6 @@
 export type Theme =
   | "neubrutalism"
+  | "pressroom"
   | "quiet"
   | "light"
   | "dark"
@@ -16,6 +17,11 @@ export const THEME_OPTIONS: Array<{
     id: "neubrutalism",
     label: "Neubrutalism",
     description: "Bold borders, hard shadows, cobalt accents",
+  },
+  {
+    id: "pressroom",
+    label: "Pressroom",
+    description: "Warm paper, editorial type, coral accents",
   },
   {
     id: "quiet",

@@ -3,7 +3,14 @@
 // Content Security Policy.
 (function () {
   try {
-    var allowed = ["neubrutalism", "quiet", "light", "dark", "sunset"];
+    var allowed = [
+      "neubrutalism",
+      "pressroom",
+      "quiet",
+      "light",
+      "dark",
+      "sunset",
+    ];
     var theme =
       localStorage.getItem("dropvault-theme") ||
       localStorage.getItem("dropvault-workspace-theme") ||

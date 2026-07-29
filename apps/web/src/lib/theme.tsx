@@ -13,6 +13,7 @@ import {
   Check,
   Cloud,
   Moon,
+  Newspaper,
   RotateCcw,
   Sun,
   Sunset,
@@ -36,6 +37,7 @@ const DEFAULT_THEME_EVENT = "dropvault-default-theme";
 
 const THEME_ICONS: Record<Theme, LucideIcon> = {
   neubrutalism: Box,
+  pressroom: Newspaper,
   quiet: Cloud,
   light: Sun,
   dark: Moon,
