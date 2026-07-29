@@ -5,6 +5,7 @@ describe("theme configuration", () => {
   it("recognizes every available theme", () => {
     expect(THEMES).toEqual([
       "neubrutalism",
+      "pressroom",
       "quiet",
       "light",
       "dark",

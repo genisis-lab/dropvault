@@ -14,10 +14,10 @@ describe("service worker cache contract", () => {
 
   it("uses a new shell cache so poisoned asset responses are removed", () => {
     expect(serviceWorkerSource).toContain(
-      'const CACHE = "dropvault-shell-v4";',
+      'const CACHE = "dropvault-shell-v5";',
     );
     expect(mainSource).toContain(
-      'serviceWorker.register("/service-worker.js?v=4")',
+      'serviceWorker.register("/service-worker.js?v=5")',
     );
   });
 });

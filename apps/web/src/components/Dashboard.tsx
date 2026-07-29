@@ -213,7 +213,9 @@ export default function Dashboard({
   useEffect(() => {
     if (hasStoredView()) return;
     setViewState(
-      theme === "neubrutalism" || theme === "quiet" ? "list" : "grid",
+      theme === "neubrutalism" || theme === "pressroom" || theme === "quiet"
+        ? "list"
+        : "grid",
     );
   }, [theme]);
   function setView(v: ViewMode) {
@@ -584,7 +586,7 @@ export default function Dashboard({
   const atRoot = currentFolderId === null;
   const calmHome = layout === "calm" && atRoot && filter === "all";
   const isProductivityTheme =
-    theme === "neubrutalism" || theme === "quiet";
+    theme === "neubrutalism" || theme === "pressroom" || theme === "quiet";
   function clearSelection() {
     setSelected(new Set());
     setMoveBarOpen(false);

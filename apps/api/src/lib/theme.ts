@@ -2,6 +2,7 @@ export const DEFAULT_THEME = "neubrutalism";
 
 export const PUBLIC_THEMES = [
   "neubrutalism",
+  "pressroom",
   "quiet",
   "light",
   "dark",

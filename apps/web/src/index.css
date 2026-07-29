@@ -98,6 +98,24 @@ html.quiet {
   --glow-a: transparent;
   --glow-b: transparent;
 }
+html.pressroom {
+  color-scheme: light;
+  --c-app: 242 239 231;
+  --c-card: 250 248 242;
+  --c-line: 194 191 182;
+  --c-strong: 21 25 24;
+  --c-muted: 78 79 74;
+  --c-faint: 118 118 109;
+  --c-hover: 236 240 218;
+  --c-subtle: 235 231 221;
+  --c-track: 215 211 201;
+  --shadow-sm: 3px 3px 0 rgba(21, 25, 24, 0.16);
+  --shadow-lg: 7px 7px 0 rgba(21, 25, 24, 0.18);
+  --scroll-thumb: 119 117 108;
+  --scroll-track: 242 239 231;
+  --glow-a: rgba(200, 244, 91, 0.2);
+  --glow-b: rgba(144, 185, 255, 0.16);
+}
 html,
 body,
 #root {
@@ -397,6 +415,22 @@ html.sunset .text-drift-600 {
   border: 2px solid #111;
   background: #fff3a6;
 }
+.theme-preview-pressroom .theme-preview-canvas {
+  border-color: #151918;
+  border-radius: 0.15rem;
+  background: #f2efe7;
+  box-shadow: 3px 3px 0 rgb(21 25 24 / 0.18);
+}
+.theme-preview-pressroom .theme-preview-canvas > span:first-child {
+  background: #ff765f;
+}
+.theme-preview-pressroom .theme-preview-canvas > span:nth-child(2) {
+  background: #c8f45b;
+}
+.theme-preview-pressroom .theme-preview-canvas > span:nth-child(3) {
+  border-color: #151918;
+  background: #faf8f2;
+}
 .theme-preview-quiet .theme-preview-canvas > span:first-child {
   background: #eff4ff;
 }
@@ -516,9 +550,194 @@ html.neubrutalism [data-ui="file-list-header"] {
     min-width: 0;
     overflow: hidden;
   }
-  html.quiet [data-ui="file-size"] {
+html.quiet [data-ui="file-size"] {
     width: auto;
   }
+}
+
+/* Pressroom: Built WAI's editorial warmth adapted to a working file manager. */
+html.pressroom body {
+  background:
+    radial-gradient(
+      circle at 82% -8%,
+      rgb(200 244 91 / 0.18),
+      transparent 34rem
+    ),
+    #f2efe7;
+  font-family: "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+}
+html.pressroom [data-ui="workspace"] h1,
+html.pressroom [data-ui="workspace"] h2,
+html.pressroom [data-ui="admin-console"] h2,
+html.pressroom [data-ui="admin-console"] h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+html.pressroom [class*="bg-gradient-to"],
+html.pressroom [class*="from-drift"] {
+  background-color: #ff765f !important;
+  background-image: none !important;
+}
+html.pressroom .text-gradient {
+  background: none;
+  color: #e34e3b;
+  -webkit-text-fill-color: currentColor;
+}
+html.pressroom .text-drift-700,
+html.pressroom .text-drift-600,
+html.pressroom .text-drift-500 {
+  color: #d94735 !important;
+}
+html.pressroom .bg-drift-500\/10,
+html.pressroom .bg-drift-50,
+html.pressroom .bg-drift-50\/70 {
+  background-color: rgb(255 118 95 / 0.12) !important;
+}
+html.pressroom .border-drift-200 {
+  border-color: rgb(227 78 59 / 0.34) !important;
+}
+html.pressroom .canvas-glow {
+  background:
+    radial-gradient(44rem 30rem at 84% -8%, rgb(200 244 91 / 0.22), transparent 72%),
+    radial-gradient(36rem 28rem at -4% 4%, rgb(144 185 255 / 0.17), transparent 72%);
+}
+html.pressroom [data-ui="sidebar"] {
+  width: 16.75rem;
+  border-color: rgb(21 25 24 / 0.2) !important;
+  background: rgb(250 248 242 / 0.94) !important;
+  padding-inline: 1rem;
+  backdrop-filter: none;
+}
+html.pressroom [data-ui="dashboard-content"] {
+  padding-left: 16.75rem;
+}
+html.pressroom [data-ui="topbar"] {
+  border-color: rgb(21 25 24 / 0.2) !important;
+  background: rgb(242 239 231 / 0.94) !important;
+  backdrop-filter: none;
+}
+html.pressroom [data-ui="workspace"] {
+  max-width: 90rem;
+  padding-top: 2rem;
+}
+html.pressroom [data-ui="search"] {
+  border: 1px solid #151918;
+  border-radius: 0.2rem !important;
+  background: #faf8f2 !important;
+  box-shadow: 3px 3px 0 rgb(21 25 24 / 0.14);
+}
+html.pressroom [data-ui="new-upload"],
+html.pressroom [data-ui="new-folder"] {
+  border: 1px solid #151918 !important;
+  border-radius: 0.2rem !important;
+  color: #151918 !important;
+  box-shadow: 3px 3px 0 rgb(21 25 24 / 0.18) !important;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+html.pressroom [data-ui="new-upload"] {
+  background: #ff765f !important;
+}
+html.pressroom [data-ui="new-folder"] {
+  background: #c8f45b !important;
+}
+html.pressroom [data-ui="new-upload"]:active,
+html.pressroom [data-ui="new-folder"]:active,
+html.pressroom button.drive-shadow:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 rgb(21 25 24 / 0.18) !important;
+}
+html.pressroom [data-ui="sidebar"] nav {
+  border: 1px solid rgb(21 25 24 / 0.2);
+  border-radius: 0.25rem;
+  background: #faf8f2;
+}
+html.pressroom [data-ui="sidebar"] nav button {
+  border-radius: 0 !important;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+html.pressroom [data-ui="sidebar"] nav button[aria-current="page"] {
+  background: #ff765f !important;
+  color: #151918 !important;
+}
+html.pressroom [data-ui="storage-card"],
+html.pressroom [data-ui="upload-target"],
+html.pressroom [data-ui="file-list"],
+html.pressroom [data-ui="file-card"],
+html.pressroom [data-ui="admin-console"] {
+  border: 1px solid rgb(21 25 24 / 0.34) !important;
+  border-radius: 0.25rem !important;
+  background: #faf8f2 !important;
+  box-shadow: 4px 4px 0 rgb(21 25 24 / 0.13) !important;
+}
+html.pressroom [data-ui="upload-target"] {
+  border-style: dashed !important;
+}
+html.pressroom [data-ui="upload-icon"] {
+  border: 1px solid #151918;
+  border-radius: 0.2rem !important;
+  background: #90b9ff !important;
+  box-shadow: 3px 3px 0 rgb(21 25 24 / 0.14) !important;
+}
+html.pressroom [data-ui="file-list-header"] {
+  border-bottom: 1px solid rgb(21 25 24 / 0.24);
+  color: #4e4f4a !important;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+html.pressroom [data-ui="file-row"] {
+  border-color: rgb(21 25 24 / 0.14) !important;
+}
+html.pressroom [data-ui="file-row"]:hover,
+html.pressroom [data-ui="file-row"].bg-drift-500\/10 {
+  background: rgb(200 244 91 / 0.18) !important;
+}
+html.pressroom [data-ui="file-icon"] {
+  border: 1px solid rgb(21 25 24 / 0.55);
+  border-radius: 0.2rem !important;
+  box-shadow: 2px 2px 0 rgb(21 25 24 / 0.12);
+}
+html.pressroom [data-ui="shared-label"],
+html.pressroom [data-ui="encrypted-label"],
+html.pressroom [data-ui="file-expiry"] {
+  border-radius: 999px !important;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.64rem;
+  font-weight: 750;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+html.pressroom [data-ui="detail-overlay"] {
+  background: rgb(21 25 24 / 0.16) !important;
+}
+html.pressroom [data-ui="detail-panel"] {
+  max-width: 22rem;
+  border-left: 1px solid #151918 !important;
+  background: #faf8f2 !important;
+  box-shadow: -8px 0 0 rgb(21 25 24 / 0.12) !important;
+}
+html.pressroom [data-ui="default-theme-editor"] {
+  border-color: rgb(21 25 24 / 0.34) !important;
+  border-radius: 0.25rem !important;
+  background: #f7f1dc;
+}
+html.pressroom :where(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #ff765f;
+  outline-offset: 3px;
+}
+html.pressroom input[type="checkbox"] {
+  accent-color: #e34e3b;
+}
+html.pressroom ::selection {
+  background: #c8f45b;
+  color: #151918;
 }
 
 /* DropVault Neubrutalism: the primary new visual system. */
@@ -774,6 +993,7 @@ html.neubrutalism ::selection {
 
 @media (max-width: 767px) {
   html.quiet [data-ui="dashboard-content"],
+  html.pressroom [data-ui="dashboard-content"],
   html.neubrutalism [data-ui="dashboard-content"] {
     padding-left: 0;
   }

@@ -2796,7 +2796,7 @@ function DefaultThemeEditor({
         </div>
       </div>
       <div
-        className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5"
+        className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"
         role="radiogroup"
         aria-label="Workspace default theme"
       >
