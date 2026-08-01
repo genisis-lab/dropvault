@@ -18,6 +18,7 @@ import {
 } from "../lib/quota";
 import { requireAuth } from "../middleware/auth";
 import { adminRole } from "../middleware/admin";
+import { parseMaxUploadBytes } from "../lib/settings";
 import type { Bindings, Variables } from "../types";
 import { scanFile } from "../lib/scanner";
 
@@ -94,7 +95,7 @@ async function workspacePolicy(db: ReturnType<typeof getDb>) {
     .catch(() => []);
   const map = new Map(rows.map((r) => [r.key, r.value] as const));
   return {
-    maxUploadBytes: Number(map.get("maxUploadBytes") || 0),
+    maxUploadBytes: parseMaxUploadBytes(map.get("maxUploadBytes")),
     allowedTypes: String(map.get("allowedTypes") || ""),
     defaultQuotaBytes: Number(map.get("defaultQuotaBytes") || 1073741824),
   };
