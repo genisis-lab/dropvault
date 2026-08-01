@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyRequestedSettingChanges } from "./settings";
+import {
+  applyRequestedSettingChanges,
+  DEFAULT_MAX_UPLOAD_BYTES,
+  parseMaxUploadBytes,
+} from "./settings";
 
 type Key = "defaultTheme" | "publicSharingEnabled" | "rolePermissions";
 const keys: Key[] = [
@@ -42,5 +46,22 @@ describe("requested workspace settings", () => {
     );
 
     expect(result.rolePermissions).toBe('{"manageUsers":"admin"}');
+  });
+});
+
+describe("max upload policy", () => {
+  it("uses the 1 GiB default when the setting is missing", () => {
+    expect(parseMaxUploadBytes(undefined)).toBe(DEFAULT_MAX_UPLOAD_BYTES);
+  });
+
+  it("preserves explicit limits and the existing unlimited value", () => {
+    expect(parseMaxUploadBytes("536870912")).toBe(536870912);
+    expect(parseMaxUploadBytes("0")).toBe(0);
+  });
+
+  it("fails closed to the default for malformed settings", () => {
+    expect(parseMaxUploadBytes("")).toBe(DEFAULT_MAX_UPLOAD_BYTES);
+    expect(parseMaxUploadBytes("not-a-number")).toBe(DEFAULT_MAX_UPLOAD_BYTES);
+    expect(parseMaxUploadBytes("1.5")).toBe(DEFAULT_MAX_UPLOAD_BYTES);
   });
 });

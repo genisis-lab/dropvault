@@ -38,6 +38,7 @@ import {
   wrapAccountFileKey,
 } from "../lib/vaultRecovery";
 import { requestVaultPurge } from "../lib/vaultPurge";
+import { parseMaxUploadBytes } from "../lib/settings";
 import { requireAuth } from "../middleware/auth";
 import { adminRole } from "../middleware/admin";
 import type { Bindings, Variables } from "../types";
@@ -150,7 +151,7 @@ async function settings(db: ReturnType<typeof getDb>) {
     .catch(() => []);
   const map = new Map(rows.map((r) => [r.key, r.value] as const));
   return {
-    maxUploadBytes: Number(map.get("maxUploadBytes") || 0),
+    maxUploadBytes: parseMaxUploadBytes(map.get("maxUploadBytes")),
     allowedTypes: (map.get("allowedTypes") || "")
       .split(",")
       .map((x) => x.trim())
