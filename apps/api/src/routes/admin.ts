@@ -24,7 +24,10 @@ import {
 import { isSafeWebhookUrl } from "../lib/url";
 import { normalizeTheme } from "../lib/theme";
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
-import { applyRequestedSettingChanges } from "../lib/settings";
+import {
+  applyRequestedSettingChanges,
+  DEFAULT_MAX_UPLOAD_BYTES,
+} from "../lib/settings";
 import type { Bindings, Variables } from "../types";
 
 type SettingsKey =
@@ -381,7 +384,7 @@ async function settingsMap(db: ReturnType<typeof getDb>) {
   const out: Record<SettingsKey, string> = {
     defaultExpiryDays: "7",
     maxExpiryDays: "30",
-    maxUploadBytes: "1073741824",
+    maxUploadBytes: String(DEFAULT_MAX_UPLOAD_BYTES),
     allowedTypes: "",
     defaultQuotaBytes: "1073741824",
     adminMaxQuotaBytes: "10737418240",
