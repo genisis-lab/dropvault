@@ -1,3 +1,12 @@
+import {
+  notifyVaultFilesChanged,
+  recoverAccountFileKey,
+  recoverPasswordFileKey,
+  recoveryStatus,
+  requestRecoveryPassword,
+  VaultRecoveryError,
+} from "./vaultRecovery";
+
 export const MAX_BROWSER_ENCRYPTION_BYTES = 256 * 1024 * 1024;
 
 type StoredKey = {
@@ -74,6 +83,17 @@ async function getStoredEncryptionKey(
 
 export async function getEncryptionKey(fileId: string): Promise<string | null> {
   return (await getStoredEncryptionKey(fileId))?.key ?? null;
+}
+
+export async function deleteEncryptionKey(fileId: string): Promise<void> {
+  const db = await openKeys();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("keys", "readwrite");
+    tx.objectStore("keys").delete(fileId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
 }
 
 export async function getEncryptionKeys(
@@ -235,16 +255,56 @@ export async function downloadDecryptedFile(
     encryptedMetadata?: string | null;
   },
   downloadUrl: string,
+  options?: { forcePassword?: boolean },
 ): Promise<void> {
   const stored = await getStoredEncryptionKey(file.id);
-  const encodedKey = stored?.key;
+  let encodedKey = options?.forcePassword ? null : stored?.key;
   const nonce = file.encryptionNonce ?? stored?.nonce;
   const encryptedMetadata =
     file.encryptedMetadata ?? stored?.encryptedMetadata;
-  if (!encodedKey)
-    throw new Error(
-      "This browser does not have the encryption key for this file",
-    );
+  if (!encodedKey) {
+    const status = await recoveryStatus(file.id).catch((error) => {
+      if (error instanceof VaultRecoveryError && error.code === "BROWSER_ONLY")
+        return {
+          accountRecovery: false,
+          passwordRecovery: false,
+          duressEnabled: false,
+          legacyBrowserOnly: true,
+          credentialSalt: null,
+        };
+      throw error;
+    });
+    if (!options?.forcePassword && status.accountRecovery) {
+      encodedKey = await recoverAccountFileKey(file.id).catch(() => null);
+    }
+    if (!encodedKey && status.passwordRecovery) {
+      const password = await requestRecoveryPassword(
+        file.id,
+        "Encrypted file",
+      );
+      if (!password) throw new Error("Download cancelled");
+      try {
+        encodedKey = await recoverPasswordFileKey(
+          file.id,
+          password,
+          status.credentialSalt,
+        );
+      } catch (error) {
+        notifyVaultFilesChanged();
+        throw new Error("Unable to unlock this file");
+      }
+    }
+    if (!encodedKey)
+      throw new Error(
+        status.legacyBrowserOnly
+          ? "This older encrypted file is browser-only. Open it on the device that uploaded it, then enable recovery in Details."
+          : "No working recovery method is available for this file",
+      );
+    await saveEncryptionKey(file.id, encodedKey, {
+      nonce,
+      encryptedMetadata,
+    });
+  }
   if (!nonce)
     throw new Error(
       "This legacy E2E upload is missing its encryption nonce because the production backend was not upgraded when it was uploaded. It cannot be decrypted; upload the original file again.",

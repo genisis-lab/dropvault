@@ -31,7 +31,7 @@ export async function reserveUpload(
     INSERT INTO upload_reservations (id, user_id, file_id, bytes, status, created_at, expires_at)
     SELECT ?, ?, ?, ?, 'active', ?, ?
     WHERE (
-      COALESCE((SELECT SUM(size_bytes) FROM files WHERE owner_id = ? AND status IN ('ready', 'quarantined') AND deleted_at IS NULL), 0)
+      COALESCE((SELECT SUM(size_bytes) FROM files WHERE owner_id = ? AND status IN ('ready', 'quarantined') AND deleted_at IS NULL AND purge_requested_at IS NULL), 0)
       + COALESCE((SELECT SUM(bytes) FROM upload_reservations WHERE user_id = ? AND status = 'active' AND expires_at > ?), 0)
       + ?
     ) <= ?

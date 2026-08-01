@@ -249,11 +249,18 @@ export async function presign(input: {
 
 export async function fileCapabilities(): Promise<{
   e2eEncryption: boolean;
+  accountRecovery: boolean;
+  passwordRecovery: boolean;
 }> {
   const res = await fetch(`${API}/api/files/capabilities`, {
     credentials: "include",
+    cache: "no-store",
   });
-  return j<{ e2eEncryption: boolean }>(res);
+  return j<{
+    e2eEncryption: boolean;
+    accountRecovery: boolean;
+    passwordRecovery: boolean;
+  }>(res);
 }
 
 export function uploadUrlFor(id: string) {
@@ -639,10 +646,94 @@ export function uploadToR2(
 // multipart at 32 MiB keeps every request comfortably below Cloudflare's plan-
 // dependent body limit and makes interrupted transfers resumable by part.
 export const MULTIPART_THRESHOLD = 32 * 1024 * 1024;
-const PART_SIZE = 32 * 1024 * 1024;
+export const MULTIPART_PART_SIZE = 32 * 1024 * 1024;
+const MULTIPART_ATTEMPTS = 3;
+const MULTIPART_SESSION_ATTEMPTS = 2;
 type UploadedPart = { partNumber: number; etag: string };
+
+export class UploadTransportError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code = "",
+  ) {
+    super(message);
+    this.name = "UploadTransportError";
+  }
+}
+
+async function multipartJson<T>(response: Response): Promise<T> {
+  let body: { error?: unknown; code?: unknown } & Partial<T> = {};
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {}
+  if (!response.ok)
+    throw new UploadTransportError(
+      String(body.error || response.statusText || "Upload request failed"),
+      response.status,
+      String(body.code || ""),
+    );
+  return body as T;
+}
+
+function multipartSessionIsStale(error: unknown): boolean {
+  return (
+    error instanceof UploadTransportError &&
+    error.code === "MULTIPART_SESSION_STALE"
+  );
+}
+
+function multipartStepIsRetryable(error: unknown): boolean {
+  if (!(error instanceof UploadTransportError)) return false;
+  return (
+    error.code === "MULTIPART_TRANSIENT" ||
+    error.status === 0 ||
+    error.status === 408 ||
+    error.status === 425 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
+}
+
+export function uploadCheckpointMustBeCleared(error: unknown): boolean {
+  if (!(error instanceof UploadTransportError)) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /upload integrity check failed|upload size mismatch|^not found$|^expired$/i.test(
+      message.trim(),
+    );
+  }
+  return (
+    error.code === "UPLOAD_RESTART_REQUIRED" ||
+    error.status === 404 ||
+    error.status === 451 ||
+    (error.status === 410 && !multipartSessionIsStale(error))
+  );
+}
+
+const multipartSleep = (milliseconds: number) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function retryMultipartStep<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MULTIPART_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (
+        multipartSessionIsStale(error) ||
+        !multipartStepIsRetryable(error) ||
+        attempt === MULTIPART_ATTEMPTS - 1
+      )
+        break;
+      await multipartSleep(300 * 2 ** attempt);
+    }
+  }
+  throw lastError;
+}
+
 async function startMultipart(id: string) {
-  return j<{
+  return multipartJson<{
     uploadId?: string;
     key?: string;
     parts?: UploadedPart[];
@@ -676,25 +767,49 @@ function putPart(
         try {
           resolve(JSON.parse(xhr.responseText) as UploadedPart);
         } catch {
-          reject(new Error("bad part response"));
+          reject(
+            new UploadTransportError(
+              "bad part response",
+              502,
+              "MULTIPART_TRANSIENT",
+            ),
+          );
         }
       } else {
         let detail = "";
+        let code = "";
         try {
-          detail = String(JSON.parse(xhr.responseText || "{}").error || "");
+          const body = JSON.parse(xhr.responseText || "{}");
+          detail = String(body.error || "");
+          code = String(body.code || "");
         } catch {}
-        reject(new Error(detail || `part ${partNumber} failed: ${xhr.status}`));
+        reject(
+          new UploadTransportError(
+            detail || `part ${partNumber} failed: ${xhr.status}`,
+            xhr.status,
+            code,
+          ),
+        );
       }
     };
     xhr.onerror = () =>
       reject(
-        new Error(
+        new UploadTransportError(
           navigator.onLine === false
             ? "You appear to be offline. Reconnect and retry the upload."
             : `Upload part ${partNumber} was interrupted. Retrying will resume it.`,
+          0,
+          "UPLOAD_NETWORK",
         ),
       );
-    xhr.onabort = () => reject(new Error("The upload was cancelled."));
+    xhr.onabort = () =>
+      reject(
+        new UploadTransportError(
+          "The upload was cancelled.",
+          0,
+          "UPLOAD_CANCELLED",
+        ),
+      );
     xhr.send(chunk);
   });
 }
@@ -703,7 +818,7 @@ async function completeMultipart(
   uploadId: string,
   parts: UploadedPart[],
 ) {
-  return j<{ ok: true }>(
+  return multipartJson<{ ok: true }>(
     await fetch(`${API}/api/files/${id}/multipart/complete`, {
       method: "POST",
       credentials: "include",
@@ -723,43 +838,80 @@ export async function uploadLargeFile(
   file: File,
   onProgress: (pct: number) => void,
 ): Promise<void> {
-  const started = await startMultipart(id);
-  if (started.completed) {
-    onProgress(100);
-    return;
-  }
-  if (!started.uploadId) throw new Error("multipart session unavailable");
-  const uploadId = started.uploadId;
-  const total = file.size;
-  const partCount = Math.max(1, Math.ceil(total / PART_SIZE));
-  const parts: UploadedPart[] = [...(started.parts ?? [])];
-  const done = new Map(parts.map((part) => [part.partNumber, part]));
-  let completedBytes = 0;
-  for (let i = 0; i < partCount; i++) {
-    const start = i * PART_SIZE;
-    const end = Math.min(start + PART_SIZE, total);
-    const partNumber = i + 1;
-    if (done.has(partNumber)) {
-      completedBytes += end - start;
-      onProgress(Math.min(99, Math.round((completedBytes / total) * 100)));
-      continue;
+  for (
+    let sessionAttempt = 0;
+    sessionAttempt < MULTIPART_SESSION_ATTEMPTS;
+    sessionAttempt++
+  ) {
+    const started = await retryMultipartStep(() => startMultipart(id));
+    if (started.completed) {
+      onProgress(100);
+      return;
     }
-    const part = await putPart(
-      id,
-      uploadId,
-      partNumber,
-      file.slice(start, end),
-      (loaded) =>
-        onProgress(
-          Math.min(99, Math.round(((completedBytes + loaded) / total) * 100)),
-        ),
+    if (!started.uploadId)
+      throw new UploadTransportError(
+        "multipart session unavailable",
+        503,
+        "MULTIPART_TRANSIENT",
+      );
+    const uploadId = started.uploadId;
+    const total = file.size;
+    const partCount = Math.max(1, Math.ceil(total / MULTIPART_PART_SIZE));
+    const done = new Map(
+      (started.parts ?? []).map((part) => [part.partNumber, part]),
     );
-    parts.push(part);
-    completedBytes += end - start;
-    onProgress(Math.min(99, Math.round((completedBytes / total) * 100)));
+    let completedBytes = 0;
+
+    try {
+      for (let i = 0; i < partCount; i++) {
+        const start = i * MULTIPART_PART_SIZE;
+        const end = Math.min(start + MULTIPART_PART_SIZE, total);
+        const partNumber = i + 1;
+        if (done.has(partNumber)) {
+          completedBytes += end - start;
+          onProgress(
+            Math.min(99, Math.round((completedBytes / total) * 100)),
+          );
+          continue;
+        }
+        const part = await retryMultipartStep(() =>
+          putPart(
+            id,
+            uploadId,
+            partNumber,
+            file.slice(start, end),
+            (loaded) =>
+              onProgress(
+                Math.min(
+                  99,
+                  Math.round(((completedBytes + loaded) / total) * 100),
+                ),
+              ),
+          ),
+        );
+        done.set(part.partNumber, part);
+        completedBytes += end - start;
+        onProgress(Math.min(99, Math.round((completedBytes / total) * 100)));
+      }
+      await retryMultipartStep(() =>
+        completeMultipart(id, uploadId, [...done.values()]),
+      );
+      onProgress(100);
+      return;
+    } catch (error) {
+      if (
+        multipartSessionIsStale(error) &&
+        sessionAttempt < MULTIPART_SESSION_ATTEMPTS - 1
+      ) {
+        // The API retired the dead D1/R2 session. Keep the file reservation
+        // and immediately negotiate a fresh multipart upload under the same
+        // checkpoint so a single Retry click is enough.
+        onProgress(0);
+        continue;
+      }
+      throw error;
+    }
   }
-  await completeMultipart(id, uploadId, parts);
-  onProgress(100);
 }
 
 export type AdminRole = "owner" | "admin" | "moderator" | "auditor";

@@ -104,11 +104,11 @@ export default function PreviewModal({
                   size={28}
                 />
                 <p className="font-semibold text-slate-700">
-                  End-to-end encrypted
+                  Encrypted in your browser
                 </p>
                 <p className="mt-1 leading-5">
-                  Dropvault stores only ciphertext. Decrypt and download this
-                  file with the key saved in this browser.
+                  Dropvault stores the file as ciphertext. Download it with a
+                  saved key, signed-in recovery, or its recovery password.
                 </p>
               </div>
             ) : isImage ? (

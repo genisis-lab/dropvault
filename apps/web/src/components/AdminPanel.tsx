@@ -1451,7 +1451,7 @@ export default function AdminPanel({
                             </span>
                             {fl.encryptionMode === "aes-gcm" && (
                               <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
-                                E2E · admin inaccessible
+                                Encrypted · admin inaccessible
                               </span>
                             )}
                           </div>
@@ -1644,9 +1644,9 @@ export default function AdminPanel({
                     Permanently banned file hashes
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    Matching SHA-256 uploads are rejected before storage. E2E
-                    files are excluded because administrators never receive a
-                    stable plaintext hash.
+                    Matching SHA-256 uploads are rejected before storage.
+                    Client-side encrypted files are excluded because
+                    administrators never receive a stable plaintext hash.
                   </p>
                   <div className="mt-2 space-y-1.5">
                     {(hashBansQ.data ?? []).map((ban) => (
@@ -2940,7 +2940,7 @@ function RolePermsEditor() {
     {
       role: "Moderator",
       detail:
-        "Review reports and quarantine content. Cannot open E2E files or change workspace policy.",
+        "Review reports and quarantine content. Cannot open client-side encrypted files or change workspace policy.",
     },
     {
       role: "Auditor",

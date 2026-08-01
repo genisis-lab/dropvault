@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "./lib/auth-client";
 import { accountStatus, type AccountStatus } from "./lib/account";
 
@@ -8,6 +9,9 @@ const PublicUploadRequest = lazy(
   () => import("./components/PublicUploadRequest"),
 );
 const SuspendedScreen = lazy(() => import("./components/SuspendedScreen"));
+const RecoveryPasswordDialog = lazy(
+  () => import("./components/RecoveryPasswordDialog"),
+);
 
 function LoadingScreen() {
   return (
@@ -18,6 +22,7 @@ function LoadingScreen() {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
   const { data: session, isPending } = useSession();
   const isRequestPage =
     typeof window !== "undefined" &&
@@ -53,6 +58,16 @@ export default function App() {
     };
   }, [userEmail, isRequestPage]);
 
+  useEffect(() => {
+    const refresh = () => {
+      void queryClient.invalidateQueries({ queryKey: ["files"] });
+      void queryClient.invalidateQueries({ queryKey: ["trash"] });
+      void queryClient.invalidateQueries({ queryKey: ["folders"] });
+    };
+    window.addEventListener("dropvault:files-changed", refresh);
+    return () => window.removeEventListener("dropvault:files-changed", refresh);
+  }, [queryClient]);
+
   if (isRequestPage)
     return (
       <Suspense fallback={<LoadingScreen />}>
@@ -84,6 +99,11 @@ export default function App() {
           <AuthScreen />
         )}
       </Suspense>
+      {session?.user && (
+        <Suspense fallback={null}>
+          <RecoveryPasswordDialog />
+        </Suspense>
+      )}
     </>
   );
 }

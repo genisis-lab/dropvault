@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import type { FileRow } from "../db/schema";
 import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry";
@@ -512,7 +512,11 @@ admin.get("/stats", async (c) => {
   const db = getDb(c.env.DB);
   const [users, files, folders, openFlags, suspensions] = await Promise.all([
     db.select().from(schema.user).all(),
-    db.select().from(schema.files).all(),
+    db
+      .select()
+      .from(schema.files)
+      .where(isNull(schema.files.purgeRequestedAt))
+      .all(),
     db.select().from(schema.folders).all(),
     db
       .select()
@@ -738,7 +742,7 @@ admin.get("/users", async (c) => {
   if (userIds.length) {
     const placeholders = userIds.map(() => "?").join(",");
     const aggregates = await c.env.DB.prepare(
-      `SELECT owner_id, COUNT(*) AS file_count, COALESCE(SUM(CASE WHEN status = 'ready' THEN size_bytes ELSE 0 END), 0) AS total_bytes FROM files WHERE deleted_at IS NULL AND owner_id IN (${placeholders}) GROUP BY owner_id`,
+      `SELECT owner_id, COUNT(*) AS file_count, COALESCE(SUM(CASE WHEN status = 'ready' THEN size_bytes ELSE 0 END), 0) AS total_bytes FROM files WHERE deleted_at IS NULL AND purge_requested_at IS NULL AND owner_id IN (${placeholders}) GROUP BY owner_id`,
     )
       .bind(...userIds)
       .all<{ owner_id: string; file_count: number; total_bytes: number }>();
@@ -809,7 +813,12 @@ admin.get("/users/:id", async (c) => {
       db
         .select()
         .from(schema.files)
-        .where(eq(schema.files.ownerId, id))
+        .where(
+          and(
+            eq(schema.files.ownerId, id),
+            isNull(schema.files.purgeRequestedAt),
+          ),
+        )
         .orderBy(desc(schema.files.createdAt))
         .all(),
       db.select().from(schema.user).all(),
@@ -1124,7 +1133,14 @@ admin.get("/files", async (c) => {
   const files = await db
     .select()
     .from(schema.files)
-    .where(cursor ? lt(schema.files.createdAt, cursor) : undefined)
+    .where(
+      cursor
+        ? and(
+            lt(schema.files.createdAt, cursor),
+            isNull(schema.files.purgeRequestedAt),
+          )
+        : isNull(schema.files.purgeRequestedAt),
+    )
     .orderBy(desc(schema.files.createdAt))
     .limit(limit + 1)
     .all();
@@ -1176,7 +1192,12 @@ admin.post("/files/:id/revoke", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await db
@@ -1188,7 +1209,12 @@ admin.post("/files/:id/revoke", async (c) => {
       shareDownloadCount: 0,
       shareExpiresAt: null,
     })
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .run();
   await logAction(c, db, "file.revoke", "file", id, row.filename);
   return c.json({ ok: true });
@@ -1206,7 +1232,12 @@ admin.post("/files/:id/extend", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   const expiresAt = clampExtension(
@@ -1217,7 +1248,12 @@ admin.post("/files/:id/extend", async (c) => {
   await db
     .update(schema.files)
     .set({ expiresAt, keepForever: false })
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .run();
   await logAction(
     c,
@@ -1237,14 +1273,24 @@ admin.post("/files/:id/expire", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   const expiresAt = nowSeconds();
   await db
     .update(schema.files)
     .set({ expiresAt, keepForever: false })
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .run();
   await logAction(c, db, "file.expire", "file", id, row.filename);
   return c.json({ ok: true, expiresAt });
@@ -1257,13 +1303,23 @@ admin.delete("/files/:id", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await db
     .update(schema.files)
     .set({ deletedAt: nowSeconds(), shareToken: null, sharePassword: null })
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .run();
   await logAction(c, db, "file.trash", "file", id, row.filename);
   return c.json({ ok: true });
@@ -1283,7 +1339,12 @@ admin.post("/files/:id/delete-permanent", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await deleteOneFileObjects(c.env.FILES, db, row);
@@ -1299,7 +1360,12 @@ admin.post("/files/:id/restore", async (c) => {
   await db
     .update(schema.files)
     .set({ deletedAt: null })
-    .where(eq(schema.files.id, id))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .run();
   await logAction(c, db, "file.restore", "file", id, null);
   return c.json({ ok: true });
@@ -1336,7 +1402,12 @@ admin.post("/files/bulk", async (c) => {
   const rows = await db
     .select()
     .from(schema.files)
-    .where(inArray(schema.files.id, ids))
+    .where(
+      and(
+        inArray(schema.files.id, ids),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .all();
   if (!rows.length) return c.json({ ok: true, count: 0 });
   const now = nowSeconds();
@@ -1408,7 +1479,11 @@ admin.get("/flags", async (c) => {
       .orderBy(desc(schema.fileFlags.createdAt))
       .all()
       .catch(() => []),
-    db.select().from(schema.files).all(),
+    db
+      .select()
+      .from(schema.files)
+      .where(isNull(schema.files.purgeRequestedAt))
+      .all(),
     db.select().from(schema.user).all(),
   ]);
   const fileById = new Map(files.map((f) => [f.id, f] as const));
@@ -1457,14 +1532,19 @@ admin.get("/flags/:id/content", async (c) => {
   const file = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, flag.fileId))
+    .where(
+      and(
+        eq(schema.files.id, flag.fileId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!file) return c.json({ error: "reported file not found" }, 404);
   if (file.encryptionMode === "aes-gcm")
     return c.json(
       {
         error:
-          "This file is end-to-end encrypted. Administrators do not have the decryption key.",
+          "This file is client-side encrypted. Administrators do not have the decryption key.",
         code: "e2e_admin_inaccessible",
       },
       409,
@@ -1599,14 +1679,19 @@ admin.post("/flags/:id/ban-hash", async (c) => {
   const file = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, flag.fileId))
+    .where(
+      and(
+        eq(schema.files.id, flag.fileId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!file) return c.json({ error: "reported file not found" }, 404);
   if (file.encryptionMode === "aes-gcm")
     return c.json(
       {
         error:
-          "E2E ciphertext uses a random nonce and has no stable plaintext hash available to administrators.",
+          "Client-side ciphertext uses a random nonce and has no stable plaintext hash available to administrators.",
       },
       409,
     );

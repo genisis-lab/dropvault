@@ -174,6 +174,8 @@ export const files = sqliteTable(
     }).default(false),
     scanStatus: text("scan_status").notNull().default("not_required"),
     scanResult: text("scan_result"),
+    purgeRequestedAt: integer("purge_requested_at"),
+    purgeReason: text("purge_reason"),
   },
   (t) => ({
     hashIdx: index("idx_files_content_hash").on(t.ownerId, t.contentHash),
@@ -182,6 +184,55 @@ export const files = sqliteTable(
 );
 
 export type FileRow = typeof files.$inferSelect;
+
+export const fileKeyRecovery = sqliteTable(
+  "file_key_recovery",
+  {
+    fileId: text("file_id")
+      .primaryKey()
+      .references(() => files.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accountEnvelope: text("account_envelope"),
+    passwordEnvelope: text("password_envelope"),
+    passwordVerifier: text("password_verifier"),
+    duressVerifier: text("duress_verifier"),
+    credentialSalt: text("credential_salt"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    ownerIdx: index("idx_file_key_recovery_owner").on(t.ownerId, t.updatedAt),
+  }),
+);
+
+export type FileKeyRecoveryRow = typeof fileKeyRecovery.$inferSelect;
+
+export const vaultPurgeJobs = sqliteTable(
+  "vault_purge_jobs",
+  {
+    fileId: text("file_id")
+      .primaryKey()
+      .references(() => files.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    state: text("state").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    requestedAt: integer("requested_at").notNull(),
+    nextAttemptAt: integer("next_attempt_at").notNull(),
+    lastError: text("last_error"),
+  },
+  (t) => ({
+    pendingIdx: index("idx_vault_purge_jobs_pending").on(
+      t.state,
+      t.nextAttemptAt,
+    ),
+  }),
+);
+
+export type VaultPurgeJobRow = typeof vaultPurgeJobs.$inferSelect;
 
 export const adminEmails = sqliteTable("admin_emails", {
   email: text("email").primaryKey(),
