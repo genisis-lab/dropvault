@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import type { Bindings } from "../types";
 
@@ -15,7 +15,12 @@ export async function scanFile(
   const file = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.id, fileId))
+    .where(
+      and(
+        eq(schema.files.id, fileId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get()
     .catch(() => null);
   if (!file) return;

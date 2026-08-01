@@ -71,6 +71,7 @@ export async function scheduleExpiryWarnings(env: Bindings): Promise<number> {
       and(
         eq(schema.files.status, "ready"),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
         gt(schema.files.expiresAt, now),
         lte(schema.files.expiresAt, soon),
         eq(schema.files.keepForever, false),

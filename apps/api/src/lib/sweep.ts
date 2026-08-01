@@ -31,7 +31,11 @@ export async function sweepExpired(
     })
     .from(schema.files)
     .where(
-      and(lte(schema.files.expiresAt, cutoff), isNull(schema.files.deletedAt)),
+      and(
+        lte(schema.files.expiresAt, cutoff),
+        isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
+      ),
     )
     .limit(batchSize)
     .all();
@@ -42,7 +46,12 @@ export async function sweepExpired(
       sizeBytes: schema.files.sizeBytes,
     })
     .from(schema.files)
-    .where(lte(schema.files.deletedAt, trashCutoff))
+    .where(
+      and(
+        lte(schema.files.deletedAt, trashCutoff),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .limit(batchSize)
     .all()
     .catch(() => []);
@@ -58,6 +67,7 @@ export async function sweepExpired(
         eq(schema.files.status, "pending"),
         lte(schema.files.createdAt, pendingCutoff),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .limit(batchSize)

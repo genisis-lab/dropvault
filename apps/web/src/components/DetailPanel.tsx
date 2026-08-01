@@ -9,6 +9,7 @@ import {
   Film,
   Image as ImageIcon,
   Infinity as InfinityIcon,
+  KeyRound,
   Link2,
   LockKeyhole,
   Music,
@@ -26,6 +27,7 @@ import {
 } from "../lib/encryption";
 import { copyTextFrom } from "../lib/clipboard";
 import { useToast } from "./Toast";
+import VaultRecoveryDialog from "./VaultRecoveryDialog";
 
 type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
 const TINT: Record<Tint, { bg: string; fg: string }> = {
@@ -131,6 +133,7 @@ function DetailBody({
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const created = new Date(file.createdAt * 1000).toLocaleDateString(
     undefined,
     { year: "numeric", month: "short", day: "numeric" },
@@ -201,7 +204,7 @@ function DetailBody({
         </p>
         {file.encryptionMode === "aes-gcm" && (
           <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-            <LockKeyhole size={12} /> End-to-end encrypted
+            <LockKeyhole size={12} /> Encrypted in your browser
           </p>
         )}
         {downloadError && (
@@ -292,6 +295,29 @@ function DetailBody({
             <Download size={16} /> Download
           </a>
         )}
+        {file.encryptionMode === "aes-gcm" && (
+          <button
+            onClick={() => setRecoveryOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 font-medium text-emerald-700 transition hover:bg-emerald-100"
+          >
+            <LockKeyhole size={16} /> Recovery
+          </button>
+        )}
+        {file.encryptionMode === "aes-gcm" && (
+          <button
+            onClick={() => {
+              setDownloadError(null);
+              downloadDecryptedFile(file, downloadUrl(file.id), {
+                forcePassword: true,
+              }).catch((downloadCause) =>
+                setDownloadError((downloadCause as Error).message),
+              );
+            }}
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-600 transition hover:bg-slate-50"
+          >
+            <KeyRound size={16} /> Use password
+          </button>
+        )}
         <button
           disabled={busy}
           onClick={copyLink}
@@ -358,6 +384,11 @@ function DetailBody({
           <X size={16} /> Revoke share link
         </button>
       )}
+      <VaultRecoveryDialog
+        file={file}
+        open={recoveryOpen}
+        onClose={() => setRecoveryOpen(false)}
+      />
     </>
   );
 }

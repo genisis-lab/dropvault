@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import { isExpired, nowSeconds } from "../lib/expiry";
 import { requireAuth } from "../middleware/auth";
@@ -81,7 +81,13 @@ async function sharedTeamFile(
   return db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, fileId), eq(schema.files.teamId, teamId)))
+    .where(
+      and(
+        eq(schema.files.id, fileId),
+        eq(schema.files.teamId, teamId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get()
     .catch(() => null);
 }
@@ -122,7 +128,7 @@ teams.get("/", async (c) => {
       const row = await c.env.DB.prepare(
         `SELECT
       (SELECT COUNT(*) FROM team_members WHERE team_id = ?) AS memberCount,
-      (SELECT COUNT(*) FROM files WHERE team_id = ? AND deleted_at IS NULL) AS fileCount,
+      (SELECT COUNT(*) FROM files WHERE team_id = ? AND deleted_at IS NULL AND purge_requested_at IS NULL) AS fileCount,
       (SELECT COUNT(*) FROM folders WHERE team_id = ?) AS folderCount
     `,
       )
@@ -211,7 +217,12 @@ teams.get("/:id", async (c) => {
     db
       .select()
       .from(schema.files)
-      .where(eq(schema.files.teamId, access.team.id))
+      .where(
+        and(
+          eq(schema.files.teamId, access.team.id),
+          isNull(schema.files.purgeRequestedAt),
+        ),
+      )
       .orderBy(desc(schema.files.createdAt))
       .all()
       .catch(() => []),
@@ -265,7 +276,12 @@ teams.get("/:id/files/:fileId/inline", async (c) => {
   const access = await membership(db, c.req.param("id"), c.get("userId"));
   if (!access) return c.json({ error: "not found" }, 404);
   const file = await sharedTeamFile(db, access.team.id, c.req.param("fileId"));
-  if (!file || file.status !== "ready" || file.deletedAt)
+  if (
+    !file ||
+    file.status !== "ready" ||
+    file.deletedAt ||
+    file.purgeRequestedAt
+  )
     return c.json({ error: "not found" }, 404);
   if (file.releaseAt && file.releaseAt > nowSeconds())
     return c.json(

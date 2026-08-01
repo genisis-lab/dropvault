@@ -25,6 +25,14 @@ export type Bindings = {
   NOTIFICATION_WEBHOOK_URL?: string;
   // Optional HMAC secret used to sign notification webhook requests.
   NOTIFICATION_WEBHOOK_SECRET?: string;
+  // High-entropy secret used only to wrap per-file account recovery keys and
+  // authenticate duress credentials. Set with `wrangler secret put`.
+  VAULT_KEY_SECRET?: string;
+  // Version identifier for VAULT_KEY_SECRET. Keep the previous pair configured
+  // during rotations so existing envelopes remain recoverable.
+  VAULT_KEY_ID?: string;
+  VAULT_KEY_PREVIOUS_ID?: string;
+  VAULT_KEY_SECRET_PREVIOUS?: string;
 };
 
 // Per-request variables set by middleware.

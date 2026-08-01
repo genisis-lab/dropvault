@@ -83,6 +83,7 @@ folders.get("/", async (c) => {
         eq(schema.files.status, "ready"),
         gt(schema.files.expiresAt, nowSeconds()),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .all();
@@ -264,6 +265,7 @@ folders.get("/:id/download-zip", async (c) => {
         eq(schema.files.status, "ready"),
         gt(schema.files.expiresAt, nowSeconds()),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .all();
@@ -445,6 +447,7 @@ folders.delete("/:id", async (c) => {
           eq(schema.files.ownerId, userId),
           inArray(schema.files.folderId, idBatch),
           isNull(schema.files.deletedAt),
+          isNull(schema.files.purgeRequestedAt),
         ),
       )
       .all();
