@@ -39,13 +39,6 @@ import {
   shareFolder,
   revokeFolderShare,
   downloadUrl,
-  presign,
-  complete,
-  uploadToR2,
-  uploadUrlFor,
-  uploadLargeFile,
-  fileContentHash,
-  MULTIPART_THRESHOLD,
   adminAccess,
   createLimitRequest,
   listMyLimitRequests,
@@ -69,7 +62,7 @@ import { downloadFilesAsZip } from "../lib/zip";
 import { downloadDecryptedFile } from "../lib/encryption";
 import Sidebar, { type Filter } from "./Sidebar";
 import Topbar, { type ViewMode } from "./Topbar";
-import UploadZone from "./UploadZone";
+import UploadZone, { type UploadZoneHandle } from "./UploadZone";
 import FileCard from "./FileCard";
 import FolderCard from "./FolderCard";
 import NameDialog from "./NameDialog";
@@ -209,6 +202,7 @@ export default function Dashboard({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const dragDepth = useRef(0);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const uploadZoneRef = useRef<UploadZoneHandle>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (hasStoredView()) return;
@@ -496,34 +490,6 @@ export default function Dashboard({
     } catch (e) {
       toastErr((e as Error)?.message || "Couldn't send upload limit request");
     }
-  }
-  async function uploadDropped(fileList: FileList) {
-    const arr = Array.from(fileList);
-    if (arr.length === 0 || filter === "trash") return;
-    toastOk(`Uploading ${arr.length} file${arr.length === 1 ? "" : "s"}…`);
-    for (const file of arr) {
-      try {
-        const checksum = await fileContentHash(file);
-        const { id } = await presign({
-          filename: file.name,
-          contentType: file.type,
-          sizeBytes: file.size,
-          expiryDays,
-          folderId: currentFolderId,
-          checksum,
-          contentHash: checksum,
-        });
-        if (file.size > MULTIPART_THRESHOLD)
-          await uploadLargeFile(id, file, () => {});
-        else {
-          await uploadToR2(uploadUrlFor(id), file, () => {});
-          await complete(id);
-        }
-      } catch (e) {
-        toastErr((e as Error)?.message || `Couldn't upload ${file.name}`);
-      }
-    }
-    invalidate();
   }
   useEffect(() => {
     const hasOSFiles = (e: DragEvent) =>
@@ -1043,6 +1009,7 @@ export default function Dashboard({
             )}
           {filter !== "trash" && (
             <UploadZone
+              ref={uploadZoneRef}
               expiryDays={expiryDays}
               keepForever={canKeepForever}
               onUploaded={invalidate}
@@ -1447,7 +1414,7 @@ export default function Dashboard({
               e.stopPropagation();
               setOsDrag(false);
               dragDepth.current = 0;
-              uploadDropped(e.dataTransfer.files);
+              void uploadZoneRef.current?.uploadDrop(e.dataTransfer);
             }}
             className="fixed inset-0 z-[80] grid place-items-center bg-drift-600/20 backdrop-blur-sm"
           >

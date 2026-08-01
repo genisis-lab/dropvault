@@ -610,7 +610,12 @@ async function shareRecipient(
   const file = await db
     .select()
     .from(schema.files)
-    .where(eq(schema.files.shareToken, token))
+    .where(
+      and(
+        eq(schema.files.shareToken, token),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get()
     .catch(() => null);
   if (file) {
@@ -832,6 +837,7 @@ share.get("/folder/:token", async (c) => {
         eq(schema.files.folderId, folder.id),
         eq(schema.files.status, "ready"),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
         gt(schema.files.expiresAt, nowSeconds()),
         sql`(${schema.files.releaseAt} IS NULL OR ${schema.files.releaseAt} <= ${nowSeconds()})`,
       ),
@@ -900,6 +906,7 @@ share.get("/folder/:token/zip", async (c) => {
         eq(schema.files.folderId, folder.id),
         eq(schema.files.status, "ready"),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
         gt(schema.files.expiresAt, nowSeconds()),
         sql`(${schema.files.releaseAt} IS NULL OR ${schema.files.releaseAt} <= ${nowSeconds()})`,
       ),
@@ -1025,6 +1032,7 @@ share.get("/folder/:token/:fileId", async (c) => {
         eq(schema.files.id, fileId),
         eq(schema.files.folderId, folder.id),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .get();
@@ -1068,7 +1076,11 @@ share.post("/:token/unlock", async (c) => {
     .select()
     .from(schema.files)
     .where(
-      and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt)),
+      and(
+        eq(schema.files.shareToken, token),
+        isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
+      ),
     )
     .get();
   if (!row || row.status !== "ready")
@@ -1146,7 +1158,11 @@ share.post("/:token/flag", async (c) => {
     .select()
     .from(schema.files)
     .where(
-      and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt)),
+      and(
+        eq(schema.files.shareToken, token),
+        isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
+      ),
     )
     .get();
   if (!row || row.status !== "ready")
@@ -1201,7 +1217,11 @@ share.get("/:token", async (c) => {
     .select()
     .from(schema.files)
     .where(
-      and(eq(schema.files.shareToken, token), isNull(schema.files.deletedAt)),
+      and(
+        eq(schema.files.shareToken, token),
+        isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
+      ),
     )
     .get();
   if (!row || row.status !== "ready")

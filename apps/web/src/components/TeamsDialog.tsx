@@ -806,7 +806,7 @@ function TeamFileCard({
           </div>
         )}
         <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
-          {encrypted ? "E2E encrypted" : mediaLabel(file.contentType)}
+          {encrypted ? "Client-side encrypted" : mediaLabel(file.contentType)}
         </span>
         {media && (
           <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 text-slate-600 shadow-sm">

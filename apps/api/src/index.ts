@@ -16,6 +16,7 @@ import keepForeverRoute from "./routes/keepForever";
 import { isIpBanned } from "./lib/ipAccess";
 import { clientIp } from "./lib/rateLimit";
 import { sweepExpired, reconcileOrphans } from "./lib/sweep";
+import { sweepPendingVaultPurges } from "./lib/vaultPurge";
 import { cleanupMetadata, scheduleExpiryWarnings } from "./lib/retention";
 import { deliverPendingEvents } from "./lib/delivery";
 import { workspaceDefaultTheme } from "./lib/theme";
@@ -142,6 +143,16 @@ export default {
   ) => {
     ctx.waitUntil(
       (async () => {
+        try {
+          await sweepPendingVaultPurges(env);
+        } catch (err) {
+          console.error(
+            JSON.stringify({
+              event: "cron.vaultPurge.failed",
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
         try {
           await sweepExpired(env);
         } catch (err) {

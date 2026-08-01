@@ -10,7 +10,7 @@ import {
   FOREVER_EXPIRES_AT,
 } from "../lib/expiry";
 import { hashSecret, sha256StreamHex } from "../lib/hash";
-import { clientIp } from "../lib/rateLimit";
+import { checkRateLimit, clientIp } from "../lib/rateLimit";
 import {
   completeReservation,
   releaseReservation,
@@ -19,6 +19,25 @@ import {
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
 import { chunkValues } from "../lib/batch";
 import { scanFile } from "../lib/scanner";
+import {
+  multipartFailureKind,
+  storedMultipartParts,
+} from "../lib/multipart";
+import { trustedAppOrigins } from "../lib/origins";
+import {
+  createDuressVerifier,
+  createPasswordVerifier,
+  normalizeCredentialProof,
+  normalizeCredentialSalt,
+  normalizePasswordEnvelope,
+  recoveryKeyring,
+  unwrapAccountFileKey,
+  vaultRecoveryAvailable,
+  verifyDuressProof,
+  verifyRecoveryProof,
+  wrapAccountFileKey,
+} from "../lib/vaultRecovery";
+import { requestVaultPurge } from "../lib/vaultPurge";
 import { requireAuth } from "../middleware/auth";
 import { adminRole } from "../middleware/admin";
 import type { Bindings, Variables } from "../types";
@@ -226,7 +245,7 @@ function accessMode(input: unknown): string {
     : "download";
 }
 function safeFile(row: any) {
-  const { sharePassword, tags, ...r } = row;
+  const { sharePassword, tags, purgeRequestedAt, purgeReason, ...r } = row;
   return {
     ...r,
     tags: parseTags(tags ?? null),
@@ -236,15 +255,477 @@ function safeFile(row: any) {
   };
 }
 
+function sensitiveMutationAllowed(c: any): boolean {
+  const origin = c.req.header("Origin");
+  if (origin && !trustedAppOrigins(c.env).includes(origin)) return false;
+  const fetchSite = c.req.header("Sec-Fetch-Site");
+  return !fetchSite || ["same-origin", "same-site", "none"].includes(fetchSite);
+}
+
+type RecoveryAction = "keep" | "set" | "remove";
+
+function recoveryAction(value: unknown): RecoveryAction | null {
+  return value === "keep" || value === "set" || value === "remove"
+    ? value
+    : null;
+}
+
+function recoveryBodyAllowed(c: any): boolean {
+  const raw = c.req.header("Content-Length");
+  if (!raw) return true;
+  const size = Number(raw);
+  return Number.isFinite(size) && size >= 0 && size <= 16_384;
+}
+
 files.get("/capabilities", async (c) => {
+  c.header("Cache-Control", "no-store");
   try {
     await c.env.DB.prepare(
       "SELECT encryption_mode, encryption_nonce, encrypted_metadata FROM files LIMIT 0",
     ).run();
-    return c.json({ e2eEncryption: true });
+    return c.json({
+      e2eEncryption: true,
+      accountRecovery: vaultRecoveryAvailable(recoveryKeyring(c.env)),
+      passwordRecovery: vaultRecoveryAvailable(recoveryKeyring(c.env)),
+    });
   } catch {
-    return c.json({ e2eEncryption: false });
+    return c.json({
+      e2eEncryption: false,
+      accountRecovery: false,
+      passwordRecovery: false,
+    });
   }
+});
+
+files.get("/:id/recovery", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const userId = c.get("userId");
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+  const file = await db
+    .select({ id: schema.files.id })
+    .from(schema.files)
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        eq(schema.files.encryptionMode, "aes-gcm"),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
+    .get();
+  if (!file) return c.json({ error: "not found" }, 404);
+  const recovery = await db
+    .select()
+    .from(schema.fileKeyRecovery)
+    .where(
+      and(
+        eq(schema.fileKeyRecovery.fileId, id),
+        eq(schema.fileKeyRecovery.ownerId, userId),
+      ),
+    )
+    .get()
+    .catch(() => null);
+  return c.json({
+    accountRecovery: !!recovery?.accountEnvelope,
+    passwordRecovery:
+      !!recovery?.passwordEnvelope && !!recovery?.passwordVerifier,
+    duressEnabled: !!recovery?.duressVerifier,
+    credentialSalt: recovery?.credentialSalt ?? null,
+    legacyBrowserOnly:
+      !recovery?.accountEnvelope &&
+      !(recovery?.passwordEnvelope && recovery?.passwordVerifier),
+  });
+});
+
+files.put("/:id/recovery", async (c) => {
+  c.header("Cache-Control", "no-store");
+  if (!sensitiveMutationAllowed(c))
+    return c.json({ error: "forbidden" }, 403);
+  if (!recoveryBodyAllowed(c))
+    return c.json({ error: "recovery request is too large" }, 413);
+  const userId = c.get("userId");
+  const id = c.req.param("id");
+  const body = await c.req
+    .json<{
+      account?: { action?: string; key?: string };
+      password?: {
+        action?: string;
+        envelope?: unknown;
+        proof?: string;
+        credentialSalt?: string;
+      };
+      duress?: { action?: string; proof?: string };
+    }>()
+    .catch(
+      () =>
+        ({}) as {
+          account?: { action?: string; key?: string };
+          password?: {
+            action?: string;
+            envelope?: unknown;
+            proof?: string;
+            credentialSalt?: string;
+          };
+          duress?: { action?: string; proof?: string };
+        },
+    );
+  const accountAction = recoveryAction(body.account?.action);
+  const passwordAction = recoveryAction(body.password?.action);
+  const duressAction = recoveryAction(body.duress?.action);
+  if (!accountAction || !passwordAction || !duressAction)
+    return c.json({ error: "invalid recovery actions" }, 400);
+  const db = getDb(c.env.DB);
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        eq(schema.files.encryptionMode, "aes-gcm"),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
+    .get();
+  if (!file) return c.json({ error: "not found" }, 404);
+  const current = await db
+    .select()
+    .from(schema.fileKeyRecovery)
+    .where(eq(schema.fileKeyRecovery.fileId, id))
+    .get()
+    .catch(() => null);
+  const keyring = recoveryKeyring(c.env);
+
+  let accountEnvelope = current?.accountEnvelope ?? null;
+  if (accountAction === "remove") accountEnvelope = null;
+  if (accountAction === "set") {
+    if (!vaultRecoveryAvailable(keyring))
+      return c.json({ error: "account recovery is unavailable" }, 503);
+    try {
+      accountEnvelope = await wrapAccountFileKey(
+        keyring!,
+        userId,
+        id,
+        String(body.account?.key ?? ""),
+      );
+    } catch {
+      return c.json({ error: "valid account recovery key required" }, 400);
+    }
+  }
+
+  let passwordEnvelope = current?.passwordEnvelope ?? null;
+  let passwordVerifier = current?.passwordVerifier ?? null;
+  let credentialSalt = current?.credentialSalt ?? null;
+  if (passwordAction === "remove") {
+    passwordEnvelope = null;
+    passwordVerifier = null;
+    credentialSalt = null;
+  }
+  if (passwordAction === "set") {
+    if (!vaultRecoveryAvailable(keyring))
+      return c.json({ error: "password recovery is unavailable" }, 503);
+    passwordEnvelope = normalizePasswordEnvelope(body.password?.envelope);
+    credentialSalt = normalizeCredentialSalt(body.password?.credentialSalt);
+    const proof = normalizeCredentialProof(body.password?.proof);
+    if (!passwordEnvelope || !credentialSalt || !proof)
+      return c.json({ error: "valid password recovery envelope required" }, 400);
+    try {
+      passwordVerifier = await createPasswordVerifier(
+        keyring!,
+        userId,
+        id,
+        proof,
+      );
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "valid recovery password required",
+        },
+        400,
+      );
+    }
+  }
+
+  let duressVerifier = current?.duressVerifier ?? null;
+  if (duressAction === "remove") duressVerifier = null;
+  if (duressAction === "set") {
+    if (!passwordEnvelope)
+      return c.json(
+        { error: "password recovery is required before duress protection" },
+        400,
+      );
+    if (!vaultRecoveryAvailable(keyring))
+      return c.json({ error: "duress protection is unavailable" }, 503);
+    const proof = normalizeCredentialProof(body.duress?.proof);
+    if (!proof)
+      return c.json({ error: "valid duress credential proof required" }, 400);
+    try {
+      duressVerifier = await createDuressVerifier(
+        keyring!,
+        userId,
+        id,
+        proof,
+      );
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "valid duress password required",
+        },
+        400,
+      );
+    }
+  }
+  if (!passwordEnvelope || !passwordVerifier) {
+    passwordEnvelope = null;
+    passwordVerifier = null;
+    duressVerifier = null;
+    credentialSalt = null;
+  }
+  const passwordProof = normalizeCredentialProof(body.password?.proof);
+  const duressProof = normalizeCredentialProof(body.duress?.proof);
+  if (
+    passwordAction === "set" &&
+    duressAction === "set" &&
+    passwordProof === duressProof
+  )
+    return c.json(
+      { error: "recovery and duress passwords must be different" },
+      400,
+    );
+  if (
+    passwordAction === "set" &&
+    duressAction === "keep" &&
+    current?.duressVerifier &&
+    credentialSalt !== current.credentialSalt
+  )
+    return c.json(
+      { error: "reset the duress password when changing credential salt" },
+      400,
+    );
+  if (
+    passwordAction === "set" &&
+    duressAction === "keep" &&
+    passwordProof &&
+    duressVerifier &&
+    keyring &&
+    (await verifyDuressProof(
+      keyring,
+      userId,
+      id,
+      passwordProof,
+      duressVerifier,
+    ))
+  )
+    return c.json(
+      { error: "recovery and duress passwords must be different" },
+      400,
+    );
+  if (
+    duressAction === "set" &&
+    passwordAction === "keep" &&
+    duressProof &&
+    passwordVerifier &&
+    keyring &&
+    (await verifyRecoveryProof(
+      keyring,
+      userId,
+      id,
+      duressProof,
+      passwordVerifier,
+    ))
+  )
+    return c.json(
+      { error: "recovery and duress passwords must be different" },
+      400,
+    );
+  if (!accountEnvelope && !passwordEnvelope)
+    return c.json(
+      { error: "keep at least one cross-device recovery method" },
+      400,
+    );
+
+  const now = nowSeconds();
+  await db
+    .insert(schema.fileKeyRecovery)
+    .values({
+      fileId: id,
+      ownerId: userId,
+      accountEnvelope,
+      passwordEnvelope,
+      passwordVerifier,
+      duressVerifier,
+      credentialSalt,
+      createdAt: current?.createdAt ?? now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: schema.fileKeyRecovery.fileId,
+      set: {
+        accountEnvelope,
+        passwordEnvelope,
+        passwordVerifier,
+        duressVerifier,
+        credentialSalt,
+        updatedAt: now,
+      },
+    })
+    .run();
+  await logActivity(c, db, "file.recovery.update", id, file.filename);
+  return c.json({
+    ok: true,
+    accountRecovery: !!accountEnvelope,
+    passwordRecovery: !!passwordEnvelope && !!passwordVerifier,
+    duressEnabled: !!duressVerifier,
+    credentialSalt,
+  });
+});
+
+files.post("/:id/recovery/unlock", async (c) => {
+  c.header("Cache-Control", "no-store");
+  c.header("Pragma", "no-cache");
+  if (!sensitiveMutationAllowed(c))
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 403);
+  if (!recoveryBodyAllowed(c))
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 413);
+  const userId = c.get("userId");
+  const id = c.req.param("id");
+  const body = await c.req
+    .json<{ proof?: string; mode?: "account" | "password" }>()
+    .catch(
+      () =>
+        ({}) as {
+          proof?: string;
+          mode?: "account" | "password";
+        },
+    );
+  const db = getDb(c.env.DB);
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        eq(schema.files.encryptionMode, "aes-gcm"),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
+    .get();
+  if (!file)
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 404);
+  const recovery = await db
+    .select()
+    .from(schema.fileKeyRecovery)
+    .where(
+      and(
+        eq(schema.fileKeyRecovery.fileId, id),
+        eq(schema.fileKeyRecovery.ownerId, userId),
+      ),
+    )
+    .get()
+    .catch(() => null);
+  if (!recovery)
+    return c.json(
+      { error: "This file is still browser-only", code: "BROWSER_ONLY" },
+      409,
+    );
+  const keyring = recoveryKeyring(c.env);
+
+  if (body.mode !== "password" && !body.proof) {
+    if (!recovery.accountEnvelope)
+      return c.json(
+        { error: "recovery password required", code: "PASSWORD_REQUIRED" },
+        409,
+      );
+    try {
+      const key = await unwrapAccountFileKey(
+        keyring!,
+        userId,
+        id,
+        recovery.accountEnvelope,
+      );
+      await logActivity(c, db, "file.recovery.account", id, file.filename);
+      return c.json({ ok: true, mode: "account", key });
+    } catch {
+      return c.json(
+        { error: "account recovery unavailable", code: "ACCOUNT_UNAVAILABLE" },
+        503,
+      );
+    }
+  }
+
+  const proof = normalizeCredentialProof(body.proof);
+  if (!proof || !keyring)
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 401);
+  // Consume the attempt before any credential comparison. Correct, wrong and
+  // duress proofs therefore share the same brute-force gate.
+  const rate = await checkRateLimit(
+    c.env.DB,
+    `vault-unlock:${userId}:${id}:${clientIp(c)}`,
+    8,
+    15 * 60,
+  );
+  if (!rate.allowed) {
+    c.header("Retry-After", String(rate.retryAfter));
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 429);
+  }
+  let duressMatches = false;
+  try {
+    duressMatches = await verifyDuressProof(
+      keyring,
+      userId,
+      id,
+      proof,
+      recovery.duressVerifier,
+    );
+  } catch {
+    duressMatches = false;
+  }
+  if (duressMatches) {
+    await requestVaultPurge(
+      c.env,
+      {
+        id: file.id,
+        ownerId: file.ownerId,
+        r2Key: file.r2Key,
+      },
+      (work) => c.executionCtx.waitUntil(work),
+    );
+    // Deliberately indistinguishable from a wrong password. The frontend
+    // refreshes file lists after any unlock failure, so the hidden tombstone
+    // disappears without revealing which credential caused the purge.
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 401);
+  }
+  let passwordMatches = false;
+  if (recovery.passwordEnvelope && recovery.passwordVerifier) {
+    try {
+      passwordMatches = await verifyRecoveryProof(
+        keyring,
+        userId,
+        id,
+        proof,
+        recovery.passwordVerifier,
+      );
+    } catch {
+      passwordMatches = false;
+    }
+  }
+  if (!passwordMatches)
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 401);
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(recovery.passwordEnvelope!);
+  } catch {
+    return c.json({ error: "unlock failed", code: "UNLOCK_FAILED" }, 500);
+  }
+  return c.json({ ok: true, mode: "password", envelope });
 });
 
 files.post("/presign", async (c) => {
@@ -380,6 +861,7 @@ files.post("/presign", async (c) => {
             eq(schema.files.sizeBytes, sizeBytes),
             eq(schema.files.status, "ready"),
             isNull(schema.files.deletedAt),
+            isNull(schema.files.purgeRequestedAt),
           ),
         )
         .get()
@@ -471,6 +953,7 @@ async function loadPendingOwned(c: any, id: string) {
         eq(schema.files.id, id),
         eq(schema.files.ownerId, userId),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .get();
@@ -544,13 +1027,20 @@ async function verifyMultipartIntegrity(
   // authenticates their ciphertext in the browser during decryption.
   if (row.encryptionMode === "aes-gcm" && !row.contentHash) return null;
   const object = await c.env.FILES.get(row.r2Key);
-  if (!object) return c.json({ error: "upload missing" }, 409);
+  if (!object)
+    return c.json(
+      { error: "upload missing", code: "UPLOAD_RESTART_REQUIRED" },
+      409,
+    );
   const actual = await sha256StreamHex(object.body);
   const expected = String(row.contentHash ?? "").toLowerCase();
   if (!expected || actual !== expected) {
     await discardPendingUpload(c, db, row);
     return c.json(
-      { error: "upload integrity check failed; retry the file" },
+      {
+        error: "upload integrity check failed; retry the file",
+        code: "UPLOAD_RESTART_REQUIRED",
+      },
       409,
     );
   }
@@ -588,7 +1078,10 @@ files.put("/:id/upload", async (c) => {
   if (row.status === "ready" || row.status === "quarantined")
     return c.json({ completed: true });
   if (row.status !== "pending")
-    return c.json({ error: "upload unavailable" }, 409);
+    return c.json(
+      { error: "upload unavailable", code: "UPLOAD_RESTART_REQUIRED" },
+      409,
+    );
   if (isExpired(row.expiresAt)) {
     await db.delete(schema.files).where(eq(schema.files.id, id)).run();
     return c.json({ error: "expired" }, 410);
@@ -650,8 +1143,15 @@ files.post("/:id/multipart/start", async (c) => {
     return c.json({
       uploadId: existing.uploadId,
       key: row.r2Key,
-      parts: JSON.parse(existing.parts || "[]"),
+      parts: storedMultipartParts(existing.parts),
     });
+  if (existing?.uploadId) {
+    // D1 sessions expire sooner than R2's provider-side multipart cleanup.
+    // Retire both sides so a resumed browser cannot leak an abandoned upload.
+    await c.env.FILES.resumeMultipartUpload(row.r2Key, existing.uploadId)
+      .abort()
+      .catch(() => {});
+  }
   const mpu = await c.env.FILES.createMultipartUpload(
     row.r2Key,
     row.contentType
@@ -699,7 +1199,7 @@ files.get("/:id/multipart/status", async (c) => {
   return c.json({
     session: {
       uploadId: session.uploadId,
-      parts: JSON.parse(session.parts || "[]"),
+      parts: storedMultipartParts(session.parts),
       expiresAt: session.expiresAt,
     },
   });
@@ -735,7 +1235,13 @@ files.put("/:id/multipart/part", async (c) => {
     session.uploadId !== uploadId ||
     session.expiresAt <= nowSeconds()
   )
-    return c.json({ error: "upload session expired" }, 410);
+    return c.json(
+      {
+        error: "The resumable upload session expired. Restarting is safe.",
+        code: "MULTIPART_SESSION_STALE",
+      },
+      410,
+    );
   const declared = Number(c.req.header("Content-Length"));
   if (!Number.isSafeInteger(declared) || declared <= 0)
     return c.json({ error: "valid Content-Length is required" }, 411);
@@ -743,16 +1249,40 @@ files.put("/:id/multipart/part", async (c) => {
     return c.json({ error: "multipart part exceeds 100 MiB" }, 413);
   const body = c.req.raw.body;
   if (!body) return c.json({ error: "empty part" }, 400);
-  const uploaded = await c.env.FILES.resumeMultipartUpload(
-    row.r2Key,
-    uploadId,
-  ).uploadPart(partNumber, body);
-  const parts = (
-    JSON.parse(session.parts || "[]") as Array<{
-      partNumber: number;
-      etag: string;
-    }>
-  ).filter((part) => part.partNumber !== uploaded.partNumber);
+  let uploaded: { partNumber: number; etag: string };
+  try {
+    uploaded = await c.env.FILES.resumeMultipartUpload(
+      row.r2Key,
+      uploadId,
+    ).uploadPart(partNumber, body);
+  } catch (error) {
+    const kind = multipartFailureKind(error);
+    if (kind !== "transient") {
+      await db
+        .update(schema.uploadSessions)
+        .set({ status: "stale", updatedAt: nowSeconds() })
+        .where(eq(schema.uploadSessions.id, session.id))
+        .run()
+        .catch(() => {});
+      return c.json(
+        {
+          error: "The resumable upload session expired. Restarting is safe.",
+          code: "MULTIPART_SESSION_STALE",
+        },
+        410,
+      );
+    }
+    return c.json(
+      {
+        error: "This upload part is temporarily unavailable. Please retry.",
+        code: "MULTIPART_TRANSIENT",
+      },
+      503,
+    );
+  }
+  const parts = storedMultipartParts(session.parts).filter(
+    (part) => part.partNumber !== uploaded.partNumber,
+  );
   parts.push({ partNumber: uploaded.partNumber, etag: uploaded.etag });
   parts.sort((a, b) => a.partNumber - b.partNumber);
   await db
@@ -787,23 +1317,16 @@ files.post("/:id/multipart/complete", async (c) => {
     session.status !== "active" ||
     session.expiresAt <= nowSeconds()
   )
-    return c.json({ error: "active upload session required" }, 400);
+    return c.json(
+      {
+        error: "The resumable upload session expired. Restarting is safe.",
+        code: "MULTIPART_SESSION_STALE",
+      },
+      410,
+    );
   // Complete only the parts the Worker itself recorded. Client-provided ETags
   // are progress hints, not trusted completion authority.
-  const parts = (
-    JSON.parse(session.parts || "[]") as Array<{
-      partNumber: number;
-      etag: string;
-    }>
-  )
-    .map((p: { partNumber: number; etag: string }) => ({
-      partNumber: Number(p.partNumber),
-      etag: String(p.etag),
-    }))
-    .sort(
-      (a: { partNumber: number }, b: { partNumber: number }) =>
-        a.partNumber - b.partNumber,
-    );
+  const parts = storedMultipartParts(session.parts);
   if (
     !parts.length ||
     parts.some(
@@ -822,18 +1345,51 @@ files.post("/:id/multipart/complete", async (c) => {
       object = await c.env.FILES.head(row.r2Key);
     }
   } catch (e) {
+    const kind = multipartFailureKind(e);
+    if (kind !== "transient") {
+      await db
+        .update(schema.uploadSessions)
+        .set({ status: "stale", updatedAt: nowSeconds() })
+        .where(eq(schema.uploadSessions.id, session.id))
+        .run()
+        .catch(() => {});
+      return c.json(
+        {
+          error: "The resumable upload session expired. Restarting is safe.",
+          code: "MULTIPART_SESSION_STALE",
+        },
+        410,
+      );
+    }
     return c.json(
       {
-        error: `multipart complete failed: ${(e as Error)?.message ?? "unknown"}`,
+        error: "Upload finalization is temporarily unavailable. Please retry.",
+        code: "MULTIPART_TRANSIENT",
       },
-      400,
+      503,
     );
   }
   if (!object || object.size !== row.sizeBytes) {
     await discardPendingUpload(c, db, row);
-    return c.json({ error: "upload size mismatch" }, 409);
+    return c.json(
+      { error: "upload size mismatch", code: "UPLOAD_RESTART_REQUIRED" },
+      409,
+    );
   }
-  const integrityError = await verifyMultipartIntegrity(c, db, row);
+  let integrityError: Response | null;
+  try {
+    integrityError = await verifyMultipartIntegrity(c, db, row);
+  } catch {
+    // The multipart object has already been committed. Preserve the session
+    // and reservation so retry only repeats finalization, never all 218+ MiB.
+    return c.json(
+      {
+        error: "Upload verification is temporarily unavailable. Please retry.",
+        code: "MULTIPART_TRANSIENT",
+      },
+      503,
+    );
+  }
   if (integrityError) return integrityError;
   return markReady(c, db, row, id);
 });
@@ -892,6 +1448,7 @@ files.get("/", async (c) => {
   const conds: any[] = [
     eq(schema.files.ownerId, userId),
     eq(schema.files.status, "ready"),
+    isNull(schema.files.purgeRequestedAt),
     gt(schema.files.expiresAt, now),
     or(isNull(schema.files.releaseAt), lte(schema.files.releaseAt, now)),
     includeTrash
@@ -941,6 +1498,7 @@ async function loadReadyOwned(c: any, id: string) {
         eq(schema.files.id, id),
         eq(schema.files.ownerId, userId),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .get();
@@ -1140,6 +1698,7 @@ files.post("/:id/share", async (c) => {
         eq(schema.files.id, id),
         eq(schema.files.ownerId, userId),
         isNull(schema.files.deletedAt),
+        isNull(schema.files.purgeRequestedAt),
       ),
     )
     .get();
@@ -1208,7 +1767,13 @@ files.delete("/:id/share", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await db
@@ -1258,7 +1823,13 @@ files.get("/:id/versions", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   const versions = await db
@@ -1565,6 +2136,7 @@ files.post("/bulk-keep-forever", async (c) => {
           eq(schema.files.id, id),
           eq(schema.files.ownerId, userId),
           isNull(schema.files.deletedAt),
+          isNull(schema.files.purgeRequestedAt),
         ),
       )
       .get()
@@ -1655,6 +2227,7 @@ files.post("/bulk", async (c) => {
           and(
             eq(schema.files.ownerId, userId),
             inArray(schema.files.id, idBatch),
+            isNull(schema.files.purgeRequestedAt),
           ),
         )
         .all()),
@@ -1732,7 +2305,13 @@ files.patch("/:id", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   const update: Record<string, unknown> = {};
@@ -1810,7 +2389,13 @@ files.post("/:id/restore", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await db
@@ -1828,7 +2413,13 @@ files.delete("/:id/permanent", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await deleteOneFileObjects(c.env.FILES, db, row).catch(() => {});
@@ -1843,7 +2434,13 @@ files.delete("/:id", async (c) => {
   const row = await db
     .select()
     .from(schema.files)
-    .where(and(eq(schema.files.id, id), eq(schema.files.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.files.id, id),
+        eq(schema.files.ownerId, userId),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
     .get();
   if (!row) return c.json({ error: "not found" }, 404);
   await db

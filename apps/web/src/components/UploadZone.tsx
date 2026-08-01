@@ -1,6 +1,8 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type RefObject,
@@ -21,8 +23,10 @@ import {
   fileCapabilities,
   generateAndUploadThumbnail,
   MULTIPART_THRESHOLD,
+  permanentDeleteFile,
   presign,
   uploadLargeFile,
+  uploadCheckpointMustBeCleared,
   uploadToR2,
   uploadUrlFor,
 } from "../lib/api";
@@ -34,10 +38,19 @@ import {
 import { accountStatus } from "../lib/account";
 import { formatBytes } from "../lib/format";
 import {
+  deleteEncryptionKey,
   encryptForUpload,
   MAX_BROWSER_ENCRYPTION_BYTES,
   saveEncryptionKey,
 } from "../lib/encryption";
+import {
+  configureFileRecovery,
+  createCredentialSalt,
+  createPasswordKeyEnvelope,
+  deriveRecoveryProof,
+  MAX_RECOVERY_PASSWORD_LENGTH,
+  MIN_RECOVERY_PASSWORD_LENGTH,
+} from "../lib/vaultRecovery";
 
 type JobState = "queued" | "uploading" | "done" | "error";
 type Job = {
@@ -47,6 +60,20 @@ type Job = {
   state: JobState;
   error?: string;
   file: File;
+};
+
+export type UploadZoneHandle = {
+  uploadFiles: (files: FileList | File[] | null) => Promise<void>;
+  uploadDrop: (dataTransfer: DataTransfer) => Promise<void>;
+};
+
+type UploadZoneProps = {
+  expiryDays: number;
+  keepForever?: boolean;
+  onUploaded: () => void;
+  inputRef?: RefObject<HTMLInputElement>;
+  folderId?: string | null;
+  folderName?: string;
 };
 
 // How many files upload in parallel. Bounded so we don't flood the Worker / R2
@@ -71,7 +98,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Errors that will never succeed on retry (quota, type, size, permission, auth).
 // Everything else is treated as transient and retried with backoff.
 function isPermanentError(message: string): boolean {
-  return /quota|not allowed|suspended|permission|exceeds|too large|offline|cancelled|413|415|403|401|400/i.test(
+  return /quota|not allowed|suspended|permission|blocked|exceeds|too large|offline|cancelled|451|413|415|403|401|400/i.test(
     message,
   );
 }
@@ -87,7 +114,12 @@ async function withRetry<T>(
     } catch (e) {
       lastErr = e;
       const msg = (e as Error)?.message ?? "";
-      if (isPermanentError(msg) || i === attempts - 1) break;
+      if (
+        uploadCheckpointMustBeCleared(e) ||
+        isPermanentError(msg) ||
+        i === attempts - 1
+      )
+        break;
       await sleep(400 * 2 ** i + Math.random() * 250);
     }
   }
@@ -148,30 +180,39 @@ async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
   return Array.from(dt.files);
 }
 
-export default function UploadZone({
-  expiryDays,
-  keepForever = false,
-  onUploaded,
-  inputRef,
-  folderId = null,
-  folderName,
-}: {
-  expiryDays: number;
-  keepForever?: boolean;
-  onUploaded: () => void;
-  inputRef?: RefObject<HTMLInputElement>;
-  folderId?: string | null;
-  folderName?: string;
-}) {
+const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
+  function UploadZone(
+    {
+      expiryDays,
+      keepForever = false,
+      onUploaded,
+      inputRef,
+      folderId = null,
+      folderName,
+    },
+    uploadZoneRef,
+  ) {
   const [dragging, setDragging] = useState(false);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [canKeepForever, setCanKeepForever] = useState(false);
   const [keepForeverChoice, setKeepForeverChoice] = useState(keepForever);
   const [encryptChoice, setEncryptChoice] = useState(false);
+  const [accountRecoveryAvailable, setAccountRecoveryAvailable] =
+    useState(false);
+  const [passwordRecoveryAvailable, setPasswordRecoveryAvailable] =
+    useState(false);
+  const [accountRecoveryChoice, setAccountRecoveryChoice] = useState(false);
+  const [passwordRecoveryChoice, setPasswordRecoveryChoice] = useState(false);
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = useState("");
+  const [duressChoice, setDuressChoice] = useState(false);
+  const [duressPassword, setDuressPassword] = useState("");
+  const [duressPasswordConfirm, setDuressPasswordConfirm] = useState("");
   const [e2eCapability, setE2eCapability] = useState<
     "checking" | "available" | "unavailable"
   >("checking");
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchRunning, setBatchRunning] = useState(false);
   const [releaseAtInput, setReleaseAtInput] = useState("");
   const [expireAfterDownloadChoice, setExpireAfterDownloadChoice] =
     useState(false);
@@ -184,6 +225,21 @@ export default function UploadZone({
   useEffect(() => {
     jobsRef.current = jobs;
   }, [jobs]);
+
+  const patchJob = useCallback((key: string, patch: Partial<Job>) => {
+    const current = jobsRef.current[key];
+    if (!current) return;
+    const next = {
+      ...jobsRef.current,
+      [key]: { ...current, ...patch },
+    };
+    // Keep the admission check synchronous with the rendered queue. React may
+    // batch state updates after a 218+ MiB upload finishes; a ref that still
+    // says "uploading" would otherwise reject every immediately-following
+    // file even though the batch has released its lock.
+    jobsRef.current = next;
+    setJobs(next);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -207,11 +263,23 @@ export default function UploadZone({
         if (!alive) return;
         const available = capabilities.e2eEncryption === true;
         setE2eCapability(available ? "available" : "unavailable");
+        setAccountRecoveryAvailable(capabilities.accountRecovery === true);
+        setPasswordRecoveryAvailable(capabilities.passwordRecovery === true);
+        setAccountRecoveryChoice(capabilities.accountRecovery === true);
+        setPasswordRecoveryChoice(
+          available &&
+            capabilities.passwordRecovery === true &&
+            capabilities.accountRecovery !== true,
+        );
         if (!available) setEncryptChoice(false);
       })
       .catch(() => {
         if (!alive) return;
         setE2eCapability("unavailable");
+        setAccountRecoveryAvailable(false);
+        setPasswordRecoveryAvailable(false);
+        setAccountRecoveryChoice(false);
+        setPasswordRecoveryChoice(false);
         setEncryptChoice(false);
       });
     return () => {
@@ -230,21 +298,8 @@ export default function UploadZone({
 
   const uploadOne = useCallback(
     async (key: string, file: File) => {
-      setJobs((j) =>
-        j[key]
-          ? {
-              ...j,
-              [key]: {
-                ...j[key],
-                state: "uploading",
-                pct: 0,
-                error: undefined,
-              },
-            }
-          : j,
-      );
-      const setPct = (pct: number) =>
-        setJobs((j) => (j[key] ? { ...j, [key]: { ...j[key], pct } } : j));
+      patchJob(key, { state: "uploading", pct: 0, error: undefined });
+      const setPct = (pct: number) => patchJob(key, { pct });
       try {
         const encrypted = encryptChoice ? await encryptForUpload(file) : null;
         const payload = encrypted?.file ?? file;
@@ -281,11 +336,55 @@ export default function UploadZone({
               }),
             )
           ).id;
-        if (encrypted)
-          await saveEncryptionKey(id, encrypted.key, {
-            nonce: encrypted.nonce,
-            encryptedMetadata: encrypted.encryptedMetadata,
-          });
+        if (encrypted) {
+          try {
+            const passwordEnvelope = passwordRecoveryChoice
+              ? await createPasswordKeyEnvelope(
+                  encrypted.key,
+                  recoveryPassword,
+                  id,
+                )
+              : undefined;
+            const credentialSalt = passwordRecoveryChoice
+              ? createCredentialSalt()
+              : undefined;
+            const [passwordProof, duressProof] = await Promise.all([
+              passwordRecoveryChoice && credentialSalt
+                ? deriveRecoveryProof(recoveryPassword, credentialSalt)
+                : Promise.resolve(undefined),
+              duressChoice && credentialSalt
+                ? deriveRecoveryProof(duressPassword, credentialSalt)
+                : Promise.resolve(undefined),
+            ]);
+            await configureFileRecovery(id, {
+              account: accountRecoveryChoice
+                ? { action: "set", key: encrypted.key }
+                : { action: "remove" },
+              password: passwordEnvelope
+                ? {
+                    action: "set",
+                    envelope: passwordEnvelope,
+                    proof: passwordProof,
+                    credentialSalt,
+                  }
+                : { action: "remove" },
+              duress: duressChoice
+                ? { action: "set", proof: duressProof }
+                : { action: "remove" },
+            });
+            await saveEncryptionKey(id, encrypted.key, {
+              nonce: encrypted.nonce,
+              encryptedMetadata: encrypted.encryptedMetadata,
+            });
+          } catch (recoveryCause) {
+            // Recovery is part of the encrypted upload contract. Never leave a
+            // pending reservation or upload bytes if its cross-device unlock
+            // method could not be committed first.
+            await permanentDeleteFile(id).catch(() => {});
+            await deleteEncryptionKey(id).catch(() => {});
+            throw recoveryCause;
+          }
+        }
         if (payload.size > MULTIPART_THRESHOLD) {
           if (!encrypted) await saveUploadCheckpoint(file, id).catch(() => {});
           await withRetry(() => uploadLargeFile(id, payload, setPct));
@@ -305,34 +404,34 @@ export default function UploadZone({
         if (!encrypted && file.type.startsWith("image/")) {
           await generateAndUploadThumbnail(id, file).catch(() => {});
         }
-        setJobs((j) =>
-          j[key] ? { ...j, [key]: { ...j[key], pct: 100, state: "done" } } : j,
-        );
+        patchJob(key, { pct: 100, state: "done", error: undefined });
         await clearUploadCheckpoint(file).catch(() => {});
         onUploaded();
       } catch (e) {
         const msg = (e as Error)?.message?.trim() || "Upload failed";
-        // The server removes expired/aborted multipart sessions. Drop the local
-        // pointer so the next retry negotiates a fresh upload instead of looping
-        // forever on a stale session id.
-        if (/not found|expired|unavailable|410/i.test(msg)) {
+        // Only discard the file checkpoint when the API says the file
+        // reservation itself is gone. A stale multipart *session* keeps the
+        // same file id and is restarted automatically by uploadLargeFile().
+        if (uploadCheckpointMustBeCleared(e)) {
           await clearUploadCheckpoint(file).catch(() => {});
         }
-        setJobs((j) =>
-          j[key]
-            ? { ...j, [key]: { ...j[key], state: "error", error: msg } }
-            : j,
-        );
+        patchJob(key, { state: "error", error: msg });
       }
     },
     [
       expiryDays,
       effectiveKeepForever,
       encryptChoice,
+      accountRecoveryChoice,
+      passwordRecoveryChoice,
+      recoveryPassword,
+      duressChoice,
+      duressPassword,
       releaseAtInput,
       expireAfterDownloadChoice,
       onUploaded,
       folderId,
+      patchJob,
     ],
   );
 
@@ -343,6 +442,7 @@ export default function UploadZone({
     async (entries: Array<{ key: string; file: File }>) => {
       if (!entries.length) return;
       batchRunningRef.current = true;
+      setBatchRunning(true);
       let cursor = 0;
       const worker = async () => {
         while (cursor < entries.length) {
@@ -360,6 +460,17 @@ export default function UploadZone({
         );
       } finally {
         batchRunningRef.current = false;
+        setBatchRunning(false);
+        if (
+          entries.every(
+            ({ key }) => jobsRef.current[key]?.state === "done",
+          )
+        ) {
+          setRecoveryPassword("");
+          setRecoveryPasswordConfirm("");
+          setDuressPassword("");
+          setDuressPasswordConfirm("");
+        }
       }
     },
     [encryptChoice, uploadOne],
@@ -372,9 +483,66 @@ export default function UploadZone({
       if (!files.length) return;
       if (encryptChoice && e2eCapability !== "available") {
         setBatchError(
-          "E2E upload is unavailable because the production backend has not confirmed encryption support.",
+          "Encrypted upload is unavailable because the production backend has not confirmed encryption support.",
         );
         return;
+      }
+      if (encryptChoice) {
+        if (!accountRecoveryChoice && !passwordRecoveryChoice) {
+          setBatchError(
+            "Choose signed-in recovery or a recovery password before uploading encrypted files.",
+          );
+          return;
+        }
+        if (passwordRecoveryChoice) {
+          const normalized = recoveryPassword.normalize("NFKC");
+          const length = Array.from(normalized).length;
+          if (recoveryPassword !== recoveryPasswordConfirm) {
+            setBatchError("Recovery password confirmation does not match.");
+            return;
+          }
+          if (
+            length < MIN_RECOVERY_PASSWORD_LENGTH ||
+            length > MAX_RECOVERY_PASSWORD_LENGTH
+          ) {
+            setBatchError(
+              `Recovery passwords must be ${MIN_RECOVERY_PASSWORD_LENGTH}-${MAX_RECOVERY_PASSWORD_LENGTH} characters.`,
+            );
+            return;
+          }
+        }
+        if (duressChoice) {
+          const normalizedDuress = duressPassword.normalize("NFKC");
+          const duressLength = Array.from(normalizedDuress).length;
+          if (!passwordRecoveryChoice) {
+            setBatchError(
+              "Enable password recovery before adding a duress password.",
+            );
+            return;
+          }
+          if (duressPassword !== duressPasswordConfirm) {
+            setBatchError("Duress password confirmation does not match.");
+            return;
+          }
+          if (
+            duressLength < MIN_RECOVERY_PASSWORD_LENGTH ||
+            duressLength > MAX_RECOVERY_PASSWORD_LENGTH ||
+            /^\d+$/.test(normalizedDuress)
+          ) {
+            setBatchError(
+              `The duress password must be ${MIN_RECOVERY_PASSWORD_LENGTH}-${MAX_RECOVERY_PASSWORD_LENGTH} characters and cannot be all numeric.`,
+            );
+            return;
+          }
+          if (
+            normalizedDuress === recoveryPassword.normalize("NFKC")
+          ) {
+            setBatchError(
+              "Recovery and duress passwords must be different.",
+            );
+            return;
+          }
+        }
       }
       const batchActive =
         batchRunningRef.current ||
@@ -398,22 +566,45 @@ export default function UploadZone({
         key: crypto.randomUUID(),
         file,
       }));
-      setJobs(() => {
-        const next: Record<string, Job> = {};
-        for (const { key, file } of entries)
-          next[key] = {
-            name: file.name,
-            size: file.size,
-            pct: 0,
-            state: "queued",
-            file,
-          };
-        jobsRef.current = next;
-        return next;
-      });
+      const next: Record<string, Job> = {};
+      for (const { key, file } of entries)
+        next[key] = {
+          name: file.name,
+          size: file.size,
+          pct: 0,
+          state: "queued",
+          file,
+        };
+      // uploadOne() begins before React is required to flush setState. Publish
+      // the queue to the ref first so drag/drop and picker uploads both have a
+      // row available for their first progress event.
+      jobsRef.current = next;
+      setJobs(next);
       await runJobs(entries);
     },
-    [e2eCapability, encryptChoice, runJobs],
+    [
+      e2eCapability,
+      encryptChoice,
+      accountRecoveryChoice,
+      passwordRecoveryChoice,
+      recoveryPassword,
+      recoveryPasswordConfirm,
+      duressChoice,
+      duressPassword,
+      duressPasswordConfirm,
+      runJobs,
+    ],
+  );
+
+  useImperativeHandle(
+    uploadZoneRef,
+    () => ({
+      uploadFiles: handleFiles,
+      uploadDrop: async (dataTransfer) => {
+        await handleFiles(await filesFromDrop(dataTransfer));
+      },
+    }),
+    [handleFiles],
   );
 
   const retryJob = useCallback(
@@ -421,17 +612,11 @@ export default function UploadZone({
       if (batchRunningRef.current) return;
       const job = jobsRef.current[key];
       if (!job?.file) return;
-      setJobs((j) =>
-        j[key]
-          ? {
-              ...j,
-              [key]: { ...j[key], state: "queued", pct: 0, error: undefined },
-            }
-          : j,
-      );
+      setBatchError(null);
+      patchJob(key, { state: "queued", pct: 0, error: undefined });
       void runJobs([{ key, file: job.file }]);
     },
-    [runJobs],
+    [patchJob, runJobs],
   );
 
   const retryAllFailed = useCallback(() => {
@@ -440,20 +625,11 @@ export default function UploadZone({
       ([, job]) => job.state === "error" && job.file,
     );
     if (!failed.length) return;
-    setJobs((j) => {
-      const next = { ...j };
-      for (const [key] of failed)
-        if (next[key])
-          next[key] = {
-            ...next[key],
-            state: "queued",
-            pct: 0,
-            error: undefined,
-          };
-      return next;
-    });
+    setBatchError(null);
+    for (const [key] of failed)
+      patchJob(key, { state: "queued", pct: 0, error: undefined });
     void runJobs(failed.map(([key, job]) => ({ key, file: job.file })));
-  }, [runJobs]);
+  }, [patchJob, runJobs]);
 
   const jobList = Object.entries(jobs);
   const errorCount = jobList.filter(([, j]) => j.state === "error").length;
@@ -469,8 +645,8 @@ export default function UploadZone({
   const batchPct =
     totalBytes > 0 ? Math.round((completedBytes / totalBytes) * 100) : 0;
 
-  return (
-    <div data-ui="upload-zone">
+    return (
+      <div data-ui="upload-zone">
       <motion.div
         animate={dragging ? zoneActive : zoneIdle}
         onDragOver={(e) => {
@@ -553,10 +729,10 @@ export default function UploadZone({
           />
           <LockKeyhole size={13} />{" "}
           {e2eCapability === "checking"
-            ? "Checking E2E support…"
+            ? "Checking encryption support…"
             : e2eCapability === "unavailable"
-              ? "E2E unavailable — backend upgrade required"
-              : `End-to-end encrypt (up to ${formatBytes(
+              ? "Encryption unavailable — backend upgrade required"
+              : `Encrypt in this browser (up to ${formatBytes(
                   MAX_BROWSER_ENCRYPTION_BYTES,
                 )})`}
         </label>
@@ -566,11 +742,140 @@ export default function UploadZone({
             className="max-w-xl text-center text-xs leading-5 text-slate-500"
             data-ui="upload-encryption-help"
           >
-            Encryption happens in this browser before upload. Downloads in this
-            browser decrypt automatically, and encrypted share links include the
-            decryption key after the # symbol. E2E batches encrypt and upload one
-            file at a time to limit memory use.
+            Encryption happens in this browser before upload. Choose how the
+            file can be recovered on another device below. Encrypted batches
+            process one file at a time to limit memory use.
           </p>
+        )}
+        {encryptChoice && (
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-xl space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-left text-xs text-slate-600"
+            data-ui="upload-recovery"
+          >
+            <div>
+              <p className="font-semibold text-slate-800">
+                Cross-device recovery
+              </p>
+              <p className="mt-0.5 leading-5">
+                Signed-in recovery is the easiest option. Password recovery
+                keeps a separately wrapped key for this file.
+              </p>
+            </div>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={accountRecoveryChoice}
+                disabled={!accountRecoveryAvailable || activeCount > 0}
+                onChange={(event) =>
+                  setAccountRecoveryChoice(event.target.checked)
+                }
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-semibold text-slate-700">
+                  Recover after signing in
+                </span>
+                <span className="mt-0.5 block leading-5 text-slate-500">
+                  Dropvault stores a service-wrapped copy of the file key. This
+                  is convenient, but is not strict end-to-end encryption.
+                </span>
+              </span>
+            </label>
+            {!accountRecoveryAvailable && (
+              <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-700">
+                Signed-in recovery is unavailable right now; use a recovery
+                password instead.
+              </p>
+            )}
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={passwordRecoveryChoice}
+                disabled={!passwordRecoveryAvailable || activeCount > 0}
+                onChange={(event) => {
+                  setPasswordRecoveryChoice(event.target.checked);
+                  if (!event.target.checked) setDuressChoice(false);
+                }}
+                className="mt-0.5"
+              />
+              <span className="font-semibold text-slate-700">
+                Add a recovery password
+              </span>
+            </label>
+            {!passwordRecoveryAvailable && (
+              <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-700">
+                Password recovery is unavailable until the recovery key service
+                is configured.
+              </p>
+            )}
+            {passwordRecoveryChoice && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={recoveryPassword}
+                  disabled={activeCount > 0}
+                  onChange={(event) => setRecoveryPassword(event.target.value)}
+                  placeholder="Recovery password"
+                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 outline-none focus:border-drift-400"
+                />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={recoveryPasswordConfirm}
+                  disabled={activeCount > 0}
+                  onChange={(event) =>
+                    setRecoveryPasswordConfirm(event.target.value)
+                  }
+                  placeholder="Confirm recovery password"
+                  className="rounded-xl border border-emerald-200 bg-white px-3 py-2 outline-none focus:border-drift-400"
+                />
+              </div>
+            )}
+            {passwordRecoveryChoice && (
+              <label className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-2.5 text-red-700">
+                <input
+                  type="checkbox"
+                  checked={duressChoice}
+                  disabled={activeCount > 0}
+                  onChange={(event) => setDuressChoice(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-semibold">Add a duress password</span>
+                  <span className="mt-0.5 block leading-5">
+                    Entering it during password unlock permanently removes the
+                    file, versions, shares, folder entry, and Trash entry.
+                  </span>
+                </span>
+              </label>
+            )}
+            {passwordRecoveryChoice && duressChoice && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={duressPassword}
+                  disabled={activeCount > 0}
+                  onChange={(event) => setDuressPassword(event.target.value)}
+                  placeholder="Duress password"
+                  className="rounded-xl border border-red-200 bg-white px-3 py-2 outline-none focus:border-red-400"
+                />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={duressPasswordConfirm}
+                  disabled={activeCount > 0}
+                  onChange={(event) =>
+                    setDuressPasswordConfirm(event.target.value)
+                  }
+                  placeholder="Confirm duress password"
+                  className="rounded-xl border border-red-200 bg-white px-3 py-2 outline-none focus:border-red-400"
+                />
+              </div>
+            )}
+          </div>
         )}
         <div
           onClick={(e) => e.stopPropagation()}
@@ -621,14 +926,22 @@ export default function UploadZone({
           type="file"
           multiple
           hidden
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            void handleFiles(files);
+            e.currentTarget.value = "";
+          }}
         />
         <input
           ref={folderInputRef}
           type="file"
           multiple
           hidden
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            void handleFiles(files);
+            e.currentTarget.value = "";
+          }}
           {...({ webkitdirectory: "", directory: "" } as Record<
             string,
             string
@@ -640,7 +953,11 @@ export default function UploadZone({
           accept="image/*,video/*"
           capture="environment"
           hidden
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            void handleFiles(files);
+            e.currentTarget.value = "";
+          }}
         />
       </motion.div>
 
@@ -671,7 +988,8 @@ export default function UploadZone({
                 <button
                   type="button"
                   onClick={retryAllFailed}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 font-medium text-red-600 transition hover:bg-red-100"
+                  disabled={batchRunning || activeCount > 0}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
                 >
                   <RotateCw size={13} /> Retry {errorCount} failed
                 </button>
@@ -739,7 +1057,7 @@ export default function UploadZone({
                   <button
                     type="button"
                     onClick={() => retryJob(key)}
-                    disabled={activeCount > 0}
+                    disabled={batchRunning || activeCount > 0}
                     title="Retry upload"
                     className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
                   >
@@ -751,6 +1069,9 @@ export default function UploadZone({
           })}
         </AnimatePresence>
       </div>
-    </div>
-  );
-}
+      </div>
+    );
+  },
+);
+
+export default UploadZone;

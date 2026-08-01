@@ -770,8 +770,8 @@ export default function FileCard({
         )}
         {file.encryptionMode === "aes-gcm" && (
           <span
-            title="End-to-end encrypted"
-            aria-label="End-to-end encrypted"
+            title="Client-side encrypted"
+            aria-label="Client-side encrypted"
             className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700"
           >
             <Lock size={11} />

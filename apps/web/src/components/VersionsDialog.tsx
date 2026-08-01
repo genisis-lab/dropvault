@@ -152,9 +152,9 @@ export default function VersionsDialog({
             <div className="border-b border-slate-100 px-5 py-3">
               {encrypted ? (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs leading-5 text-amber-800">
-                  Version replacement and restore are unavailable for E2E files
-                  because the server cannot safely create or inspect plaintext
-                  versions.
+                  Version replacement and restore are unavailable for
+                  client-side encrypted files because the server cannot safely
+                  create or inspect plaintext versions.
                 </p>
               ) : (
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-drift-300 bg-drift-50 px-3 py-2 text-xs font-semibold text-drift-700 hover:bg-drift-100">

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { createAuth } from "../auth";
 import { getDb, schema } from "../db";
 import { adminRole } from "../middleware/admin";
@@ -139,7 +139,12 @@ account.get("/export", async (c) => {
           encryptionMode: schema.files.encryptionMode,
         })
         .from(schema.files)
-        .where(eq(schema.files.ownerId, userId))
+        .where(
+          and(
+            eq(schema.files.ownerId, userId),
+            isNull(schema.files.purgeRequestedAt),
+          ),
+        )
         .all(),
       db
         .select({
