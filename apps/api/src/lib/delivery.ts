@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import { nowSeconds } from "./expiry";
 import { isSafeWebhookUrl } from "./url";
@@ -54,6 +54,7 @@ async function signature(secret: string, body: string): Promise<string> {
 export async function deliverPendingEvents(
   env: Bindings,
   limit = 25,
+  eventIds: string[] = [],
 ): Promise<number> {
   const db = getDb(env.DB);
   const now = nowSeconds();
@@ -64,6 +65,7 @@ export async function deliverPendingEvents(
       and(
         eq(schema.outgoingEvents.status, "pending"),
         lte(schema.outgoingEvents.nextAttemptAt, now),
+        eventIds.length ? inArray(schema.outgoingEvents.id, eventIds) : undefined,
       ),
     )
     .orderBy(asc(schema.outgoingEvents.createdAt))

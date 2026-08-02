@@ -21,6 +21,7 @@ import { adminRole } from "../middleware/admin";
 import { parseMaxUploadBytes } from "../lib/settings";
 import type { Bindings, Variables } from "../types";
 import { scanFile } from "../lib/scanner";
+import { enqueueUploadComplete, processUploadComplete } from "../lib/uploadEvents";
 
 type CreateUploadRequestBody = {
   title?: string;
@@ -1080,6 +1081,11 @@ uploadRequests.post(
         .set({ status: "completed", updatedAt: now })
         .where(eq(schema.uploadSessions.id, loaded.session.id))
         .run();
+      c.executionCtx.waitUntil(
+        enqueueUploadComplete(c.env, loaded.file.id).catch(() =>
+          processUploadComplete(c.env, loaded.file.id),
+        ),
+      );
       return c.json({
         ok: true,
         fileId: loaded.file.id,
@@ -1313,6 +1319,13 @@ uploadRequests.post("/public/:token", async (c) => {
     targetType: "upload_request",
     targetId: row.id,
   });
+  for (const fileId of fileIds) {
+    c.executionCtx.waitUntil(
+      enqueueUploadComplete(c.env, fileId).catch(() =>
+        processUploadComplete(c.env, fileId),
+      ),
+    );
+  }
   return c.json({
     ok: true,
     fileIds,
