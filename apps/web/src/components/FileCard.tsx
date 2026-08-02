@@ -65,6 +65,7 @@ function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } {
 }
 type FolderOption = { id: string; name: string };
 type MenuPos = { top?: number; bottom?: number; left: number };
+export type FileSelectOptions = { shiftKey?: boolean };
 type Props = {
   file: DriftFile;
   view: "grid" | "list";
@@ -87,7 +88,7 @@ type Props = {
   onKeepForever?: (id: string) => void;
   onUnkeepForever?: (id: string) => void;
   selected?: boolean;
-  onToggleSelect?: (id: string) => void;
+  onToggleSelect?: (id: string, options?: FileSelectOptions) => void;
   anySelected?: boolean;
   getDragIds?: (id: string) => string[];
 };
@@ -209,10 +210,21 @@ export default function FileCard({
   >["onDragStart"];
   function handleContextMenu(e: React.MouseEvent) {
     if (!onToggleSelect) return;
+    if (
+      e.target instanceof Element &&
+      e.target.closest("[data-file-actions], [data-file-select-toggle]")
+    )
+      return;
     e.preventDefault();
     onToggleSelect(file.id);
   }
-  function preview() {
+  function preview(e?: React.MouseEvent<HTMLElement>) {
+    if (e?.shiftKey && onToggleSelect) {
+      e.preventDefault();
+      e.stopPropagation();
+      onToggleSelect(file.id, { shiftKey: true });
+      return;
+    }
     if (file.deletedAt) return;
     if (onOpenDetails) {
       onOpenDetails(file);
@@ -293,19 +305,19 @@ export default function FileCard({
     ) : null;
   const checkbox = onToggleSelect ? (
     <button
+      type="button"
+      data-file-select-toggle
       onClick={(e) => {
         e.stopPropagation();
-        onToggleSelect(file.id);
+        onToggleSelect(file.id, { shiftKey: e.shiftKey });
       }}
       aria-label={selected ? "Deselect" : "Select"}
       className={
-        "grid h-5 w-5 place-items-center rounded-md border transition " +
+        "file-select-toggle grid h-5 w-5 place-items-center rounded-md border transition " +
         (selected
-          ? "border-drift-500 bg-drift-500 text-white"
+          ? "file-select-toggle-active border-drift-500 bg-drift-500 text-white"
           : "border-slate-300 bg-white/90 text-transparent hover:border-drift-400 " +
-            (showCheckbox
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100"))
+            (showCheckbox ? "file-select-toggle-active" : ""))
       }
     >
       <Check size={13} />
@@ -615,6 +627,7 @@ export default function FileCard({
           "group relative flex items-center gap-3 px-4 py-2.5 transition " +
           (selected ? "bg-drift-500/10" : "hover:bg-slate-50")
         }
+        data-file-id={file.id}
         data-ui="file-row"
       >
         {onToggleSelect && (
@@ -622,7 +635,7 @@ export default function FileCard({
         )}
         <button
           type="button"
-          onClick={preview}
+          onClick={(e) => preview(e)}
           aria-label={`Open details for ${file.filename}`}
           className={
             "grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " +
@@ -681,7 +694,7 @@ export default function FileCard({
         >
           {formatBytes(file.sizeBytes)}
         </span>
-        <div className="relative" data-ui="file-actions">
+        <div className="relative" data-file-actions data-ui="file-actions">
           <button
             type="button"
             onClick={openMenu}
@@ -710,15 +723,17 @@ export default function FileCard({
           ? "border-drift-400 ring-2 ring-drift-400/60"
           : "border-slate-200 hover:border-slate-300")
       }
+      data-file-id={file.id}
       data-ui="file-card"
     >
       <div
-        onClick={preview}
+        onClick={(e) => preview(e)}
         className={
           "relative flex h-24 items-center justify-center overflow-hidden rounded-t-2xl " +
           tone.bg +
           (canPreview ? " cursor-zoom-in" : clickable ? " cursor-pointer" : "")
         }
+        data-file-preview
       >
         {showThumb ? (
           <img
@@ -777,7 +792,7 @@ export default function FileCard({
             <Lock size={11} />
           </span>
         )}
-        <div className="relative">
+        <div className="relative" data-file-actions>
           <button
             type="button"
             onClick={openMenu}
