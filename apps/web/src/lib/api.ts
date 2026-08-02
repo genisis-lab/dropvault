@@ -1296,6 +1296,12 @@ export async function adminDeleteFlag(
 export function adminFlagContentUrl(id: string): string {
   return `${API}/api/admin/flags/${encodeURIComponent(id)}/content`;
 }
+export function adminFilePreviewUrl(id: string): string {
+  return `${API}/api/admin/files/${encodeURIComponent(id)}/preview`;
+}
+export function adminFileDownloadUrl(id: string): string {
+  return `${API}/api/admin/files/${encodeURIComponent(id)}/download`;
+}
 export async function adminBanFlagHash(
   id: string,
   confirmation: string,

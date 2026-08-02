@@ -45,6 +45,8 @@ import {
   adminUpdateFlag,
   adminDeleteFlag,
   adminFlagContentUrl,
+  adminFilePreviewUrl,
+  adminFileDownloadUrl,
   adminBanFlagHash,
   adminHashBans,
   adminAdmins,
@@ -156,6 +158,18 @@ function downloadCsv(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function adminFileContentAvailable(file: AdminFile): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  return (
+    file.encryptionMode !== "aes-gcm" &&
+    file.adminContentAccessible !== false &&
+    (file.status === "ready" || file.status === "quarantined") &&
+    file.deletedAt == null &&
+    (!file.releaseAt || file.releaseAt <= now) &&
+    file.expiresAt > now
+  );
 }
 
 export default function AdminPanel({
@@ -1369,6 +1383,7 @@ export default function AdminPanel({
                         <FileRow
                           key={f.id}
                           file={f}
+                          canViewContent={isOwner}
                           selected={selected.has(f.id)}
                           onToggle={() =>
                             setSelected((p) => {
@@ -2593,6 +2608,7 @@ function UserDetail({
 
 function FileRow({
   file,
+  canViewContent,
   selected,
   onToggle,
   onRevoke,
@@ -2603,6 +2619,7 @@ function FileRow({
   onPermanent,
 }: {
   file: AdminFile;
+  canViewContent: boolean;
   selected: boolean;
   onToggle: () => void;
   onRevoke: () => void;
@@ -2641,6 +2658,28 @@ function FileRow({
       <td className="px-3 py-2.5 text-slate-500">{fmtDate(file.expiresAt)}</td>
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-end gap-1">
+          {canViewContent && adminFileContentAvailable(file) && (
+            <>
+              <a
+                href={adminFilePreviewUrl(file.id)}
+                target="_blank"
+                rel="noopener"
+                className="icon-btn"
+                aria-label={`Preview ${file.filename}`}
+                title="Preview file"
+              >
+                <FileText size={15} />
+              </a>
+              <a
+                href={adminFileDownloadUrl(file.id)}
+                className="icon-btn"
+                aria-label={`Download ${file.filename}`}
+                title="Download file"
+              >
+                <Download size={15} />
+              </a>
+            </>
+          )}
           {file.shareToken && (
             <a
               href={shareUrl(file.shareToken)}
