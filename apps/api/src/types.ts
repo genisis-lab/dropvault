@@ -3,6 +3,7 @@
 export type Bindings = {
   DB: D1Database;
   FILES: R2Bucket;
+  UPLOAD_EVENTS: Queue<import("./lib/uploadEvents").UploadCompleteMessage>;
   // Optional antivirus/content scanner service binding.
   SCANNER?: Fetcher;
   // vars
