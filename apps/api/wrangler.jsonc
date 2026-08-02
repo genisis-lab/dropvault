@@ -21,6 +21,24 @@
   "triggers": {
     "crons": ["0 * * * *"],
   },
+  "queues": {
+    "producers": [
+      {
+        "binding": "UPLOAD_EVENTS",
+        "queue": "dropvault-upload-events",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "dropvault-upload-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "dropvault-upload-events-dlq",
+        "retry_delay": 15,
+      },
+    ],
+  },
   "vars": {
     "API_URL": "https://dropvault-api.neil27.workers.dev",
     "PUBLIC_APP_URL": "https://drive.builtwai.com",

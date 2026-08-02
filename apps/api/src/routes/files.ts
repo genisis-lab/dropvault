@@ -39,6 +39,7 @@ import {
 } from "../lib/vaultRecovery";
 import { requestVaultPurge } from "../lib/vaultPurge";
 import { parseMaxUploadBytes } from "../lib/settings";
+import { enqueueUploadComplete, processUploadComplete } from "../lib/uploadEvents";
 import { requireAuth } from "../middleware/auth";
 import { adminRole } from "../middleware/admin";
 import type { Bindings, Variables } from "../types";
@@ -1002,6 +1003,15 @@ async function markReady(
     .catch(() => {});
   await logActivity(c, db, "file.upload", id, row.filename);
   if (c.env.SCANNER) c.executionCtx.waitUntil(scanFile(c.env, id));
+  c.executionCtx.waitUntil(
+    enqueueUploadComplete(c.env, id).catch(async (error) => {
+      console.error("upload-complete queue unavailable", {
+        fileId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await processUploadComplete(c.env, id);
+    }),
+  );
   return c.json({ ok: true });
 }
 

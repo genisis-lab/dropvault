@@ -21,6 +21,7 @@ import { cleanupMetadata, scheduleExpiryWarnings } from "./lib/retention";
 import { deliverPendingEvents } from "./lib/delivery";
 import { workspaceDefaultTheme } from "./lib/theme";
 import { trustedAppOrigins } from "./lib/origins";
+import { processUploadComplete, type UploadCompleteMessage } from "./lib/uploadEvents";
 import type { Bindings, Variables } from "./types";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -205,5 +206,25 @@ export default {
         }
       })(),
     );
+  },
+  queue: async (batch: MessageBatch, env: Bindings) => {
+    for (const message of batch.messages) {
+      const body = message.body as Partial<UploadCompleteMessage> | null;
+      if (body?.type !== "upload-complete" || typeof body.fileId !== "string") {
+        message.ack();
+        continue;
+      }
+      try {
+        await processUploadComplete(env, body.fileId);
+        message.ack();
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "queue.uploadComplete.failed",
+          fileId: body.fileId,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        message.retry({ delaySeconds: Math.min(300, 15 * 2 ** message.attempts) });
+      }
+    }
   },
 } satisfies ExportedHandler<Bindings>;
