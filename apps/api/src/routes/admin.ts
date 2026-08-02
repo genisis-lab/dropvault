@@ -1199,25 +1199,126 @@ async function serveOwnerFileContent(
   if (isExpired(file.expiresAt))
     return c.json({ error: "file expired" }, 410);
 
-  const object = await c.env.FILES.get(file.r2Key);
+  const meta = await c.env.FILES.head(file.r2Key);
+  if (!meta) return c.json({ error: "stored object not found" }, 404);
+  const range = parseOwnerRange(c.req.header("Range") ?? null, meta.size);
+  const object = await c.env.FILES.get(
+    file.r2Key,
+    range
+      ? { range: { offset: range.offset, length: range.length } }
+      : undefined,
+  );
   if (!object) return c.json({ error: "stored object not found" }, 404);
   const headers = new Headers();
   object.writeHttpMetadata(headers);
-  headers.set("Content-Type", file.contentType || "application/octet-stream");
+  const storedContentType =
+    file.contentType ||
+    object.httpMetadata?.contentType ||
+    meta.httpMetadata?.contentType ||
+    null;
+  const contentType =
+    !storedContentType || storedContentType === "application/octet-stream"
+      ? (guessOwnerContentType(file.filename) ?? storedContentType)
+      : storedContentType;
+  if (contentType) headers.set("Content-Type", contentType);
   headers.set(
     "Content-Disposition",
     `${disposition}; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
   );
+  headers.set("Accept-Ranges", "bytes");
   headers.set("Cache-Control", "private, no-store");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "no-referrer");
-  if (disposition === "inline")
-    headers.set(
-      "Content-Security-Policy",
-      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox",
-    );
+  if (meta.httpEtag) headers.set("ETag", meta.httpEtag);
+  if (disposition === "inline") addOwnerInlineSecurityHeaders(headers, contentType);
   await logAction(c, db, action, "file", file.id, file.filename);
+  if (range) {
+    headers.set("Content-Range", `bytes ${range.offset}-${range.end}/${meta.size}`);
+    headers.set("Content-Length", String(range.length));
+    return new Response(object.body, { status: 206, headers });
+  }
+  headers.set("Content-Length", String(meta.size));
   return new Response(object.body, { headers });
+}
+
+// Safari and other native media players request video in byte ranges. Keep
+// the same single-range behavior as the file and share streaming endpoints.
+function parseOwnerRange(
+  header: string | null,
+  size: number,
+): { offset: number; length: number; end: number } | null {
+  if (!header || size <= 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const startRaw = match[1];
+  const endRaw = match[2];
+  if (startRaw === "" && endRaw === "") return null;
+  let start: number;
+  let end: number;
+  if (startRaw === "") {
+    const suffixLength = Number(endRaw);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return null;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(startRaw);
+    if (!Number.isFinite(start) || start < 0) return null;
+    end = endRaw === "" ? size - 1 : Number(endRaw);
+    if (!Number.isFinite(end)) return null;
+    end = Math.min(end, size - 1);
+  }
+  if (start > end || start >= size) return null;
+  return { offset: start, length: end - start + 1, end };
+}
+
+function guessOwnerContentType(filename: string): string | null {
+  const extension = filename.toLowerCase().split(".").pop() ?? "";
+  const types: Record<string, string> = {
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+    ogv: "video/ogg",
+    mkv: "video/x-matroska",
+    avi: "video/x-msvideo",
+    mpeg: "video/mpeg",
+    mpg: "video/mpeg",
+    "3gp": "video/3gpp",
+    mp3: "audio/mpeg",
+    m4a: "audio/mp4",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    flac: "audio/flac",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    pdf: "application/pdf",
+  };
+  return types[extension] ?? null;
+}
+
+// Inert media and PDF viewers need their own native control scripts. Keep
+// script-capable uploads sandboxed, but do not sandbox video/audio/image/PDF
+// previews or Safari will leave the native player stuck loading.
+function addOwnerInlineSecurityHeaders(
+  headers: Headers,
+  contentType: string | null,
+): void {
+  const type = (contentType ?? "").toLowerCase();
+  const scriptable =
+    !type ||
+    type.includes("svg") ||
+    type.includes("html") ||
+    type.includes("xml");
+  headers.set(
+    "Content-Security-Policy",
+    scriptable
+      ? "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; base-uri 'none'; frame-ancestors 'none'; sandbox"
+      : "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'self'; frame-ancestors 'none'",
+  );
 }
 
 // Workspace-wide file access is intentionally owner-only. Admins retain the
