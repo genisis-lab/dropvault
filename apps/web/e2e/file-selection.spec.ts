@@ -20,7 +20,7 @@ const files = [
   encryptionMode: "none",
 }))
 
-test.use({ ...devices["iPhone 13"] })
+test.use({ ...devices["iPhone 13"], defaultBrowserType: "chromium" })
 
 async function mockDashboardApi(page: Page) {
   await page.route("**/api/**", async (route) => {
