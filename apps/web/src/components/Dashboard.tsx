@@ -63,7 +63,7 @@ import { downloadDecryptedFile } from "../lib/encryption";
 import Sidebar, { type Filter } from "./Sidebar";
 import Topbar, { type ViewMode } from "./Topbar";
 import UploadZone, { type UploadZoneHandle } from "./UploadZone";
-import FileCard from "./FileCard";
+import FileCard, { type FileSelectOptions } from "./FileCard";
 import FolderCard from "./FolderCard";
 import NameDialog from "./NameDialog";
 import ShareDialog from "./ShareDialog";
@@ -129,6 +129,22 @@ type ConfirmState = {
   danger?: boolean;
   onConfirm: () => void;
 } | null;
+type SelectionRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+type SelectionGesture = {
+  pointerId: number;
+  pointerType: string;
+  startX: number;
+  startY: number;
+  targetId: string | null;
+  shiftKey: boolean;
+  baseSelection: Set<string>;
+  active: boolean;
+};
 const barInitial = { opacity: 0, y: 24, x: "-50%" };
 const barAnimate = { opacity: 1, y: 0, x: "-50%" };
 const barExit = { opacity: 0, y: 24, x: "-50%" };
@@ -136,6 +152,7 @@ const popInitial = { opacity: 0, scale: 0.95, y: 8 };
 const popAnimate = { opacity: 1, scale: 1, y: 0 };
 const overlayHidden = { opacity: 0 };
 const overlayShown = { opacity: 1 };
+const LONG_PRESS_MS = 450;
 function titleFor(f: Filter): string {
   return f === "shared"
     ? "Shared"
@@ -204,6 +221,18 @@ export default function Dashboard({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const uploadZoneRef = useRef<UploadZoneHandle>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const selectionSurfaceRef = useRef<HTMLDivElement>(null);
+  const selectionGestureRef = useRef<SelectionGesture | null>(null);
+  const selectionHoldRef = useRef<number | null>(null);
+  const selectedRef = useRef<Set<string>>(new Set());
+  const selectionAnchorRef = useRef<string | null>(null);
+  const suppressClickUntilRef = useRef(0);
+  const suppressContextMenuUntilRef = useRef(0);
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(
+    null,
+  );
+  const [selectionSelecting, setSelectionSelecting] = useState(false);
+  selectedRef.current = selected;
   useEffect(() => {
     if (hasStoredView()) return;
     setViewState(
@@ -554,15 +583,34 @@ export default function Dashboard({
   const isProductivityTheme =
     theme === "neubrutalism" || theme === "pressroom" || theme === "quiet";
   function clearSelection() {
-    setSelected(new Set());
+    const next = new Set<string>();
+    selectedRef.current = next;
+    selectionAnchorRef.current = null;
+    setSelected(next);
     setMoveBarOpen(false);
   }
-  function toggleSelect(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
+  function selectFile(id: string, options: FileSelectOptions = {}) {
+    const ids = sorted.map((file) => file.id);
+    const anchor = selectionAnchorRef.current;
+    const targetIndex = ids.indexOf(id);
+    const anchorIndex = anchor ? ids.indexOf(anchor) : -1;
+    let next: Set<string>;
+    if (
+      options.shiftKey &&
+      anchorIndex >= 0 &&
+      targetIndex >= 0
+    ) {
+      next = new Set(selectedRef.current);
+      const start = Math.min(anchorIndex, targetIndex);
+      const end = Math.max(anchorIndex, targetIndex);
+      for (let i = start; i <= end; i++) next.add(ids[i]);
+    } else {
+      next = new Set(selectedRef.current);
       next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    }
+    selectedRef.current = next;
+    selectionAnchorRef.current = id;
+    setSelected(next);
   }
   function getDragIds(id: string): string[] {
     return selected.has(id) && selected.size > 0 ? Array.from(selected) : [id];
@@ -651,6 +699,185 @@ export default function Dashboard({
     [sorted, visibleCount],
   );
   const hasMore = visibleCount < sorted.length;
+  function fileIdFromTarget(target: EventTarget | null): string | null {
+    if (!(target instanceof Element)) return null;
+    return target.closest<HTMLElement>("[data-file-id]")?.dataset.fileId ?? null;
+  }
+  function isSelectionControlTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    return Boolean(
+      target.closest(
+        "[data-file-actions], [data-file-select-toggle], button, a, input, select, textarea",
+      ),
+    );
+  }
+  function rectFromPoints(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+  ): SelectionRect {
+    return {
+      left: Math.min(startX, endX),
+      top: Math.min(startY, endY),
+      width: Math.abs(endX - startX),
+      height: Math.abs(endY - startY),
+    };
+  }
+  function applySelectionRect(
+    gesture: SelectionGesture,
+    rect: SelectionRect,
+  ): void {
+    const next = new Set(gesture.baseSelection);
+    const selectionRight = rect.left + rect.width;
+    const selectionBottom = rect.top + rect.height;
+    const surface = selectionSurfaceRef.current;
+    const elements = surface?.querySelectorAll<HTMLElement>("[data-file-id]");
+    elements?.forEach((element) => {
+      const id = element.dataset.fileId;
+      if (!id) return;
+      const box = element.getBoundingClientRect();
+      const isPointSelection = rect.width === 0 && rect.height === 0;
+      const hit = isPointSelection
+        ? rect.left >= box.left &&
+          rect.left <= box.right &&
+          rect.top >= box.top &&
+          rect.top <= box.bottom
+        : rect.left < box.right &&
+          selectionRight > box.left &&
+          rect.top < box.bottom &&
+          selectionBottom > box.top;
+      if (hit) next.add(id);
+    });
+    if (gesture.targetId) next.add(gesture.targetId);
+    selectedRef.current = next;
+    setSelected(next);
+  }
+  function clearSelectionHold() {
+    if (selectionHoldRef.current == null) return;
+    window.clearTimeout(selectionHoldRef.current);
+    selectionHoldRef.current = null;
+  }
+  function startSelectionGesture() {
+    const gesture = selectionGestureRef.current;
+    const surface = selectionSurfaceRef.current;
+    if (!gesture || gesture.active || !surface) return;
+    gesture.active = true;
+    setSelectionSelecting(true);
+    suppressClickUntilRef.current = performance.now() + 500;
+    suppressContextMenuUntilRef.current = performance.now() + 1000;
+    const rect = rectFromPoints(
+      gesture.startX,
+      gesture.startY,
+      gesture.startX,
+      gesture.startY,
+    );
+    setSelectionRect(rect);
+    applySelectionRect(gesture, rect);
+    try {
+      surface.setPointerCapture(gesture.pointerId);
+    } catch {
+      /* The pointer may have been cancelled between the timer and capture. */
+    }
+  }
+  function handleSelectionPointerDown(e: React.PointerEvent<HTMLElement>) {
+    if (!e.isPrimary || (e.pointerType === "mouse" && e.button !== 0)) return;
+    if (selectionGestureRef.current || isSelectionControlTarget(e.target))
+      return;
+    const targetId = fileIdFromTarget(e.target);
+    const isTouch = e.pointerType !== "mouse";
+    if (isTouch && !targetId) return;
+    const gesture: SelectionGesture = {
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+      startX: e.clientX,
+      startY: e.clientY,
+      targetId,
+      shiftKey: e.shiftKey,
+      baseSelection: e.shiftKey
+        ? new Set(selectedRef.current)
+        : new Set<string>(),
+      active: false,
+    };
+    selectionGestureRef.current = gesture;
+    if (isTouch || Boolean(targetId)) {
+      selectionHoldRef.current = window.setTimeout(
+        startSelectionGesture,
+        LONG_PRESS_MS,
+      );
+    }
+  }
+  function handleSelectionPointerMove(e: React.PointerEvent<HTMLElement>) {
+    const gesture = selectionGestureRef.current;
+    if (!gesture || gesture.pointerId !== e.pointerId) return;
+    const distance = Math.hypot(
+      e.clientX - gesture.startX,
+      e.clientY - gesture.startY,
+    );
+    if (!gesture.active) {
+      if (gesture.pointerType !== "mouse") {
+        if (distance > 8) {
+          clearSelectionHold();
+          selectionGestureRef.current = null;
+        }
+        return;
+      }
+      if (gesture.targetId) {
+        if (distance > 5) {
+          clearSelectionHold();
+          selectionGestureRef.current = null;
+        }
+        return;
+      }
+      if (distance <= 5) return;
+      e.preventDefault();
+      startSelectionGesture();
+    }
+    if (!gesture.active) return;
+    e.preventDefault();
+    const rect = rectFromPoints(
+      gesture.startX,
+      gesture.startY,
+      e.clientX,
+      e.clientY,
+    );
+    setSelectionRect(rect);
+    applySelectionRect(gesture, rect);
+  }
+  function finishSelectionGesture(
+    e: React.PointerEvent<HTMLElement>,
+    cancelled = false,
+  ) {
+    const gesture = selectionGestureRef.current;
+    if (!gesture || gesture.pointerId !== e.pointerId) return;
+    clearSelectionHold();
+    if (gesture.active) {
+      e.preventDefault();
+      suppressClickUntilRef.current = performance.now() + 500;
+      if (gesture.targetId) selectionAnchorRef.current = gesture.targetId;
+      const surface = selectionSurfaceRef.current;
+      if (surface?.hasPointerCapture(gesture.pointerId))
+        surface.releasePointerCapture(gesture.pointerId);
+    }
+    selectionGestureRef.current = null;
+    setSelectionRect(null);
+    setSelectionSelecting(false);
+    if (cancelled) suppressClickUntilRef.current = 0;
+  }
+  function handleSelectionContextMenu(e: React.MouseEvent<HTMLElement>) {
+    const id = fileIdFromTarget(e.target);
+    if (!id || isSelectionControlTarget(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (performance.now() < suppressContextMenuUntilRef.current) return;
+    selectFile(id);
+  }
+  function handleSelectionClickCapture(e: React.MouseEvent<HTMLElement>) {
+    if (performance.now() >= suppressClickUntilRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    suppressClickUntilRef.current = 0;
+  }
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [filter, sort, currentFolderId, q, typeScope]);
@@ -1110,7 +1337,16 @@ export default function Dashboard({
               ) : view === "grid" ? (
                 <motion.div
                   layout
-                  className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4"
+                  ref={selectionSurfaceRef}
+                  onPointerDown={handleSelectionPointerDown}
+                  onPointerMove={handleSelectionPointerMove}
+                  onPointerUp={finishSelectionGesture}
+                  onPointerCancel={(e) => finishSelectionGesture(e, true)}
+                  onContextMenuCapture={handleSelectionContextMenu}
+                  onClickCapture={handleSelectionClickCapture}
+                  data-selecting={selectionSelecting ? "true" : undefined}
+                  data-ui="file-selection-grid"
+                  className="file-selection-surface grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4"
                 >
                   <AnimatePresence>
                     {pagedFiles.map((f) => (
@@ -1158,7 +1394,7 @@ export default function Dashboard({
                         onKeepForever={(id) => keepForeverMut.mutate(id)}
                         onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
                         selected={selected.has(f.id)}
-                        onToggleSelect={toggleSelect}
+                        onToggleSelect={selectFile}
                         anySelected={selCount > 0}
                         getDragIds={getDragIds}
                       />
@@ -1167,7 +1403,15 @@ export default function Dashboard({
                 </motion.div>
               ) : (
                 <div
-                  className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow"
+                  ref={selectionSurfaceRef}
+                  onPointerDown={handleSelectionPointerDown}
+                  onPointerMove={handleSelectionPointerMove}
+                  onPointerUp={finishSelectionGesture}
+                  onPointerCancel={(e) => finishSelectionGesture(e, true)}
+                  onContextMenuCapture={handleSelectionContextMenu}
+                  onClickCapture={handleSelectionClickCapture}
+                  data-selecting={selectionSelecting ? "true" : undefined}
+                  className="file-selection-surface divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow"
                   data-ui="file-list"
                 >
                   <div
@@ -1228,7 +1472,7 @@ export default function Dashboard({
                         onKeepForever={(id) => keepForeverMut.mutate(id)}
                         onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
                         selected={selected.has(f.id)}
-                        onToggleSelect={toggleSelect}
+                        onToggleSelect={selectFile}
                         anySelected={selCount > 0}
                         getDragIds={getDragIds}
                       />
@@ -1260,6 +1504,14 @@ export default function Dashboard({
             )}
         </main>
       </div>
+      {selectionRect && selectionSelecting && (
+        <div
+          aria-hidden="true"
+          data-ui="selection-rectangle"
+          className="pointer-events-none fixed z-[55] border-2 border-drift-500 bg-drift-500/10"
+          style={selectionRect}
+        />
+      )}
       <AnimatePresence>
         {selCount > 0 && (
           <motion.div
