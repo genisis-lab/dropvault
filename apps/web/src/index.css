@@ -140,6 +140,42 @@ body {
 .drive-shadow-lg {
   box-shadow: var(--shadow-lg);
 }
+.file-select-toggle {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 160ms ease-out,
+    transform 120ms ease-out;
+}
+.file-select-toggle:active {
+  transform: scale(0.97);
+}
+.file-select-toggle-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: hover) and (pointer: fine) {
+  .group:hover .file-select-toggle,
+  .file-select-toggle:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .file-select-toggle-active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+.file-selection-surface {
+  position: relative;
+  touch-action: pan-y;
+}
+.file-selection-surface[data-selecting="true"] {
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
 .text-gradient {
   background: linear-gradient(90deg, #4f46e5, #7c3aed, #db2777);
   -webkit-background-clip: text;
