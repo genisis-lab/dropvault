@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import type { FileRow } from "../db/schema";
-import { clampExtension, DAY_SECONDS, nowSeconds } from "../lib/expiry";
+import {
+  clampExtension,
+  DAY_SECONDS,
+  isExpired,
+  nowSeconds,
+} from "../lib/expiry";
 import {
   addIpBan,
   getIpBans,
@@ -1165,6 +1170,102 @@ admin.get("/files", async (c) => {
       hasMore && files.length ? files[files.length - 1].createdAt : null,
   });
 });
+
+async function serveOwnerFileContent(
+  c: any,
+  db: ReturnType<typeof getDb>,
+  file: FileRow,
+  disposition: "inline" | "attachment",
+  action: "file.content_view" | "file.content_download",
+): Promise<Response> {
+  if (file.encryptionMode === "aes-gcm")
+    return c.json(
+      {
+        error:
+          "This file is client-side encrypted. The owner does not have the decryption key.",
+        code: "e2e_admin_inaccessible",
+      },
+      409,
+    );
+  if (!["ready", "quarantined"].includes(file.status))
+    return c.json({ error: "file is not ready" }, 409);
+  if (file.deletedAt != null)
+    return c.json({ error: "file is in trash" }, 410);
+  if (file.releaseAt && file.releaseAt > nowSeconds())
+    return c.json(
+      { error: "file is not available yet", releaseAt: file.releaseAt },
+      423,
+    );
+  if (isExpired(file.expiresAt))
+    return c.json({ error: "file expired" }, 410);
+
+  const object = await c.env.FILES.get(file.r2Key);
+  if (!object) return c.json({ error: "stored object not found" }, 404);
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Content-Type", file.contentType || "application/octet-stream");
+  headers.set(
+    "Content-Disposition",
+    `${disposition}; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+  );
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "no-referrer");
+  if (disposition === "inline")
+    headers.set(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox",
+    );
+  await logAction(c, db, action, "file", file.id, file.filename);
+  return new Response(object.body, { headers });
+}
+
+// Workspace-wide file access is intentionally owner-only. Admins retain the
+// narrower report-review route below for unencrypted flagged files.
+admin.get("/files/:id/preview", async (c) => {
+  const denied = await forbidUnless(c, "owner");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
+    .get();
+  if (!file) return c.json({ error: "file not found" }, 404);
+  return serveOwnerFileContent(c, db, file, "inline", "file.content_view");
+});
+
+admin.get("/files/:id/download", async (c) => {
+  const denied = await forbidUnless(c, "owner");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.purgeRequestedAt),
+      ),
+    )
+    .get();
+  if (!file) return c.json({ error: "file not found" }, 404);
+  return serveOwnerFileContent(
+    c,
+    db,
+    file,
+    "attachment",
+    "file.content_download",
+  );
+});
+
 admin.get("/activity", async (c) => {
   const denied = await forbidUnlessCan(c, "viewActivity");
   if (denied) return denied;
