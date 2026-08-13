@@ -24,10 +24,22 @@ import {
   isTrustedBrowserMutation,
   trustedAppOrigins,
 } from "./lib/origins";
+import {
+  credentialVaryHeader,
+  isPrivateCredentialApiPath,
+} from "./lib/responseCache";
 import { processUploadComplete, type UploadCompleteMessage } from "./lib/uploadEvents";
 import type { Bindings, Variables } from "./types";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+app.use("*", async (c, next) => {
+  await next();
+  if (!isPrivateCredentialApiPath(new URL(c.req.url).pathname)) return;
+
+  c.header("Cache-Control", "private, no-store");
+  c.header("Vary", credentialVaryHeader(c.res.headers.get("Vary")));
+});
 
 app.use("*", async (c, next) => {
   const handler = cors({
