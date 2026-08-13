@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { canonicalAppOrigin, trustedAppOrigins } from "./origins";
+import {
+  canonicalAppOrigin,
+  isTrustedBrowserMutation,
+  trustedAppOrigins,
+} from "./origins";
 
 describe("application origin allowlist", () => {
   it("keeps the canonical custom domain first and includes exact aliases", () => {
@@ -29,5 +33,46 @@ describe("application origin allowlist", () => {
     expect(() =>
       canonicalAppOrigin({ PUBLIC_APP_URL: "not-a-url" }),
     ).toThrow("PUBLIC_APP_URL");
+  });
+
+  it("allows only configured browser origins for mutations", () => {
+    const env = {
+      PUBLIC_APP_URL: "https://drive.builtwai.com",
+      TRUSTED_ORIGINS: "https://drop-vault.pages.dev",
+    };
+    expect(
+      isTrustedBrowserMutation(
+        "POST",
+        "https://drive.builtwai.com",
+        "same-origin",
+        env,
+      ),
+    ).toBe(true);
+    expect(
+      isTrustedBrowserMutation(
+        "DELETE",
+        "https://drop-vault.pages.dev",
+        "same-site",
+        env,
+      ),
+    ).toBe(true);
+    expect(
+      isTrustedBrowserMutation(
+        "POST",
+        "https://evil.example",
+        "cross-site",
+        env,
+      ),
+    ).toBe(false);
+    expect(isTrustedBrowserMutation("POST", "null", "cross-site", env)).toBe(
+      false,
+    );
+  });
+
+  it("keeps safe methods and non-browser clients compatible", () => {
+    const env = { PUBLIC_APP_URL: "https://drive.builtwai.com" };
+    expect(isTrustedBrowserMutation("GET", "https://evil.example", "cross-site", env)).toBe(true);
+    expect(isTrustedBrowserMutation("POST", undefined, undefined, env)).toBe(true);
+    expect(isTrustedBrowserMutation("POST", undefined, "cross-site", env)).toBe(false);
   });
 });

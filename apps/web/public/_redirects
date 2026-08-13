@@ -1,2 +1,2 @@
-# Cloudflare Pages SPA fallback: route everything to index.html except real assets.
-/*    /index.html   200
+# Cloudflare Pages provides its default SPA fallback when no top-level 404.html
+# exists. Do not add a catch-all rewrite here: static well-known files must win.
