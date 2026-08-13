@@ -39,3 +39,22 @@ export function canonicalAppOrigin(env: AppOriginEnv): string {
   if (!origin) throw new Error("PUBLIC_APP_URL must be a valid HTTP(S) origin");
   return origin;
 }
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Reject browser-initiated cross-site mutations before they reach cookie-
+ * authenticated routes. Requests without an Origin remain available to
+ * non-browser clients, unless Fetch Metadata explicitly identifies them as
+ * cross-site.
+ */
+export function isTrustedBrowserMutation(
+  method: string,
+  origin: string | undefined,
+  secFetchSite: string | undefined,
+  env: AppOriginEnv,
+): boolean {
+  if (SAFE_METHODS.has(method.toUpperCase())) return true;
+  if (origin) return trustedAppOrigins(env).includes(origin);
+  return secFetchSite?.toLowerCase() !== "cross-site";
+}

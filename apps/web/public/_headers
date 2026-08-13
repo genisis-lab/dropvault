@@ -7,3 +7,6 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
   Cross-Origin-Opener-Policy: same-origin-allow-popups
   Cross-Origin-Resource-Policy: same-origin
+
+/.well-known/security.txt
+  Content-Type: text/plain; charset=utf-8
