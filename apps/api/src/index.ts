@@ -20,7 +20,10 @@ import { sweepPendingVaultPurges } from "./lib/vaultPurge";
 import { cleanupMetadata, scheduleExpiryWarnings } from "./lib/retention";
 import { deliverPendingEvents } from "./lib/delivery";
 import { workspaceDefaultTheme } from "./lib/theme";
-import { trustedAppOrigins } from "./lib/origins";
+import {
+  isTrustedBrowserMutation,
+  trustedAppOrigins,
+} from "./lib/origins";
 import { processUploadComplete, type UploadCompleteMessage } from "./lib/uploadEvents";
 import type { Bindings, Variables } from "./types";
 
@@ -40,6 +43,20 @@ app.use("*", async (c, next) => {
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
   return handler(c, next);
+});
+
+app.use("*", async (c, next) => {
+  if (
+    !isTrustedBrowserMutation(
+      c.req.method,
+      c.req.header("Origin"),
+      c.req.header("Sec-Fetch-Site"),
+      c.env,
+    )
+  ) {
+    return c.json({ error: "forbidden origin" }, 403);
+  }
+  return next();
 });
 
 app.use("*", async (c, next) => {
