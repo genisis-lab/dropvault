@@ -12,6 +12,7 @@ import { checkRateLimit, clientIp } from "../lib/rateLimit";
 import { makeZip, zipResponse } from "../lib/zip";
 import { contentSecurityNonce, jsonForInlineScript } from "../lib/html";
 import { hasRole } from "../middleware/admin";
+import { workspaceDefaultTheme, type PublicTheme } from "../lib/theme";
 import type { Bindings, Variables } from "../types";
 
 type FileRow = typeof schema.files.$inferSelect;
@@ -67,8 +68,8 @@ function allowedByList(value: string, values: string[]): boolean {
     values.map((x) => x.toLowerCase()).includes(value.toLowerCase())
   );
 }
-function accessDeniedPage(msg: string): string {
-  return infoPage("Access restricted", msg);
+function accessDeniedPage(theme: PublicTheme, msg: string): string {
+  return infoPage(theme, "Access restricted", msg);
 }
 function isImageType(type: string | null): boolean {
   return !!type && type.startsWith("image/");
@@ -301,11 +302,148 @@ function oneTimeConsumed(row: FileRow | FolderRow): boolean {
   );
 }
 
-const STYLE = `:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Inter,sans-serif;background:#f6f8fc;color:#1f2430}.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#8b5cf6,#ec4899)}.brand b{font-size:18px}h1{font-size:24px;margin:0 0 4px;word-break:break-word}.muted{color:#64748b;font-size:14px;margin:0 0 24px}.list{background:#fff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06)}.row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid #f1f5f9}.row:first-child{border-top:none}.row:hover{background:#f8fafc}.rowmain{display:flex;align-items:center;gap:14px;flex:1;min-width:0;text-decoration:none;color:inherit}.ic{width:40px;height:40px;border-radius:10px;background:#eef2ff;color:#6366f1;display:grid;place-items:center;font-size:18px;flex:none}.grow{flex:1;min-width:0}.name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meta{color:#94a3b8;font-size:13px}.dl{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:9px;background:#eef2ff;color:#6d28d9;font-weight:600;font-size:13px;text-decoration:none;flex:none}.dl:hover{background:#e0e7ff}.empty{text-align:center;color:#94a3b8;padding:56px 16px;background:#fff;border:1px solid #e2e8f0;border-radius:18px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:22px;padding:34px 28px;text-align:center;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06)}.fic{width:72px;height:72px;border-radius:20px;margin:0 auto 18px;display:grid;place-items:center;font-size:32px;background:linear-gradient(135deg,#eef2ff,#f5f3ff);color:#7c3aed}.btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:22px}.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:12px;font-weight:600;font-size:15px;text-decoration:none;border:1px solid transparent;cursor:pointer}.btn.primary{background:linear-gradient(135deg,#7c3aed,#8b5cf6,#ec4899);color:#fff;box-shadow:0 8px 20px rgba(124,58,237,.28)}.btn.primary:hover{filter:brightness(1.05)}.btn.ghost{background:#fff;border-color:#e2e8f0;color:#475569}.btn.ghost:hover{background:#f8fafc}.pwform{display:flex;flex-direction:column;gap:12px;max-width:320px;margin:22px auto 0}.pwin{padding:12px 14px;border:1px solid #e2e8f0;border-radius:12px;font-size:15px;outline:none;width:100%;font-family:inherit}.pwin:focus{border-color:#a78bfa}.badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:0 0 6px}.badge{display:inline-block;padding:4px 11px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:12px;font-weight:600}.err{color:#dc2626;font-size:14px;margin:0}.pimg{display:block;max-width:100%;max-height:74vh;width:auto;margin:0 auto 18px;border-radius:14px;border:1px solid #e2e8f0;background:#f8fafc;object-fit:contain}.pvid{display:block;width:100%;max-height:74vh;margin:0 auto 18px;border-radius:14px;border:1px solid #e2e8f0;background:#000}footer{text-align:center;color:#94a3b8;font-size:12px;margin-top:28px}`;
-function pageShell(title: string, inner: string, head = ""): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${esc(title)} \u00b7 Dropvault</title>${head}<style>${STYLE}</style></head><body><div class="wrap"><div class="brand"><div class="logo"></div><b>Dropvault</b></div>${inner}<footer>Shared securely with Dropvault \u00b7 links expire automatically.</footer></div></body></html>`;
+const STYLE = `
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body {
+  --app: #f6f8fc;
+  --card: #fff;
+  --line: #e2e8f0;
+  --strong: #1f2430;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --hover: #f8fafc;
+  --accent: #7c3aed;
+  --accent-ink: #fff;
+  --accent-soft: #eef2ff;
+  --accent-shadow: rgba(124, 58, 237, .24);
+  --shape: 14px;
+  --card-shadow: 0 12px 32px -18px rgba(15, 23, 42, .25);
+  margin: 0;
+  min-height: 100vh;
+  background: var(--app);
+  color: var(--strong);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body[data-theme="neubrutalism"] {
+  --app: #f7f4eb;
+  --card: #fffdf6;
+  --line: #111;
+  --strong: #0a0a0a;
+  --muted: #303030;
+  --faint: #525252;
+  --hover: #e8eeff;
+  --accent: #0647ff;
+  --accent-ink: #fff;
+  --accent-soft: #dce7ff;
+  --accent-shadow: #111;
+  --shape: 2px;
+  --card-shadow: 7px 7px 0 #111;
+}
+body[data-theme="pressroom"] {
+  --app: #f2efe7;
+  --card: #faf8f2;
+  --line: rgba(21, 25, 24, .34);
+  --strong: #151918;
+  --muted: #4e4f4a;
+  --faint: #76766d;
+  --hover: #edf2d9;
+  --accent: #ff765f;
+  --accent-ink: #151918;
+  --accent-soft: #c8f45b;
+  --accent-shadow: rgba(21, 25, 24, .15);
+  --shape: 3px;
+  --card-shadow: 5px 5px 0 rgba(21, 25, 24, .14);
+  font-family: "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+}
+body[data-theme="quiet"] {
+  --app: #f8f9fb;
+  --card: #fff;
+  --line: #dadfe7;
+  --strong: #161d2b;
+  --muted: #4c586c;
+  --faint: #808b9e;
+  --hover: #f6f8fb;
+  --accent: #4f46e5;
+  --accent-ink: #fff;
+  --accent-soft: #eef2ff;
+  --accent-shadow: rgba(16, 24, 40, .12);
+  --shape: 8px;
+  --card-shadow: 0 14px 34px -24px rgba(16, 24, 40, .3);
+}
+body[data-theme="dark"] {
+  color-scheme: dark;
+  --app: #080a14;
+  --card: #141826;
+  --line: #262c40;
+  --strong: #e2e8f0;
+  --muted: #94a3b8;
+  --faint: #64748b;
+  --hover: #1e2436;
+  --accent: #8b5cf6;
+  --accent-ink: #fff;
+  --accent-soft: #292044;
+  --accent-shadow: rgba(0, 0, 0, .55);
+  --shape: 14px;
+  --card-shadow: 0 16px 40px -16px rgba(0, 0, 0, .7);
+}
+body[data-theme="sunset"] {
+  color-scheme: dark;
+  --app: #1a0e18;
+  --card: #2b1828;
+  --line: #4a2a40;
+  --strong: #fde8e2;
+  --muted: #d6a2aa;
+  --faint: #9e707a;
+  --hover: #3a2034;
+  --accent: #f472b6;
+  --accent-ink: #2a1124;
+  --accent-soft: #54203f;
+  --accent-shadow: rgba(0, 0, 0, .5);
+  --shape: 14px;
+  --card-shadow: 0 16px 40px -16px rgba(0, 0, 0, .65);
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 36px 20px 64px; }
+.brand { display: flex; align-items: center; gap: 10px; margin: 0 0 28px; }
+.logo { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--line); border-radius: calc(var(--shape) + 4px); background: var(--accent); color: var(--accent-ink); box-shadow: 3px 3px 0 var(--accent-shadow); }
+.logo svg { width: 23px; height: 23px; }
+.brand b { font-size: 18px; letter-spacing: -.04em; }
+.brand b span { color: var(--accent); }
+h1 { margin: 0 0 5px; font-size: clamp(22px, 4vw, 27px); line-height: 1.16; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.muted { margin: 0 0 24px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.card, .list, .empty { border: 1px solid var(--line); border-radius: var(--shape); background: var(--card); box-shadow: var(--card-shadow); }
+.card { padding: 34px 28px; text-align: center; }
+.list { overflow: hidden; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row:hover { background: var(--hover); }
+.rowmain { display: flex; min-width: 0; flex: 1; align-items: center; gap: 14px; color: inherit; text-decoration: none; }
+.ic, .fic { display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--line); }
+.ic { width: 40px; height: 40px; flex: none; border-radius: calc(var(--shape) - 2px); font-size: 18px; }
+.fic { width: 70px; height: 70px; margin: 0 auto 18px; border-radius: calc(var(--shape) + 4px); font-size: 30px; box-shadow: 3px 3px 0 var(--accent-shadow); }
+.grow { min-width: 0; flex: 1; }.name { overflow: hidden; font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }.meta { color: var(--faint); font-size: 13px; }
+.dl { display: inline-flex; flex: none; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: calc(var(--shape) - 2px); background: var(--accent-soft); color: var(--accent); padding: 7px 13px; font-size: 13px; font-weight: 700; text-decoration: none; }.dl:hover { background: var(--accent); color: var(--accent-ink); }
+.empty { padding: 56px 16px; color: var(--faint); text-align: center; }.btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 22px; }
+.btn { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--shape); padding: 10px 18px; font: inherit; font-size: 14px; font-weight: 750; text-decoration: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: 3px 3px 0 var(--accent-shadow); }.btn.ghost { background: var(--card); color: var(--strong); }.btn:hover { transform: translate(-1px, -1px); }.btn.primary:hover { box-shadow: 5px 5px 0 var(--accent-shadow); }.btn.ghost:hover { background: var(--hover); }.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--accent-shadow); }
+.pwform { display: flex; max-width: 320px; flex-direction: column; gap: 12px; margin: 22px auto 0; }.pwin { width: 100%; border: 1px solid var(--line); border-radius: var(--shape); background: var(--card); padding: 12px 14px; color: var(--strong); font: inherit; font-size: 15px; outline: none; }.pwin:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0 0 7px; }.badge { display: inline-block; border: 1px solid var(--line); border-radius: 999px; background: var(--accent-soft); color: var(--strong); padding: 4px 10px; font-size: 12px; font-weight: 700; }.err { margin: 0; color: #dc2626; font-size: 14px; }.pimg, .pvid { display: block; max-width: 100%; margin: 0 auto 18px; border: 1px solid var(--line); border-radius: var(--shape); background: #000; }.pimg { max-height: 74vh; width: auto; object-fit: contain; }.pvid { width: 100%; max-height: 74vh; } footer { margin-top: 30px; color: var(--faint); font-size: 12px; text-align: center; }
+body[data-theme="neubrutalism"] .card, body[data-theme="neubrutalism"] .list, body[data-theme="neubrutalism"] .empty, body[data-theme="neubrutalism"] .btn, body[data-theme="neubrutalism"] .dl, body[data-theme="neubrutalism"] .pwin, body[data-theme="neubrutalism"] .pimg, body[data-theme="neubrutalism"] .pvid { border-width: 2px; } body[data-theme="neubrutalism"] .brand b, body[data-theme="neubrutalism"] h1 { font-family: "Arial Black", Impact, Inter, system-ui, sans-serif; letter-spacing: -.055em; text-transform: uppercase; } body[data-theme="neubrutalism"] .btn, body[data-theme="neubrutalism"] .dl, body[data-theme="neubrutalism"] .badge, body[data-theme="neubrutalism"] footer { text-transform: uppercase; letter-spacing: .025em; } body[data-theme="pressroom"] h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; } body[data-theme="pressroom"] .btn, body[data-theme="pressroom"] .dl, body[data-theme="pressroom"] .badge, body[data-theme="pressroom"] footer { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .025em; text-transform: uppercase; }
+@media (max-width: 560px) { .wrap { padding: 24px 16px 48px; }.card { padding: 28px 18px; }.btn { width: 100%; }.btns { display: grid; }.pvid { max-height: 56vh; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+`;
+function pageShell(
+  theme: PublicTheme,
+  title: string,
+  inner: string,
+  head = "",
+): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${esc(title)} \u00b7 Dropvault</title>${head}<style>${STYLE}</style></head><body data-theme="${theme}"><div class="wrap"><div class="brand"><div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 16a4 4 0 0 1 .9-7.9A5 5 0 0 1 16 7a3.5 3.5 0 0 1 .6 6.96" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 10.5v7m0 0 2.4-2.4M12 17.5l-2.4-2.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><b>Drop<span>vault</span></b></div>${inner}<footer>Shared securely with Dropvault \u00b7 links expire automatically.</footer></div></body></html>`;
 }
 function filePage(
+  theme: PublicTheme,
   name: string,
   meta: string,
   token: string,
@@ -316,11 +454,13 @@ function filePage(
     ? ""
     : `<a class="btn primary" href="/api/share/${token}?dl=1">\u2193 Download</a>`;
   return pageShell(
+    theme,
     name,
     `<div class="card"><div class="fic">\u2913</div><h1>${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Preview</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
   );
 }
 function encryptedFilePage(
+  theme: PublicTheme,
   name: string,
   meta: string,
   token: string,
@@ -334,11 +474,13 @@ function encryptedFilePage(
     ? `<p class="muted">This link is preview-only, but encrypted files cannot be previewed without downloading and decrypting them.</p>`
     : `<button id="decrypt" class="btn primary" type="button">Decrypt &amp; download</button><p id="status" class="muted" style="margin-top:14px">The key stays in your browser and is never sent to Dropvault.</p>`;
   return pageShell(
+    theme,
     name,
     `<div class="card"><div class="fic">🔐</div><h1>${esc(name)}</h1><p class="muted">${esc(meta)} · end-to-end encrypted</p><div class="btns">${action}</div></div><script nonce="${scriptNonce}">(()=>{const config=${config};const status=document.getElementById("status");const button=document.getElementById("decrypt");if(!button)return;const decode=(value)=>{value=value.replace(/-/g,"+").replace(/_/g,"/");while(value.length%4)value+="=";return Uint8Array.from(atob(value),c=>c.charCodeAt(0))};const fail=(message)=>{status.textContent=message;button.disabled=false};button.addEventListener("click",async()=>{button.disabled=true;status.textContent="Downloading encrypted bytes…";try{const encodedKey=new URLSearchParams(location.hash.slice(1)).get("key");if(!encodedKey)throw new Error("This link is missing its decryption key. Ask the sender for the complete URL.");if(!config.nonce)throw new Error("This encrypted file has no nonce.");const key=await crypto.subtle.importKey("raw",decode(encodedKey),"AES-GCM",false,["decrypt"]);const response=await fetch("/api/share/"+config.token+"?dl=1");if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||"Download failed");status.textContent="Decrypting in this browser…";const clear=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(config.nonce)},key,await response.arrayBuffer());let filename="Decrypted file",contentType="application/octet-stream";try{const metadata=JSON.parse(config.encryptedMetadata);const decoded=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(metadata.nonce)},key,decode(metadata.ciphertext));const parsed=JSON.parse(new TextDecoder().decode(decoded));filename=parsed.filename||filename;contentType=parsed.contentType||contentType}catch{}const url=URL.createObjectURL(new Blob([clear],{type:contentType}));const link=document.createElement("a");link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status.textContent="Decrypted download ready."}catch(error){fail(error instanceof Error?error.message:"Could not decrypt this file")}})})()</script>`,
   );
 }
 function imageFilePage(
+  theme: PublicTheme,
   name: string,
   meta: string,
   token: string,
@@ -350,12 +492,14 @@ function imageFilePage(
     ? ""
     : `<a class="btn primary" href="/api/share/${token}?dl=1">\u2193 Download</a>`;
   return pageShell(
+    theme,
     name,
     `<div class="card"><img class="pimg" src="/api/share/${token}?raw=1" alt="${esc(name)}"/><h1>${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Open original</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
     head,
   );
 }
 function videoFilePage(
+  theme: PublicTheme,
   name: string,
   meta: string,
   token: string,
@@ -368,38 +512,48 @@ function videoFilePage(
     ? ""
     : `<a class="btn primary" href="/api/share/${token}?dl=1">\u2193 Download</a>`;
   return pageShell(
+    theme,
     name,
     `<div class="card"><video class="pvid" controls preload="metadata" playsinline><source src="/api/share/${token}?raw=1" type="${esc(contentType ?? "video/mp4")}"/></video><h1>${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Open original</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
     head,
   );
 }
-function reportPage(token: string, done: boolean): string {
+function reportPage(theme: PublicTheme, token: string, done: boolean): string {
   return done
     ? pageShell(
+        theme,
         "Report received",
         `<div class="card"><div class="fic">\u2713</div><h1>Report received</h1><p class="muted">Thanks \u2014 our admins will review this file shortly. You can close this page.</p></div>`,
       )
     : pageShell(
+        theme,
         "Report this file",
         `<div class="card"><div class="fic">\u2691</div><h1>Report this file</h1><p class="muted">Tell us why this file should be reviewed. Your report goes to the workspace admins.</p><form method="post" action="/api/share/${token}/flag" class="pwform"><textarea class="pwin" name="reason" rows="4" placeholder="What's wrong with this file?" required></textarea><input class="pwin" type="email" name="email" placeholder="Your email (optional)"/><button type="submit" class="btn primary" style="justify-content:center">Submit report</button></form></div>`,
       );
 }
-function passwordPage(actionPath: string, error: boolean): string {
+function passwordPage(
+  theme: PublicTheme,
+  actionPath: string,
+  error: boolean,
+): string {
   const err = error
     ? `<p class="err">Incorrect password. Please try again.</p>`
     : ``;
   return pageShell(
+    theme,
     "Password required",
     `<div class="card"><div class="fic">\ud83d\udd12</div><h1>Password required</h1><p class="muted">This link is protected. Enter the password to continue.</p><form method="post" action="${actionPath}" class="pwform">${err}<input class="pwin" type="password" name="password" placeholder="Password" autofocus required/><button type="submit" class="btn primary" style="justify-content:center">Unlock</button></form></div>`,
   );
 }
-function infoPage(title: string, msg: string): string {
+function infoPage(theme: PublicTheme, title: string, msg: string): string {
   return pageShell(
+    theme,
     title,
     `<div class="card"><div class="fic">\u2298</div><h1>${esc(title)}</h1><p class="muted">${esc(msg)}</p></div>`,
   );
 }
 function guestVerificationPage(
+  theme: PublicTheme,
   token: string,
   folder: boolean,
   sent: boolean,
@@ -411,11 +565,13 @@ function guestVerificationPage(
     ? `<p class="muted">Enter the six-digit code sent to your email.</p><form method="post" action="/api/share/guest/${token}/verify" class="pwform">${errorHtml}<input type="hidden" name="folder" value="${folder ? "1" : "0"}"/><input class="pwin" type="email" name="email" placeholder="you@example.com" required/><input class="pwin" name="code" inputmode="numeric" pattern="[0-9]{6}" placeholder="Verification code" required/><button class="btn primary" type="submit">Verify email</button></form>`
     : `<p class="muted">This share is limited to approved recipients. We will email you a one-time code.</p><form method="post" action="/api/share/guest/${token}/request" class="pwform">${errorHtml}<input type="hidden" name="folder" value="${folder ? "1" : "0"}"/><input class="pwin" type="email" name="email" placeholder="you@example.com" required/><button class="btn primary" type="submit">Send verification code</button></form>`;
   return pageShell(
+    theme,
     "Verify your email",
     `<div class="card"><div class="fic">@</div><h1>Verify your email</h1>${form}<div class="btns"><a class="btn ghost" href="/api/share/${prefix}${token}">Back</a></div></div>`,
   );
 }
 function folderPage(
+  theme: PublicTheme,
   name: string,
   rowsHtml: string,
   count: number,
@@ -431,6 +587,7 @@ function folderPage(
     ? `<div class="list">${rowsHtml}</div>${zip}`
     : `<div class="empty">This folder is empty, or its files have expired.</div>`;
   return pageShell(
+    theme,
     name,
     `<h1>${esc(name)}</h1><p class="muted">${count} file${count === 1 ? "" : "s"} \u00b7 shared folder</p>${notes}${body}`,
   );
@@ -648,6 +805,7 @@ async function shareRecipient(
 share.post("/guest/:token/request", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const rl = await checkRateLimit(
     c.env.DB,
     `guest-code:${token}:${clientIp(c)}`,
@@ -657,6 +815,7 @@ share.post("/guest/:token/request", async (c) => {
   if (!rl.allowed)
     return c.html(
       guestVerificationPage(
+        theme,
         token,
         false,
         false,
@@ -674,6 +833,7 @@ share.post("/guest/:token/request", async (c) => {
   if (!recipient || !recipient.allowed || recipient.folder !== requestedFolder)
     return c.html(
       guestVerificationPage(
+        theme,
         token,
         requestedFolder,
         false,
@@ -684,6 +844,7 @@ share.post("/guest/:token/request", async (c) => {
   if (!c.env.NOTIFICATION_WEBHOOK_URL)
     return c.html(
       guestVerificationPage(
+        theme,
         token,
         requestedFolder,
         false,
@@ -728,12 +889,13 @@ share.post("/guest/:token/request", async (c) => {
     },
   });
   c.executionCtx.waitUntil(deliverPendingEvents(c.env, 5));
-  return c.html(guestVerificationPage(token, requestedFolder, true));
+  return c.html(guestVerificationPage(theme, token, requestedFolder, true));
 });
 
 share.post("/guest/:token/verify", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const form = await c.req.parseBody();
   const email = String(form.email ?? "")
     .trim()
@@ -764,6 +926,7 @@ share.post("/guest/:token/verify", async (c) => {
         .catch(() => {});
     return c.html(
       guestVerificationPage(
+        theme,
         token,
         folder,
         true,
@@ -803,6 +966,7 @@ share.post("/guest/:token/verify", async (c) => {
 share.get("/folder/:token", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const folder = await db
     .select()
     .from(schema.folders)
@@ -811,6 +975,7 @@ share.get("/folder/:token", async (c) => {
   if (!folder)
     return c.html(
       infoPage(
+        theme,
         "Link unavailable",
         "This shared folder link is invalid or has been revoked.",
       ),
@@ -819,13 +984,13 @@ share.get("/folder/:token", async (c) => {
   const gate = await shareGate(c, db, token, folder);
   if (!gate.ok)
     return gate.needsEmail
-      ? c.html(guestVerificationPage(token, true, false), 401)
-      : c.html(accessDeniedPage(gate.message), 403);
+      ? c.html(guestVerificationPage(theme, token, true, false), 401)
+      : c.html(accessDeniedPage(theme, gate.message), 403);
   const closed = folderShareClosed(folder);
-  if (closed) return c.html(infoPage(closed.title, closed.msg), 410);
+  if (closed) return c.html(infoPage(theme, closed.title, closed.msg), 410);
   if (folder.sharePassword && !(await folderPwUnlocked(c, db, folder, token)))
     return c.html(
-      passwordPage(`/api/share/folder/${token}/unlock`, false),
+      passwordPage(theme, `/api/share/folder/${token}/unlock`, false),
       401,
     );
   await logShareEvent(c, db, { token, folderId: folder.id, event: "view" });
@@ -878,7 +1043,7 @@ share.get("/folder/:token", async (c) => {
     ? `<div class="badges">${badges.join("")}</div>`
     : "";
   return c.html(
-    folderPage(folder.name, rowsHtml, rows.length, notes, token, !previewOnly),
+    folderPage(theme, folder.name, rowsHtml, rows.length, notes, token, !previewOnly),
   );
 });
 share.get("/folder/:token/zip", async (c) => {
@@ -947,6 +1112,7 @@ share.get("/folder/:token/zip", async (c) => {
 share.post("/folder/:token/unlock", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const folder = await db
     .select()
     .from(schema.folders)
@@ -955,6 +1121,7 @@ share.post("/folder/:token/unlock", async (c) => {
   if (!folder)
     return c.html(
       infoPage(
+        theme,
         "Link unavailable",
         "This shared folder link is invalid or has been revoked.",
       ),
@@ -971,6 +1138,7 @@ share.post("/folder/:token/unlock", async (c) => {
   if (!rl.allowed)
     return c.html(
       infoPage(
+        theme,
         "Too many attempts",
         "Too many password attempts. Please wait a few minutes and try again.",
       ),
@@ -982,7 +1150,10 @@ share.post("/folder/:token/unlock", async (c) => {
     folder.sharePassword,
   );
   if (!ok)
-    return c.html(passwordPage(`/api/share/folder/${token}/unlock`, true), 401);
+    return c.html(
+      passwordPage(theme, `/api/share/folder/${token}/unlock`, true),
+      401,
+    );
   const sessionToken = crypto.randomUUID().replace(/-/g, "");
   const now = nowSeconds();
   await db
@@ -1072,6 +1243,7 @@ share.get("/folder/:token/:fileId", async (c) => {
 share.post("/:token/unlock", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const row = await db
     .select()
     .from(schema.files)
@@ -1086,6 +1258,7 @@ share.post("/:token/unlock", async (c) => {
   if (!row || row.status !== "ready")
     return c.html(
       infoPage(
+        theme,
         "Link unavailable",
         "This share link is invalid or has been revoked.",
       ),
@@ -1101,6 +1274,7 @@ share.post("/:token/unlock", async (c) => {
   if (!rl.allowed)
     return c.html(
       infoPage(
+        theme,
         "Too many attempts",
         "Too many password attempts. Please wait a few minutes and try again.",
       ),
@@ -1111,7 +1285,8 @@ share.post("/:token/unlock", async (c) => {
     String(form?.password ?? ""),
     row.sharePassword,
   );
-  if (!ok) return c.html(passwordPage(`/api/share/${token}/unlock`, true), 401);
+  if (!ok)
+    return c.html(passwordPage(theme, `/api/share/${token}/unlock`, true), 401);
   const sessionToken = crypto.randomUUID().replace(/-/g, "");
   const now = nowSeconds();
   await db
@@ -1134,12 +1309,19 @@ share.post("/:token/unlock", async (c) => {
   });
   return c.redirect(`/api/share/${token}`, 302);
 });
-share.get("/:token/report", (c) =>
-  c.html(reportPage(c.req.param("token"), c.req.query("done") === "1")),
+share.get("/:token/report", async (c) =>
+  c.html(
+    reportPage(
+      await workspaceDefaultTheme(c.env.DB),
+      c.req.param("token"),
+      c.req.query("done") === "1",
+    ),
+  ),
 );
 share.post("/:token/flag", async (c) => {
   const token = c.req.param("token");
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const rl = await checkRateLimit(
     c.env.DB,
     `flag:${token}:${clientIp(c)}`,
@@ -1149,6 +1331,7 @@ share.post("/:token/flag", async (c) => {
   if (!rl.allowed)
     return c.html(
       infoPage(
+        theme,
         "Too many reports",
         "You have submitted several reports already. Please wait a while before sending more.",
       ),
@@ -1168,6 +1351,7 @@ share.post("/:token/flag", async (c) => {
   if (!row || row.status !== "ready")
     return c.html(
       infoPage(
+        theme,
         "Link unavailable",
         "This share link is invalid or has been revoked.",
       ),
@@ -1181,7 +1365,7 @@ share.post("/:token/flag", async (c) => {
     String(form?.email ?? "")
       .trim()
       .slice(0, 320) || null;
-  if (!reason) return c.html(reportPage(token, false), 400);
+  if (!reason) return c.html(reportPage(theme, token, false), 400);
   const flagId = crypto.randomUUID();
   await db
     .insert(schema.fileFlags)
@@ -1213,6 +1397,7 @@ share.get("/:token", async (c) => {
   const wantRaw = c.req.query("raw") === "1";
   const wantsBytes = wantDownload || wantRaw;
   const db = getDb(c.env.DB);
+  const theme = await workspaceDefaultTheme(c.env.DB);
   const row = await db
     .select()
     .from(schema.files)
@@ -1229,6 +1414,7 @@ share.get("/:token", async (c) => {
       ? c.json({ error: "not found" }, 404)
       : c.html(
           infoPage(
+            theme,
             "Link unavailable",
             "This share link is invalid or has been revoked.",
           ),
@@ -1241,8 +1427,8 @@ share.get("/:token", async (c) => {
       return wantsBytes
         ? c.json({ error: gate.message }, 403)
         : gate.needsEmail
-          ? c.html(guestVerificationPage(token, false, false), 401)
-          : c.html(accessDeniedPage(gate.message), 403);
+          ? c.html(guestVerificationPage(theme, token, false, false), 401)
+          : c.html(accessDeniedPage(theme, gate.message), 403);
   }
   if (row.releaseAt && row.releaseAt > nowSeconds() && !adminReview)
     return wantsBytes
@@ -1252,6 +1438,7 @@ share.get("/:token", async (c) => {
         )
       : c.html(
           infoPage(
+            theme,
             "Not available yet",
             `This file becomes available at ${new Date(row.releaseAt * 1000).toISOString()}.`,
           ),
@@ -1266,6 +1453,7 @@ share.get("/:token", async (c) => {
       ? c.json({ error: "expired" }, 410)
       : c.html(
           infoPage(
+            theme,
             "Link expired",
             "This file has expired and is no longer available.",
           ),
@@ -1277,13 +1465,13 @@ share.get("/:token", async (c) => {
     if (closed)
       return wantsBytes
         ? c.json({ error: closed.title }, 410)
-        : c.html(infoPage(closed.title, closed.msg), 410);
+        : c.html(infoPage(theme, closed.title, closed.msg), 410);
     if (row.shareAccessMode === "preview" && wantDownload)
       return c.json({ error: "download disabled for preview-only link" }, 403);
     if (row.sharePassword && !(await pwUnlocked(c, db, row, token)))
       return wantsBytes
         ? c.json({ error: "password required" }, 401)
-        : c.html(passwordPage(`/api/share/${token}/unlock`, false), 401);
+        : c.html(passwordPage(theme, `/api/share/${token}/unlock`, false), 401);
   }
   if (wantsBytes) {
     const meta = await c.env.FILES.head(row.r2Key);
@@ -1360,6 +1548,7 @@ share.get("/:token", async (c) => {
     );
     return c.html(
       encryptedFilePage(
+        theme,
         row.filename,
         meta,
         token,
@@ -1380,6 +1569,7 @@ share.get("/:token", async (c) => {
     }
     return c.html(
       imageFilePage(
+        theme,
         row.filename,
         meta,
         token,
@@ -1399,6 +1589,7 @@ share.get("/:token", async (c) => {
     }
     return c.html(
       videoFilePage(
+        theme,
         row.filename,
         meta,
         token,
@@ -1409,7 +1600,7 @@ share.get("/:token", async (c) => {
       ),
     );
   }
-  return c.html(filePage(row.filename, meta, token, notesHtml, false));
+  return c.html(filePage(theme, row.filename, meta, token, notesHtml, false));
 });
 
 export default share;
