@@ -124,7 +124,7 @@ export default function AuthScreen() {
         setErrorMsg(authErrorMessage(res, "Authentication failed"));
       else if (mode === "up")
         setStatusMsg(
-          "Account created. If email verification is enabled, check your inbox before signing in.",
+          "Account created. Check your inbox to verify your email. An administrator has also been notified and will review your access request.",
         );
     } catch (err) {
       if (promptedFor2FA) showTwoFactor();

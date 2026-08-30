@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import { adminEmailSet } from "./middleware/admin";
 import { deliverPendingEvents, enqueueEvent } from "./lib/delivery";
+import { emailDeliveryConfigured } from "./lib/email";
+import { notifyAdmins } from "./lib/notifications";
 import {
   canonicalAppOrigin,
   trustedAppOrigins,
@@ -57,6 +59,7 @@ async function notifySignup(
 export function createAuth(env: Bindings) {
   const db = getDb(env.DB);
   const canonicalOrigin = canonicalAppOrigin(env);
+  const canSendEmail = emailDeliveryConfigured(env);
   const queueAuthMessage = (
     type: string,
     user: { id?: string; email: string; name?: string },
@@ -120,7 +123,7 @@ export function createAuth(env: Bindings) {
     // Email + password for simple friend signup...
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: !!env.NOTIFICATION_WEBHOOK_URL,
+      requireEmailVerification: canSendEmail,
       minPasswordLength: 10,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) =>
@@ -134,7 +137,7 @@ export function createAuth(env: Bindings) {
       },
     },
     emailVerification: {
-      sendOnSignUp: !!env.NOTIFICATION_WEBHOOK_URL,
+      sendOnSignUp: canSendEmail,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) =>
         queueAuthMessage("verify_email", user, url),
@@ -176,6 +179,13 @@ export function createAuth(env: Bindings) {
                   })
                   .run()
                   .catch(() => {});
+                await notifyAdmins(env, db, {
+                  type: "signup_approval",
+                  title: "New account awaiting approval",
+                  message: `${email || "A new user"} signed up and is waiting for access approval.`,
+                  targetType: "user",
+                  targetId: id,
+                });
               }
               await notifySignup(env, db, id, email);
             } catch {}

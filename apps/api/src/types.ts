@@ -18,6 +18,9 @@ export type Bindings = {
   BETTER_AUTH_SECRET: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  // Resend sends account email from the verified contact.builtwai.com subdomain.
+  RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
   // Cloudflare Turnstile secret key. Optional: when set, the email login/signup
   // endpoints require a valid Turnstile token. Set via `wrangler secret put`.
   TURNSTILE_SECRET_KEY?: string;

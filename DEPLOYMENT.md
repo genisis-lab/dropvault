@@ -105,11 +105,14 @@ Dashboard → **Workers & Pages** → **dropvault-api** → **Settings** → **V
 | `BETTER_AUTH_SECRET`          | any long random string (e.g. `openssl rand -base64 32`)   |
 | `GOOGLE_CLIENT_ID`            | Google OAuth client ID                                    |
 | `GOOGLE_CLIENT_SECRET`        | Google OAuth client secret                                |
+| `RESEND_API_KEY`              | Resend API key for verification and account email         |
 | `TURNSTILE_SECRET_KEY`        | optional; required when Turnstile protection is enabled   |
 | `NOTIFICATION_WEBHOOK_URL`    | optional HTTPS endpoint used by the email/webhook adapter |
 | `NOTIFICATION_WEBHOOK_SECRET` | optional signing secret for notification deliveries       |
 
 The R2 binding handles all object operations, including multipart uploads. No R2 S3 credentials are required.
+
+`RESEND_FROM_EMAIL` is committed as `Dropvault <verification@contact.builtwai.com>`, matching the existing verified Resend subdomain and account-mail sender. Resend handles email verification, password reset, guest codes, and approval notifications directly; `NOTIFICATION_WEBHOOK_URL` remains available for other integrations and as a legacy email fallback.
 
 After adding secrets, redeploy once (push any commit, or **Deployments → Retry**).
 

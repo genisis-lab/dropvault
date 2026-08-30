@@ -16,6 +16,7 @@ import {
   removeIpBan,
 } from "../lib/ipAccess";
 import { notifyAdmins, notifyOwners, notifyUser } from "../lib/notifications";
+import { deliverPendingEvents, enqueueEvent } from "../lib/delivery";
 import { requireAuth } from "../middleware/auth";
 import {
   adminEmailSet,
@@ -1038,11 +1039,33 @@ admin.post("/users/:id/approve", async (c) => {
     .get()
     .catch(() => null);
   if (!suspension) return c.json({ error: "not found" }, 404);
+  if (suspension.reason !== PENDING_APPROVAL_REASON)
+    return c.json({ error: "account is suspended, not awaiting approval" }, 409);
+  const target = await db
+    .select({
+      id: schema.user.id,
+      email: schema.user.email,
+      name: schema.user.name,
+    })
+    .from(schema.user)
+    .where(eq(schema.user.id, id))
+    .get();
+  if (!target) return c.json({ error: "not found" }, 404);
   await db
     .delete(schema.userSuspensions)
     .where(eq(schema.userSuspensions.userId, id))
     .run();
   await logAction(c, db, "user.approve", "user", id, null);
+  const eventId = await enqueueEvent(db, {
+    type: "account_approved",
+    userId: id,
+    payload: {
+      email: target.email,
+      name: target.name,
+      url: c.env.PUBLIC_APP_URL,
+    },
+  });
+  c.executionCtx.waitUntil(deliverPendingEvents(c.env, 1, [eventId]));
   return c.json({ ok: true });
 });
 admin.post("/users/bulk", async (c) => {
@@ -1115,11 +1138,54 @@ admin.post("/users/bulk", async (c) => {
       .where(inArray(schema.files.ownerId, ids))
       .run();
   } else if (body.action === "approve") {
-    await db
-      .delete(schema.userSuspensions)
-      .where(inArray(schema.userSuspensions.userId, ids))
-      .run()
-      .catch(() => {});
+    const pending = await db
+      .select({
+        id: schema.user.id,
+        email: schema.user.email,
+        name: schema.user.name,
+      })
+      .from(schema.user)
+      .innerJoin(
+        schema.userSuspensions,
+        eq(schema.userSuspensions.userId, schema.user.id),
+      )
+      .where(
+        and(
+          inArray(schema.user.id, ids),
+          eq(schema.userSuspensions.reason, PENDING_APPROVAL_REASON),
+        ),
+      )
+      .all();
+    if (pending.length) {
+      await db
+        .delete(schema.userSuspensions)
+        .where(
+          and(
+            inArray(
+              schema.userSuspensions.userId,
+              pending.map((user) => user.id),
+            ),
+            eq(schema.userSuspensions.reason, PENDING_APPROVAL_REASON),
+          ),
+        )
+        .run();
+      const eventIds = await Promise.all(
+        pending.map((user) =>
+          enqueueEvent(db, {
+            type: "account_approved",
+            userId: user.id,
+            payload: {
+              email: user.email,
+              name: user.name,
+              url: c.env.PUBLIC_APP_URL,
+            },
+          }),
+        ),
+      );
+      c.executionCtx.waitUntil(
+        deliverPendingEvents(c.env, eventIds.length, eventIds),
+      );
+    }
   } else return c.json({ error: "bad action" }, 400);
   await logAction(
     c,
