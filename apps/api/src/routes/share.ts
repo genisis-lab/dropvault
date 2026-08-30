@@ -7,6 +7,7 @@ import { isExpired, nowSeconds } from "../lib/expiry";
 import { hashSecret, verifySecret } from "../lib/hash";
 import { notifyAdmins } from "../lib/notifications";
 import { deliverPendingEvents, enqueueEvent } from "../lib/delivery";
+import { emailDeliveryConfigured } from "../lib/email";
 import { ipMatchesAllowlist } from "../lib/ipAccess";
 import { checkRateLimit, clientIp } from "../lib/rateLimit";
 import { makeZip, zipResponse } from "../lib/zip";
@@ -841,7 +842,7 @@ share.post("/guest/:token/request", async (c) => {
       ),
       403,
     );
-  if (!c.env.NOTIFICATION_WEBHOOK_URL)
+  if (!emailDeliveryConfigured(c.env))
     return c.html(
       guestVerificationPage(
         theme,

@@ -152,11 +152,15 @@ wrangler d1 migrations apply dropvault --local    # local dev
 wrangler secret put BETTER_AUTH_SECRET       # any long random string (openssl rand -base64 32)
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
-# Optional abuse protection + delivery adapter
+# Account email through the verified contact.builtwai.com Resend domain
+wrangler secret put RESEND_API_KEY
+# Optional abuse protection + legacy delivery adapter
 wrangler secret put TURNSTILE_SECRET_KEY
 wrangler secret put NOTIFICATION_WEBHOOK_URL
 wrangler secret put NOTIFICATION_WEBHOOK_SECRET
 ```
+
+Transactional account email uses the shared verified sender `Dropvault <verification@contact.builtwai.com>`. Keep `RESEND_FROM_EMAIL` as a non-secret Worker variable and `RESEND_API_KEY` as an encrypted Worker secret.
 
 Set `VITE_TURNSTILE_SITE_KEY` in the web build environment when the Worker Turnstile secret is enabled. Optional malware scanning uses a Worker service binding named `SCANNER`; see [DEPLOYMENT.md](DEPLOYMENT.md) for the expected setup.
 

@@ -1,6 +1,11 @@
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import { nowSeconds } from "./expiry";
+import {
+  resendConfigured,
+  resendEmailForEvent,
+  sendWithResend,
+} from "./email";
 import { isSafeWebhookUrl } from "./url";
 import type { Bindings } from "../types";
 
@@ -94,6 +99,7 @@ export async function deliverPendingEvents(
       "verify_email",
       "password_reset",
       "guest_access_code",
+      "account_approved",
     ].includes(event.type);
     const categoryAllowed =
       !prefs ||
@@ -103,13 +109,20 @@ export async function deliverPendingEvents(
         : event.type.includes("upload")
           ? prefs.uploadEvents
           : prefs.securityEvents);
+    const payload = JSON.parse(event.payload) as Record<string, unknown>;
+    const resendEmail = resendConfigured(env)
+      ? resendEmailForEvent(env, event.type, payload)
+      : null;
     const target =
       prefs?.webhookEnabled && prefs.webhookUrl
         ? prefs.webhookUrl
         : !prefs || prefs.emailEnabled || authRequired
           ? globalTarget
           : null;
-    if (!categoryAllowed || !target || !isSafeWebhookUrl(target)) {
+    if (
+      !categoryAllowed ||
+      (!resendEmail && (!target || !isSafeWebhookUrl(target)))
+    ) {
       if (
         prefs &&
         (!categoryAllowed ||
@@ -132,18 +145,22 @@ export async function deliverPendingEvents(
       id: event.id,
       type: event.type,
       createdAt: event.createdAt,
-      payload: JSON.parse(event.payload),
+      payload,
     });
     try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "Idempotency-Key": event.id,
-      };
-      if (env.NOTIFICATION_WEBHOOK_SECRET)
-        headers["X-Dropvault-Signature"] =
-          `sha256=${await signature(env.NOTIFICATION_WEBHOOK_SECRET, body)}`;
-      const response = await fetch(target, { method: "POST", headers, body });
-      if (!response.ok) throw new Error(`webhook returned ${response.status}`);
+      if (resendEmail) {
+        await sendWithResend(env, event.id, resendEmail);
+      } else {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "Idempotency-Key": event.id,
+        };
+        if (env.NOTIFICATION_WEBHOOK_SECRET)
+          headers["X-Dropvault-Signature"] =
+            `sha256=${await signature(env.NOTIFICATION_WEBHOOK_SECRET, body)}`;
+        const response = await fetch(target!, { method: "POST", headers, body });
+        if (!response.ok) throw new Error(`webhook returned ${response.status}`);
+      }
       await db
         .update(schema.outgoingEvents)
         .set({
