@@ -1,5 +1,7 @@
 const PRIVATE_API_PREFIXES = [
   "/api/account",
+  "/api/admin",
+  "/api/operations",
   "/api/auth",
   "/api/sessions",
 ] as const;

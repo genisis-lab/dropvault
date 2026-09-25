@@ -115,10 +115,11 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function sha256Hex(file: File): Promise<string> {
+async function sha256Hex(file: File, signal?: AbortSignal): Promise<string> {
   const digest = sha256.create();
   const chunkSize = 8 * 1024 * 1024;
   for (let offset = 0; offset < file.size; offset += chunkSize) {
+    signal?.throwIfAborted();
     const chunk = await file.slice(offset, offset + chunkSize).arrayBuffer();
     digest.update(new Uint8Array(chunk));
   }
@@ -126,8 +127,8 @@ async function sha256Hex(file: File): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
-export async function fileContentHash(file: File) {
-  return sha256Hex(file);
+export async function fileContentHash(file: File, signal?: AbortSignal) {
+  return sha256Hex(file, signal);
 }
 
 // Generate a small JPEG thumbnail for an image entirely in the browser so the
@@ -172,24 +173,25 @@ export async function generateImageThumbnail(
 }
 
 export async function uploadThumbnail(id: string, blob: Blob): Promise<void> {
-  await fetch(`${API}/api/files/${id}/thumbnail`, {
+  const response = await fetch(`${API}/api/files/${id}/thumbnail`, {
     method: "PUT",
     credentials: "include",
     headers: { "Content-Type": "image/jpeg" },
     body: blob,
   });
+  if (!response.ok) throw new Error("Thumbnail upload failed");
 }
 
-// Best-effort: build a thumbnail and upload it. Never throws — a missing thumbnail
-// just falls back to the full image on the server side.
+// Build a thumbnail and report whether decoding was supported. Upload callers
+// treat thumbnail failures as nonfatal and record them separately from originals.
 export async function generateAndUploadThumbnail(
   id: string,
   file: File,
-): Promise<void> {
-  try {
-    const thumb = await generateImageThumbnail(file);
-    if (thumb && thumb.size > 0) await uploadThumbnail(id, thumb);
-  } catch {}
+): Promise<boolean> {
+  const thumb = await generateImageThumbnail(file);
+  if (!thumb || !thumb.size) return false;
+  await uploadThumbnail(id, thumb);
+  return true;
 }
 
 export async function listFiles(opts?: {
@@ -265,6 +267,9 @@ export async function fileCapabilities(): Promise<{
 
 export function uploadUrlFor(id: string) {
   return `${API}/api/files/${id}/upload`;
+}
+export async function cancelUpload(id: string) {
+  return j<{ok: true; completed: boolean}>(await fetch(`${API}/api/files/${id}/cancel-upload`, {method: "POST", credentials: "include"}));
 }
 export async function complete(id: string) {
   return j<{ ok: true }>(
@@ -612,6 +617,7 @@ export function uploadToR2(
   uploadUrl: string,
   file: File,
   onProgress: (pct: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -639,6 +645,10 @@ export function uploadToR2(
         ),
       );
     xhr.onabort = () => reject(new Error("The upload was cancelled."));
+    const abort = () => xhr.abort();
+    if (signal?.aborted) { reject(new DOMException("Upload cancelled", "AbortError")); return; }
+    signal?.addEventListener("abort", abort, { once: true });
+    xhr.onloadend = () => signal?.removeEventListener("abort", abort);
     xhr.send(file);
   });
 }
@@ -684,7 +694,7 @@ function multipartSessionIsStale(error: unknown): boolean {
 }
 
 function multipartStepIsRetryable(error: unknown): boolean {
-  if (!(error instanceof UploadTransportError)) return false;
+  if (!(error instanceof UploadTransportError) || error.code === "UPLOAD_CANCELLED") return false;
   return (
     error.code === "MULTIPART_TRANSIENT" ||
     error.status === 0 ||
@@ -751,6 +761,7 @@ function putPart(
   partNumber: number,
   chunk: Blob,
   onLoaded: (loaded: number) => void,
+  signal?: AbortSignal,
 ): Promise<UploadedPart> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -810,6 +821,10 @@ function putPart(
           "UPLOAD_CANCELLED",
         ),
       );
+    const abort = () => xhr.abort();
+    if (signal?.aborted) { reject(new DOMException("Upload cancelled", "AbortError")); return; }
+    signal?.addEventListener("abort", abort, { once: true });
+    xhr.onloadend = () => signal?.removeEventListener("abort", abort);
     xhr.send(chunk);
   });
 }
@@ -837,13 +852,16 @@ export async function uploadLargeFile(
   id: string,
   file: File,
   onProgress: (pct: number) => void,
+  signal?: AbortSignal,
+  onFinishing?: () => void,
 ): Promise<void> {
   for (
     let sessionAttempt = 0;
     sessionAttempt < MULTIPART_SESSION_ATTEMPTS;
     sessionAttempt++
   ) {
-    const started = await retryMultipartStep(() => startMultipart(id));
+    signal?.throwIfAborted();
+    const started = await retryMultipartStep(() => { signal?.throwIfAborted(); return startMultipart(id); });
     if (started.completed) {
       onProgress(100);
       return;
@@ -864,6 +882,7 @@ export async function uploadLargeFile(
 
     try {
       for (let i = 0; i < partCount; i++) {
+        signal?.throwIfAborted();
         const start = i * MULTIPART_PART_SIZE;
         const end = Math.min(start + MULTIPART_PART_SIZE, total);
         const partNumber = i + 1;
@@ -887,18 +906,22 @@ export async function uploadLargeFile(
                   Math.round(((completedBytes + loaded) / total) * 100),
                 ),
               ),
+            signal,
           ),
         );
         done.set(part.partNumber, part);
         completedBytes += end - start;
         onProgress(Math.min(99, Math.round((completedBytes / total) * 100)));
       }
+      signal?.throwIfAborted();
+      onFinishing?.();
       await retryMultipartStep(() =>
         completeMultipart(id, uploadId, [...done.values()]),
       );
       onProgress(100);
       return;
     } catch (error) {
+      if (signal?.aborted) throw error;
       if (
         multipartSessionIsStale(error) &&
         sessionAttempt < MULTIPART_SESSION_ATTEMPTS - 1

@@ -22,6 +22,8 @@ class FakeXMLHttpRequest {
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
   private url = "";
+  private aborted = false;
+  abort() { this.aborted = true; this.onabort?.(); }
 
   open(_method: string, url: string) {
     this.url = url;
@@ -35,6 +37,7 @@ class FakeXMLHttpRequest {
       loaded: body.size,
       total: body.size,
     } as ProgressEvent);
+    if (this.aborted) return;
     this.status = reply.status;
     this.responseText = JSON.stringify(reply.body);
     this.onload?.();
@@ -76,6 +79,14 @@ afterEach(() => {
 });
 
 describe("large multipart uploads", () => {
+  it("cancels between parts without finalizing or starting another request", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => json({ uploadId: "upload-1", parts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(uploadLargeFile("file-1", largeFile(), () => controller.abort(), controller.signal)).rejects.toMatchObject({code: "UPLOAD_CANCELLED"});
+    expect(xhrUrls).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it("uploads a 218 MiB file as seven bounded parts and completes it", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

@@ -741,3 +741,37 @@ export const outgoingEvents = sqliteTable(
     ),
   }),
 );
+
+// Operational metadata. Diagnostics deliberately exclude names and raw user agents.
+export const uploadDiagnostics = sqliteTable("upload_diagnostics", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  fileId: text("file_id"),
+  outcome: text("outcome").notNull(),
+  stage: text("stage").notNull(),
+  category: text("category").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  browser: text("browser").notNull(),
+  os: text("os").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({timeIdx: index("idx_upload_diagnostics_time").on(t.createdAt), userIdx: index("idx_upload_diagnostics_user").on(t.userId,t.createdAt)}));
+export const operationRuns = sqliteTable("operation_runs", {
+  name: text("name").primaryKey(),
+  startedAt: integer("started_at").notNull(),
+  finishedAt: integer("finished_at"),
+  lastSuccessAt: integer("last_success_at"),
+  status: text("status").notNull(),
+  detail: text("detail"),
+});
+export const operationalAlerts = sqliteTable("operational_alerts", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  detail: text("detail").notNull(),
+  status: text("status").notNull(),
+  firstSeenAt: integer("first_seen_at").notNull(),
+  lastSeenAt: integer("last_seen_at").notNull(),
+  resolvedAt: integer("resolved_at"),
+  acknowledgedAt: integer("acknowledged_at"),
+  acknowledgedBy: text("acknowledged_by"),
+});

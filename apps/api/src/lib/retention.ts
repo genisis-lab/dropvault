@@ -55,7 +55,7 @@ export async function cleanupMetadata(env: Bindings): Promise<void> {
       "DELETE FROM upload_reservations WHERE status != 'active' OR expires_at < ?",
     ).bind(now),
     env.DB.prepare(
-      "DELETE FROM upload_sessions WHERE status != 'active' OR expires_at < ?",
+      "DELETE FROM upload_sessions WHERE status != 'active' AND expires_at < ?",
     ).bind(now),
   ]);
 }

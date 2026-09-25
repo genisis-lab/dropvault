@@ -167,3 +167,55 @@ R2 → **dropvault-files** → **Settings** → **Object lifecycle rules** → d
 - **Uploads remain quarantined** → confirm the optional `SCANNER` service binding exists and that its response reports a clean verdict.
 - **API calls return HTML / JSON parse errors** → the Pages proxy isn't catching `/api/*`; confirm `functions/api/[[path]].ts` exists at the repo root and Pages redeployed.
 - **`command not found: wrangler` locally** → use the repository-pinned CLI through `pnpm --filter @dropvault/api exec wrangler ...`.
+
+## Upload experience and operations rollout (migration 0018)
+
+Apply `0018_operations.sql` before deploying the API, then deploy the frontend.
+Pushing the feature branch does not apply production migrations or deploy the API.
+
+1. Run `pnpm db:migrate:remote` with the intended Cloudflare account selected.
+2. Run `pnpm deploy:api` and confirm `/api/health` returns healthy dependencies.
+3. Build/deploy the web app through the existing Pages pipeline.
+4. As an owner, open **Admin → Operations**. Confirm the first hourly Cron run
+   populates expiration-sweep, orphan-scan, metadata-retention, and notification-delivery.
+5. Exercise a small upload, cancellation, and a supported video preview on a real
+   iPhone. Browser automation does not reproduce Apple's native Photos picker.
+
+User changes: collapsed upload options with an active-settings summary; a persistent
+upload tray with preparation/transfer/finalization states and cancellation; video
+playback and gallery navigation; unsupported-format fallbacks; selected-file expiry
+extension with partial failures retained. Originals are not transcoded by these changes.
+In-browser AES-GCM preparation cannot be interrupted mid-operation, but cancellation
+prevents subsequent upload. Finalization cannot be cancelled. Navigating away or
+closing the tab is not a supported background-upload mechanism.
+
+Operational behavior:
+
+- Authenticated client diagnostics retain coarse browser/OS, upload stage, size,
+  duration, and outcome for 30 days. No filename, contents, raw user agent, or error
+  message is collected. This is best-effort telemetry, not authoritative billing;
+  closed tabs and failures before file delivery can be absent.
+- Owner/admin/auditor can read Operations. Owners alone change thresholds,
+  acknowledge alerts, and execute reviewed orphan cleanup. Moderators have no access.
+- Alerts are evaluated hourly and displayed in Operations. They deduplicate by
+  condition and resolve after recovery. Acknowledgment does not suppress the
+  condition. This release adds in-app operational alerts, not a new email channel.
+- Storage growth compares ready-file bytes against an approximately daily baseline;
+  it is not Cloudflare's billed storage, which also includes versions and thumbnails.
+- Scheduled orphan reconciliation is now **read-only** and samples the first 500
+  objects. Owners page through reconciliation in Operations to inspect the rest.
+  Objects younger than 24 hours, existing originals, versions, and their thumbnails
+  are protected. Cleanup rechecks references and age and writes an audit intent
+  before deleting each object. Failed lookups abort cleanup rather than implying absence.
+- Missing-file and orphan scans return page-specific results; they do not claim a
+  complete inventory until every page is inspected. Scans can reflect concurrent
+  uploads/deletions. Missing objects are reported, never automatically recreated.
+- Expiration/Trash cleanup remains automatic. Storage deletion failures now preserve
+  database records and mark the run failed. Active multipart-session metadata is
+  retained for cleanup rather than discarded without aborting storage parts.
+- Policy impact is an advisory snapshot. Existing revision/owner confirmations remain
+  required. Retention changes do not rewrite existing expiry timestamps; changing
+  public-sharing policy does not revoke existing links.
+
+Rollback: revert the application deployment; keep the additive migration in place.
+Do not drop operational tables while the new API or Cron code is still running.
