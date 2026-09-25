@@ -219,3 +219,20 @@ Operational behavior:
 
 Rollback: revert the application deployment; keep the additive migration in place.
 Do not drop operational tables while the new API or Cron code is still running.
+
+## Operations cost controls (migration 0019)
+
+Apply `0019_storage_lookup_indexes.sql` before deploying this release. The indexes
+accelerate storage-key lookups on originals and versions; they add a small storage
+and write overhead when those keys are inserted, changed, or removed.
+
+Operations health and diagnostics refresh every five minutes while the screen is
+visible, with a five-minute freshness window and no background polling. The manual
+Refresh button still fetches immediately. Scheduled checks remain hourly.
+
+Worker diagnostic logs sample 10% of invocations, down from 100%; traces remain at
+5%. Sampling can omit console error logs as well as ordinary logs. D1 audit records,
+upload diagnostic events, and recorded job failures are not sampled by this setting.
+For a time-limited investigation, temporarily set `observability.logs.head_sampling_rate`
+to `1`, deploy, then restore `0.1` and redeploy when finished. Do not leave full
+sampling enabled after troubleshooting. These controls reduce usage, not cap bills.
