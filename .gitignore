@@ -6,3 +6,7 @@ dist
 *.local
 .DS_Store
 drizzle/
+
+# Browser verification artifacts
+test-results/
+playwright-report/

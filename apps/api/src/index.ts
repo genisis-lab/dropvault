@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { getDb } from "./db";
+import operationsRoute from "./routes/operations";
+import { recordOperation, refreshOperationalAlerts } from "./lib/operations";
 import filesRoute from "./routes/files";
 import foldersRoute from "./routes/folders";
 import shareRoute from "./routes/share";
@@ -163,6 +165,7 @@ app.route("/api/portal-requests", portalRequestsRoute);
 app.route("/api/keep-forever", keepForeverRoute);
 app.route("/api/account", accountRoute);
 app.route("/api/admin", adminRoute);
+app.route("/api/operations", operationsRoute);
 
 export default {
   fetch: app.fetch,
@@ -184,7 +187,7 @@ export default {
           );
         }
         try {
-          await sweepExpired(env);
+          await recordOperation(env, "expiration-sweep", () => sweepExpired(env));
         } catch (err) {
           console.error(
             JSON.stringify({
@@ -194,7 +197,7 @@ export default {
           );
         }
         try {
-          await reconcileOrphans(env);
+          await recordOperation(env, "orphan-scan", () => reconcileOrphans(env));
         } catch (err) {
           console.error(
             JSON.stringify({
@@ -204,7 +207,7 @@ export default {
           );
         }
         try {
-          await cleanupMetadata(env);
+          await recordOperation(env, "metadata-retention", () => cleanupMetadata(env));
         } catch (err) {
           console.error(
             JSON.stringify({
@@ -224,7 +227,12 @@ export default {
           );
         }
         try {
-          await deliverPendingEvents(env);
+          await refreshOperationalAlerts(env);
+        } catch (err) {
+          console.error(JSON.stringify({ event: "cron.operationalAlerts.failed", error: err instanceof Error ? err.message : String(err) }));
+        }
+        try {
+          await recordOperation(env, "notification-delivery", () => deliverPendingEvents(env));
         } catch (err) {
           console.error(
             JSON.stringify({
