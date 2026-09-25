@@ -80,12 +80,16 @@ export default function AdminOperations({ isOwner }: { isOwner: boolean }) {
   const health = useQuery({
     queryKey: ["operations-health"],
     queryFn: () => operationalRequest<Health>("/operations/health"),
-    refetchInterval: 60000,
+    refetchInterval: 5 * 60_000,
+    staleTime: 5 * 60_000,
+    refetchIntervalInBackground: false,
   });
   const diagnostics = useQuery({
     queryKey: ["operations-diagnostics"],
     queryFn: () => operationalRequest<Diagnostics>("/operations/diagnostics"),
-    refetchInterval: 60000,
+    refetchInterval: 5 * 60_000,
+    staleTime: 5 * 60_000,
+    refetchIntervalInBackground: false,
   });
   const [thresholds, setThresholds] = useState<Thresholds | null>(null);
   const [scan, setScan] = useState<Scan | null>(null);
