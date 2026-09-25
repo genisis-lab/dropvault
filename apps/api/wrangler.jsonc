@@ -53,7 +53,8 @@
     "enabled": true,
     "logs": {
       "enabled": true,
-      "head_sampling_rate": 1,
+      // Sample diagnostic logs; D1 audit records and operation status are not sampled.
+      "head_sampling_rate": 0.1,
     },
     "traces": {
       "enabled": true,

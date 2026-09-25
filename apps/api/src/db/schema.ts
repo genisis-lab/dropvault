@@ -178,6 +178,7 @@ export const files = sqliteTable(
     purgeReason: text("purge_reason"),
   },
   (t) => ({
+    r2KeyIdx: index("idx_files_r2_key").on(t.r2Key),
     hashIdx: index("idx_files_content_hash").on(t.ownerId, t.contentHash),
     teamIdx: index("idx_files_team").on(t.teamId),
   }),
@@ -397,20 +398,24 @@ export const publicUploads = sqliteTable(
 
 export type PublicUploadRow = typeof publicUploads.$inferSelect;
 
-export const fileVersions = sqliteTable("file_versions", {
-  id: text("id").primaryKey(),
-  fileId: text("file_id")
-    .notNull()
-    .references(() => files.id, { onDelete: "cascade" }),
-  versionGroupId: text("version_group_id").notNull(),
-  versionNumber: integer("version_number").notNull(),
-  r2Key: text("r2_key").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  checksum: text("checksum"),
-  contentType: text("content_type"),
-  filename: text("filename"),
-  createdAt: integer("created_at").notNull(),
-});
+export const fileVersions = sqliteTable(
+  "file_versions",
+  {
+    id: text("id").primaryKey(),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    versionGroupId: text("version_group_id").notNull(),
+    versionNumber: integer("version_number").notNull(),
+    r2Key: text("r2_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    checksum: text("checksum"),
+    contentType: text("content_type"),
+    filename: text("filename"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ r2KeyIdx: index("idx_file_versions_r2_key").on(t.r2Key) }),
+);
 
 export type FileVersionRow = typeof fileVersions.$inferSelect;
 
