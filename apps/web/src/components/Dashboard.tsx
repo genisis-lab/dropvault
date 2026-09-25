@@ -654,7 +654,7 @@ export default function Dashboard({
         }
         if (filter === "favorites" && !f.favorite) return false;
         if (filter === "shared" && !f.shareToken) return false;
-        if (filter === "expiring" && f.expiresAt - now >= DAY) return false;
+        if (filter === "expiring" && (f.keepForever || f.expiresAt <= now || f.expiresAt - now >= DAY)) return false;
         if (filter === "trash") return true;
         if (currentFolderId) return f.folderId === currentFolderId;
         if (filter === "all") return !f.folderId;
@@ -1013,6 +1013,26 @@ export default function Dashboard({
       (n) => `${n} file${n === 1 ? "" : "s"} moved`,
     );
   }
+  const [extendingSelection, setExtendingSelection] = useState(false);
+  async function extendSelection(days: number) {
+    setExtendingSelection(true);
+    let extended = 0;
+    const failed = new Set<string>();
+    for (const id of selected) {
+      const original = liveFiles.find((file) => file.id === id);
+      if (original?.keepForever) continue;
+      try {
+        const result = await extendFile(id, days);
+        if (original && result.expiresAt <= original.expiresAt) failed.add(id);
+        else extended++;
+      } catch { failed.add(id); }
+    }
+    setExtendingSelection(false);
+    setSelected(failed);
+    invalidate();
+    if (extended) toastOk(`${extended} file${extended === 1 ? "" : "s"} extended within retention limits.`);
+    if (failed.size) toastErr(`${failed.size} could not be extended. They remain selected; check their retention limits.`);
+  }
   async function bulkDownload() {
     const selectedFiles = Array.from(selected)
       .map((id) => files.find((f) => f.id === id))
@@ -1234,8 +1254,9 @@ export default function Dashboard({
                 </div>
               </div>
             )}
-          {filter !== "trash" && (
-            <UploadZone
+          <UploadZone
+              hidden={filter === "trash"}
+              selectionActive={selCount > 0}
               ref={uploadZoneRef}
               expiryDays={expiryDays}
               keepForever={canKeepForever}
@@ -1244,7 +1265,6 @@ export default function Dashboard({
               folderId={currentFolderId}
               folderName={currentFolder?.name}
             />
-          )}
           {calmHome &&
             !isProductivityTheme &&
             !q &&
@@ -1518,7 +1538,7 @@ export default function Dashboard({
             initial={barInitial}
             animate={barAnimate}
             exit={barExit}
-            className="fixed bottom-5 left-1/2 z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-2 drive-shadow-lg"
+            className="fixed bottom-5 left-1/2 z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-2 drive-shadow-lg flex-wrap justify-center"
           >
             <span className="whitespace-nowrap px-1.5 text-sm font-semibold text-slate-700">
               {selCount}
@@ -1621,6 +1641,10 @@ export default function Dashboard({
               <Star size={16} />
               <span className="hidden sm:inline">Favorite</span>
             </button>
+            {filter !== "trash" && <button disabled={extendingSelection} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              onClick={() => ask({ title: "Extend selected files", message: `Extend ${selected.size} files by 7 days, up to each file's retention limit? Permanent files remain permanent.`, confirmLabel: "Extend 7 days", onConfirm: () => { void extendSelection(7); } })}>
+              {extendingSelection ? "Extending…" : "Extend 7 days"}
+            </button>}
             {canKeepForever && filter !== "trash" && (
               <button
                 onClick={() => bulkKeepForeverMut.mutate(Array.from(selected))}
@@ -1700,6 +1724,8 @@ export default function Dashboard({
         {previewFile && (
           <PreviewModal
             file={previewFile}
+            files={sorted}
+            onNavigate={setPreviewFile}
             onClose={() => setPreviewFile(null)}
           />
         )}

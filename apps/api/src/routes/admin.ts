@@ -912,6 +912,19 @@ admin.get("/users/:id", async (c) => {
     })),
   });
 });
+admin.get("/users/:id/support", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageUsers");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const exists = await c.env.DB.prepare("SELECT id FROM user WHERE id=?").bind(id).first();
+  if (!exists) return c.json({error:"not found"},404);
+  const [sessions, failures, actions] = await Promise.all([
+    c.env.DB.prepare('SELECT id,createdAt,updatedAt,expiresAt FROM session WHERE userId=? AND expiresAt>? ORDER BY updatedAt DESC LIMIT 50').bind(id,nowSeconds()).all(),
+    c.env.DB.prepare("SELECT id,outcome,stage,category,browser,os,created_at FROM upload_diagnostics WHERE user_id=? AND outcome IN ('failed','thumbnail-failed') ORDER BY created_at DESC LIMIT 50").bind(id).all(),
+    c.env.DB.prepare("SELECT id,action,actor_email,created_at FROM audit_log WHERE target_type='user' AND target_id=? ORDER BY created_at DESC LIMIT 50").bind(id).all(),
+  ]);
+  return c.json({sessions:sessions.results,failures:failures.results,actions:actions.results});
+});
 admin.post("/users/:id/quota", async (c) => {
   const denied = await forbidUnlessCan(c, "manageUsers");
   if (denied) return denied;
@@ -2207,6 +2220,42 @@ admin.get("/settings", async (c) => {
     settings: await settingsMap(db),
     revision: await latestPolicyRevision(db),
   });
+});
+admin.post("/settings/impact", async (c) => {
+  const denied = await forbidUnless(c, "owner");
+  if (denied) return denied;
+  const body = await c.req.json<{ settings?: SettingsBody }>();
+  const db = getDb(c.env.DB);
+  const before = await settingsMap(db);
+  const after = applyRequestedSettingChanges(before, body.settings ?? {}, settingsKeys, normalizeSettingValue);
+  const count = async (query: string, ...values: (number | string)[]) => (await c.env.DB.prepare(query).bind(...values).first<{n:number}>())?.n ?? 0;
+  const impacts: Array<{ key: string; count: number | null; unit: string; effect: string }> = [];
+  for (const change of policyChanges(before, after)) {
+    let n: number | null = null, unit = "", effect = "Applies to future actions; stored files are not rewritten.";
+    if (change.key === "defaultQuotaBytes") {
+      n = await count("SELECT COUNT(*) n FROM user WHERE quota_bytes IS NULL"); unit = "accounts using the default quota";
+      effect = "Their effective quota changes immediately. Existing files remain; accounts over quota cannot add uploads.";
+    } else if (change.key === "trashRetentionDays") {
+      n = await count("SELECT COUNT(*) n FROM files WHERE deleted_at IS NOT NULL AND deleted_at<=? AND purge_requested_at IS NULL", nowSeconds() - (Number(after.trashRetentionDays)>0?Number(after.trashRetentionDays):30)*86400); unit = "trashed files eligible for cleanup";
+      effect = "These files can be permanently removed by the next expiration sweep.";
+    } else if (change.key === "publicSharingEnabled") {
+      n = await count("SELECT COUNT(*) n FROM files WHERE share_token IS NOT NULL AND deleted_at IS NULL");
+      n += await count("SELECT COUNT(*) n FROM folders WHERE share_token IS NOT NULL"); unit = "existing share links";
+      effect = "Changes creation of new share links. Existing links are not revoked by this setting; revoke them separately if needed.";
+    } else if (change.key === "defaultExpiryDays" || change.key === "maxExpiryDays") {
+      n = await count("SELECT COUNT(*) n FROM files WHERE status='ready' AND deleted_at IS NULL"); unit = "existing files retain their current expiry";
+      effect = "Changes future uploads and retention controls. Existing expiration timestamps are not shortened by this save.";
+    } else if (change.key === "maxUploadBytes" || change.key === "allowedTypes") {
+      n = await count("SELECT COUNT(*) n FROM user"); unit = "accounts in this workspace";
+      effect = "Enforced on future uploads; existing stored files are not deleted or converted.";
+    } else if (change.key === "signupMode") {
+      effect = "Changes handling of future signups. Existing accounts and pending approvals are not automatically changed.";
+    } else if (change.key === "requirePasswordForShares") {
+      effect = "Changes password requirements when creating or updating shares; review existing links separately.";
+    }
+    impacts.push({key:change.key,count:n,unit,effect});
+  }
+  return c.json({impacts,revision:await latestPolicyRevision(db),asOf:nowSeconds()});
 });
 admin.post("/settings", async (c) => {
   const denied = await forbidUnless(c, "owner");

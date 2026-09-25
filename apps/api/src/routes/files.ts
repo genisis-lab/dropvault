@@ -97,7 +97,7 @@ function validEncryptedEnvelope(
   }
 }
 function isInlineSafeContentType(type: string | null): boolean {
-  return !!type && (type.startsWith("image/") || type.includes("pdf"));
+  return !!type && (type.startsWith("image/") || type.startsWith("video/") || type.includes("pdf"));
 }
 function isImageContentType(type: string | null): boolean {
   return !!type && type.startsWith("image/");
@@ -106,10 +106,10 @@ function thumbKey(r2Key: string): string {
   return `${r2Key}/thumb`;
 }
 const THUMB_MAX_BYTES = 2 * 1024 * 1024;
-function addInlineSecurityHeaders(headers: Headers): void {
+function addInlineSecurityHeaders(headers: Headers, contentType?: string | null): void {
   headers.set(
     "Content-Security-Policy",
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; sandbox",
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'" + (contentType?.startsWith("video/") ? "" : "; sandbox"),
   );
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "no-referrer");
@@ -1404,12 +1404,34 @@ files.post("/:id/multipart/complete", async (c) => {
   if (integrityError) return integrityError;
   return markReady(c, db, row, id);
 });
+// Cancellation is limited to pending uploads; a resumed upload that finished
+// elsewhere is never removed by a delayed cancellation request.
+files.post("/:id/cancel-upload", async (c) => {
+  const id = c.req.param("id");
+  const { db, row } = await loadPendingOwned(c, id);
+  if (!row) return c.json({ ok: true, completed: false });
+  if (row.status !== "pending") return c.json({ ok: true, completed: row.status === "ready" });
+  const session = await db.select().from(schema.uploadSessions).where(eq(schema.uploadSessions.fileId, id)).get();
+  if (session?.status === "active") {
+    try { await c.env.FILES.resumeMultipartUpload(row.r2Key, session.uploadId).abort(); }
+    catch (error) { if (multipartFailureKind(error) !== "stale") throw error; }
+  }
+  const removed = await c.env.DB.prepare("DELETE FROM files WHERE id=? AND owner_id=? AND status='pending' RETURNING r2_key").bind(id, c.get("userId")).first<{r2_key:string}>();
+  if (!removed) return c.json({ ok: true, completed: true });
+  await releaseReservation(c.env.DB, id);
+  // An in-flight PUT can still leave an object after cancellation. The orphan
+  // review detects that object after its 24-hour grace period.
+  await c.env.FILES.delete([removed.r2_key, `${removed.r2_key}/thumb`]);
+  await logActivity(c, db, "file.upload.cancel", id, null);
+  return c.json({ ok: true, completed: false });
+});
 files.post("/:id/multipart/abort", async (c) => {
   const id = c.req.param("id");
   const uploadId = c.req.query("uploadId");
   if (!uploadId) return c.json({ error: "uploadId required" }, 400);
   const { db, row } = await loadPendingOwned(c, id);
   if (!row) return c.json({ error: "not found" }, 404);
+  if (row.status !== "pending") return c.json({ error: "Upload already completed" }, 409);
   try {
     await c.env.FILES.resumeMultipartUpload(row.r2Key, uploadId).abort();
   } catch {}
@@ -1607,6 +1629,7 @@ files.get("/:id/inline", async (c) => {
   if (!object) return c.json({ error: "not found" }, 404);
   const headers = new Headers();
   object.writeHttpMetadata(headers);
+  headers.set("Content-Type", row.contentType!);
   headers.set(
     "Content-Disposition",
     `inline; filename=\"${row.filename.replace(/[\"\\]/g, "_")}\"`,
@@ -1614,7 +1637,7 @@ files.get("/:id/inline", async (c) => {
   headers.set("Cache-Control", "private, max-age=3600");
   headers.set("Accept-Ranges", "bytes");
   if (etag) headers.set("ETag", etag);
-  addInlineSecurityHeaders(headers);
+  addInlineSecurityHeaders(headers, row.contentType);
   if (range) {
     headers.set("Content-Range", `bytes ${range.offset}-${range.end}/${size}`);
     headers.set("Content-Length", String(range.length));
@@ -2337,12 +2360,13 @@ files.patch("/:id", async (c) => {
     update.expiresAt = computeExpiresAt(c.env, row.createdAt);
   }
   const addDays = Math.max(body.extendDays ?? body.expiryDays ?? 0, 0);
-  if (addDays > 0 && !update.keepForever) {
-    update.expiresAt = clampExtension(
+  if (addDays > 0 && !update.keepForever && (!row.keepForever || body.keepForever === false)) {
+    const currentExpiry = body.keepForever === false ? Number(update.expiresAt) : row.expiresAt;
+    update.expiresAt = Math.max(currentExpiry, clampExtension(
       c.env,
       row.createdAt,
-      Math.max(row.expiresAt, nowSeconds()) + Math.round(addDays * DAY_SECONDS),
-    );
+      Math.max(currentExpiry, nowSeconds()) + Math.round(addDays * DAY_SECONDS),
+    ));
     update.keepForever = false;
   }
   if ("folderId" in body) {
@@ -2366,6 +2390,8 @@ files.patch("/:id", async (c) => {
   }
   if (typeof body.favorite === "boolean") update.favorite = body.favorite;
   if (Array.isArray(body.tags)) update.tags = serializeTags(body.tags);
+  if (Object.keys(update).length === 0 && addDays > 0 && row.keepForever)
+    return c.json({ ok: true, expiresAt: row.expiresAt, keepForever: true });
   if (Object.keys(update).length === 0)
     return c.json({ error: "nothing to update" }, 400);
   await db

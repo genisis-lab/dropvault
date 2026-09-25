@@ -1100,3 +1100,40 @@ html.neubrutalism ::selection {
     filter: none !important;
   }
 }
+
+/* Shared refinements preserve every palette while keeping controls readable. */
+[data-ui="upload-target"] [hidden] { display: none !important; }
+html [data-ui="upload-zone"] [data-ui="upload-target"][data-hidden="true"] { display: none !important; }
+html.neubrutalism [data-ui="upload-target"] {
+  display: flex !important;
+  padding: 1.5rem !important;
+  text-align: center;
+}
+[data-ui="upload-target"] #upload-options {
+  color: rgb(var(--c-strong));
+  background: rgb(var(--c-hover));
+  border-color: rgb(var(--c-line));
+}
+[data-ui="upload-target"] #upload-options > * { max-width: 100%; }
+[data-ui="upload-tray"] {
+  color: rgb(var(--c-strong));
+  background: rgb(var(--c-card));
+  border-color: rgb(var(--c-line));
+  box-shadow: var(--shadow-lg);
+}
+html.neubrutalism [data-ui="upload-tray"] {
+  border: 2px solid #111;
+  border-radius: 0.5rem;
+}
+[data-ui="upload-tray"] button,
+[data-ui="admin-operations"] button { min-height: 2.5rem; }
+[data-ui="admin-operations"] table th { white-space: nowrap; }
+[data-ui="admin-operations"] section { scroll-margin-top: 1rem; }
+:where([data-ui="upload-zone"], [data-ui="admin-console"]) :where(button, input, select, textarea):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+html:not(.dark):not(.sunset) [data-ui="upload-zone"] .text-slate-400 { color: rgb(var(--c-muted)); }
+
+html.dark [data-ui="upload-zone"] .text-slate-400,
+html.sunset [data-ui="upload-zone"] .text-slate-400 { color: rgb(var(--c-muted)); }

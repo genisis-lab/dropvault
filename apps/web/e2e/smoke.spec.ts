@@ -108,6 +108,7 @@ test("responsive controls and upload scheduling fit their layouts", async ({
   await page.goto("/")
   await expect(page.getByRole("heading", { name: "Welcome back, Mobile" })).toBeVisible()
   await expect(page.getByText("1 item", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Upload options" }).click()
   await expect(
     page.getByRole("checkbox", { name: /Keep these uploads forever/ }),
   ).toBeChecked()
