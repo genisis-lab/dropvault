@@ -1,3 +1,4 @@
+import AdminOperations, { PolicyImpact, UserSupport } from "./AdminOperations";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -87,6 +88,7 @@ import {
 } from "../lib/policy-settings";
 
 type Tab =
+  | "operations"
   | "overview"
   | "users"
   | "files"
@@ -208,6 +210,7 @@ export default function AdminPanel({
     settings: AdminSettings;
     version?: PolicyVersion;
   } | null>(null);
+  const [impactReady, setImpactReady] = useState(false);
   const [requestDraft, setRequestDraft] = useState({
     title: "Upload files",
     instructions: "",
@@ -233,7 +236,7 @@ export default function AdminPanel({
   useEffect(() => {
     const allowed =
       role === "auditor"
-        ? ["flags", "settings", "activity"]
+        ? ["flags", "settings", "activity", "operations"]
         : role === "moderator"
           ? ["flags", "settings"]
           : null;
@@ -686,6 +689,7 @@ export default function AdminPanel({
   if (!open) return null;
   const allTabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
+    { id: "operations", label: "Operations" },
     { id: "users", label: "Users" },
     { id: "files", label: "Files" },
     { id: "flags", label: "Flags" },
@@ -700,7 +704,7 @@ export default function AdminPanel({
     canOperate
       ? true
       : role === "auditor"
-        ? ["flags", "settings", "activity"].includes(item.id)
+        ? ["flags", "settings", "activity", "operations"].includes(item.id)
         : ["flags", "settings"].includes(item.id),
   );
   const s = statsQ.data;
@@ -775,6 +779,7 @@ export default function AdminPanel({
           ))}
         </div>
         <div className="p-6">
+          {tab === "operations" && <AdminOperations isOwner={isOwner} />}
           {tab === "overview" &&
             (statsQ.isLoading ? (
               <Loading />
@@ -2249,6 +2254,7 @@ export default function AdminPanel({
               </button>
             </div>
             <div className="mt-4 max-h-[55vh] space-y-2 overflow-y-auto">
+              <PolicyImpact key={JSON.stringify(policyReview.settings)} settings={policyReview.settings} onReady={setImpactReady} />
               {policyReviewChanges.map((change) => (
                 <div
                   key={change.key}
@@ -2285,6 +2291,7 @@ export default function AdminPanel({
               </button>
               <button
                 disabled={
+                  !impactReady ||
                   policyReviewChanges.length === 0 ||
                   saveSettingsMut.isPending ||
                   rollbackPolicyMut.isPending
@@ -2406,6 +2413,7 @@ function UserDetail({
         <Loading />
       ) : q.data ? (
         <div className="space-y-5">
+          <UserSupport id={id} />
           <div>
             <h3 className="text-base font-bold text-slate-800">
               {q.data.user.name}

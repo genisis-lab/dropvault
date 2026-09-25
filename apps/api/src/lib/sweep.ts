@@ -1,3 +1,4 @@
+import { multipartFailureKind } from "./multipart";
 import { getDb, schema } from "../db";
 import { and, eq, inArray, lte, isNull } from "drizzle-orm";
 import { nowSeconds } from "./expiry";
@@ -16,8 +17,7 @@ export async function sweepExpired(
     .select()
     .from(schema.appSettings)
     .where(eq(schema.appSettings.key, "trashRetentionDays"))
-    .get()
-    .catch(() => null);
+    .get();
   const trashDays =
     Number(trashSetting?.value) > 0 ? Number(trashSetting?.value) : 30;
   const trashCutoff = cutoff - trashDays * 86400;
@@ -53,8 +53,7 @@ export async function sweepExpired(
       ),
     )
     .limit(batchSize)
-    .all()
-    .catch(() => []);
+    .all();
   const stalePending = await db
     .select({
       id: schema.files.id,
@@ -71,8 +70,7 @@ export async function sweepExpired(
       ),
     )
     .limit(batchSize)
-    .all()
-    .catch(() => []);
+    .all();
   const rows = Array.from(
     new Map(
       [...expired, ...oldTrash, ...stalePending].map((row) => [row.id, row]),
@@ -85,12 +83,11 @@ export async function sweepExpired(
       .select()
       .from(schema.uploadSessions)
       .where(eq(schema.uploadSessions.fileId, f.id))
-      .get()
-      .catch(() => null);
+      .get();
     if (session?.status === "active") {
       await env.FILES.resumeMultipartUpload(f.r2Key, session.uploadId)
         .abort()
-        .catch(() => {});
+        .catch((error) => { if (multipartFailureKind(error) !== "stale") throw error; });
       if (session.requestId)
         await env.DB.prepare(
           "UPDATE upload_requests SET upload_count = MAX(0, upload_count - 1), reserved_bytes = MAX(0, reserved_bytes - ?) WHERE id = ?",
@@ -100,20 +97,12 @@ export async function sweepExpired(
           .catch(() => {});
     }
   }
-  await deleteFileObjects(env.FILES, db, rows).catch((err) =>
-    console.error(
-      JSON.stringify({
-        event: "sweep.r2Delete.failed",
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    ),
-  );
+  await deleteFileObjects(env.FILES, db, rows);
   for (const f of rows)
     await db
       .delete(schema.files)
       .where(eq(schema.files.id, f.id))
-      .run()
-      .catch(() => {});
+      .run();
   console.log(
     JSON.stringify({ event: "sweep.completed", removed: rows.length, cutoff }),
   );
@@ -127,16 +116,15 @@ function baseKeyOf(key: string): string {
   return key.endsWith("/thumb") ? key.slice(0, -"/thumb".length) : key;
 }
 
-// Reconcile orphaned R2 objects: storage left behind by crashes, aborted
+// Preview orphaned R2 objects (owner-reviewed cleanup is in operations routes): storage left behind by crashes, aborted
 // multipart uploads, or lost DB rows. An object is considered LIVE (kept) when
 // its base key matches a files.r2Key OR a file_versions.r2Key row. Thumbnails
 // are kept while their parent file exists. Anything uploaded within the last
 // 24h is skipped so an in-flight upload is never deleted out from under a
-// presign/complete cycle. Deliberately conservative — it only ever deletes
-// objects it can prove are unreferenced.
+// presign/complete cycle. This scheduled scan only reports candidates.
 export async function reconcileOrphans(
   env: Bindings,
-  maxObjects = 5000,
+  maxObjects = 500,
 ): Promise<number> {
   const db = getDb(env.DB);
   const graceCutoff = Date.now() - 24 * 3600 * 1000;
@@ -144,7 +132,7 @@ export async function reconcileOrphans(
   let removed = 0;
   let scanned = 0;
   do {
-    const listing: R2Objects = await env.FILES.list({ limit: 1000, cursor });
+    const listing: R2Objects = await env.FILES.list({ limit: Math.min(500, maxObjects - scanned), cursor });
     cursor = listing.truncated ? listing.cursor : undefined;
     const objects = listing.objects;
     if (objects.length === 0) break;
@@ -163,44 +151,28 @@ export async function reconcileOrphans(
         .select({ r2Key: schema.files.r2Key })
         .from(schema.files)
         .where(inArray(schema.files.r2Key, chunk))
-        .all()
-        .catch(() => []);
+        .all();
       for (const r of fileRows) live.add(r.r2Key);
       const versionRows = await db
         .select({ r2Key: schema.fileVersions.r2Key })
         .from(schema.fileVersions)
         .where(inArray(schema.fileVersions.r2Key, chunk))
-        .all()
-        .catch(() => []);
+        .all();
       for (const r of versionRows) live.add(r.r2Key);
     }
 
     const orphanKeys: string[] = [];
     for (const cand of candidates) {
-      if (cand.uploaded && cand.uploaded > graceCutoff) continue;
+      if (!cand.uploaded || cand.uploaded > graceCutoff) continue;
       if (live.has(cand.base)) continue;
       orphanKeys.push(cand.key);
     }
-    for (let i = 0; i < orphanKeys.length; i += 100) {
-      const chunk = orphanKeys.slice(i, i + 100);
-      try {
-        await env.FILES.delete(chunk);
-        removed += chunk.length;
-      } catch (err) {
-        console.error(
-          JSON.stringify({
-            event: "reconcile.delete.failed",
-            count: chunk.length,
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
-      }
-    }
+    removed += orphanKeys.length;
   } while (cursor && scanned < maxObjects);
 
   if (removed)
     console.log(
-      JSON.stringify({ event: "reconcile.completed", removed, scanned }),
+      JSON.stringify({ event: "reconcile.preview", candidates: removed, scanned }),
     );
   return removed;
 }

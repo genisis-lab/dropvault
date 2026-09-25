@@ -3,7 +3,7 @@ packages:
 
 overrides:
   esbuild: 0.28.1
-  nanoid: 3.3.17
+  nanoid: 3.3.18
   vite: 8.1.5
 
 # These exact direct/locked releases were intentionally reviewed and pinned.
