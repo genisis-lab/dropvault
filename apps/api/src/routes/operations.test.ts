@@ -84,6 +84,17 @@ function addFile(key: string, owner = "u1") {
     .run(key, owner, key, "private.heic", "image/heic", 100, 1, 9999999999);
 }
 describe("operations API", () => {
+  it("uses indexed storage-key lookups for originals and versions", () => {
+    for (const table of ["files", "file_versions"]) {
+      for (const condition of ["r2_key = ?", "r2_key IN (?, ?)"]) {
+        const params = condition.includes("IN") ? ["one", "two"] : ["one"];
+        const plan = sql.prepare(`EXPLAIN QUERY PLAN SELECT id FROM ${table} WHERE ${condition}`).all(...params);
+        const details = plan.map((row) => String(row.detail)).join(" ");
+        expect(details).toContain(`SEARCH ${table} USING INDEX idx_${table}_r2_key`);
+        expect(details).not.toContain(`SCAN ${table}`);
+      }
+    }
+  });
   it("deduplicates reports, strips unowned file IDs, and rejects invalid stages", async () => {
     addFile("other", "u2");
     const body = {
