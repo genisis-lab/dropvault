@@ -825,11 +825,18 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
               Up to {MAX_BATCH_FILES} files per batch · {expiryText}
             </p>
           </div>
-          <p className="text-xs text-slate-600">
-            {encryptChoice ? "Encrypted" : "Standard upload"}
-            {releaseAtInput ? " · Scheduled release" : ""}
-            {expireAfterDownloadChoice ? " · Expires after download" : ""}
-          </p>
+          {/* Summarize only options that differ from a plain upload. */}
+          {(encryptChoice || releaseAtInput || expireAfterDownloadChoice) && (
+            <p className="text-xs text-slate-600" data-ui="upload-summary">
+              {[
+                encryptChoice && "Encrypted",
+                releaseAtInput && "Scheduled release",
+                expireAfterDownloadChoice && "Expires after first download",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
           <button
             type="button"
             aria-expanded={optionsOpen}

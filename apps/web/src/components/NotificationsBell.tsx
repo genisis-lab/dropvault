@@ -9,6 +9,10 @@ import {
   markNotificationRead,
   type NotificationItem,
 } from "../lib/api";
+import {
+  notificationDestination,
+  type NotificationDestination,
+} from "../lib/notificationTarget";
 
 const popInitial = { opacity: 0, scale: 0.96, y: 8 };
 const popAnimate = { opacity: 1, scale: 1, y: 0 };
@@ -22,7 +26,11 @@ function when(ts: number) {
   });
 }
 
-export default function NotificationsBell() {
+export default function NotificationsBell({
+  onNavigate,
+}: {
+  onNavigate?: (destination: NotificationDestination) => void;
+}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const q = useQuery({
@@ -118,7 +126,14 @@ export default function NotificationsBell() {
                     >
                       <div className="flex items-start gap-2">
                         <button
-                          onClick={() => !n.readAt && readMut.mutate(n.id)}
+                          onClick={() => {
+                            if (!n.readAt) readMut.mutate(n.id);
+                            const destination = notificationDestination(n);
+                            if (destination && onNavigate) {
+                              setOpen(false);
+                              onNavigate(destination);
+                            }
+                          }}
                           className="min-w-0 flex-1 text-left"
                         >
                           <p className="truncate text-sm font-semibold text-slate-800">

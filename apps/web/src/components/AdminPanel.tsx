@@ -6,6 +6,7 @@ import {
   Bell,
   Check,
   ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   ExternalLink,
@@ -33,6 +34,8 @@ import {
   adminSuspendUser,
   adminUnsuspendUser,
   adminApproveUser,
+  adminResendVerification,
+  adminTestWebhook,
   adminBulkUsers,
   adminFiles,
   adminRevokeFile,
@@ -80,6 +83,14 @@ import {
 import { formatBytes } from "../lib/format";
 import { setUserKeepForever } from "../lib/keepForever";
 import { useToast } from "./Toast";
+import { useConfirm, useTypedConfirmation } from "./Dialog";
+import { useSession } from "../lib/auth-client";
+import {
+  ADMIN_HASH_PREFIX,
+  adminSectionFromHash,
+  urlWithoutHash,
+} from "../lib/adminRoute";
+import { activityLabel, browserSummary } from "../lib/activityFormat";
 import { announceWorkspaceDefaultTheme } from "../lib/theme";
 import { isTheme, THEME_OPTIONS, type Theme } from "../lib/theme-config";
 import {
@@ -99,6 +110,42 @@ type Tab =
   | "limit-requests"
   | "activity"
   | "notifications";
+const TAB_LABELS: Record<Tab, string> = {
+  overview: "Overview",
+  operations: "Operations",
+  activity: "Activity",
+  users: "Users",
+  admins: "Roles",
+  "limit-requests": "Limit Requests",
+  files: "Files",
+  flags: "Flags",
+  requests: "Requests",
+  settings: "Policies",
+  notifications: "Notifications",
+};
+// Grouped so the eleven sections stay findable and never scroll off-screen.
+const TAB_GROUPS: { label: string; tabs: Tab[] }[] = [
+  { label: "System", tabs: ["overview", "operations", "activity"] },
+  { label: "People", tabs: ["users", "admins", "limit-requests"] },
+  { label: "Content", tabs: ["files", "flags", "requests"] },
+  { label: "Settings", tabs: ["settings", "notifications"] },
+];
+function allowedTabs(role: string | null | undefined, canOperate: boolean): Tab[] {
+  const all = TAB_GROUPS.flatMap((group) => group.tabs);
+  if (canOperate) return all;
+  if (role === "auditor")
+    return all.filter((id) =>
+      ["flags", "settings", "activity", "operations"].includes(id),
+    );
+  return all.filter((id) => ["flags", "settings"].includes(id));
+}
+// The open admin section lives in the URL (#admin/users) so reloads,
+// bookmarks and shared links land on the same section.
+function tabFromHash(): Tab | null {
+  if (typeof window === "undefined") return null;
+  const id = adminSectionFromHash(window.location.hash);
+  return id && id in TAB_LABELS ? (id as Tab) : null;
+}
 type SortDir = "asc" | "desc";
 type GrowthMetric = "files" | "bytes" | "users";
 const DAY = 86400;
@@ -117,19 +164,18 @@ const SECURITY_POLICY_KEYS = new Set([
   "trashRetentionDays",
   "rolePermissions",
 ]);
-function ownerConfirmation(phrase: string): string | null {
-  const value = window.prompt(
-    `Owner confirmation required. Type ${phrase} to continue.`,
-  );
-  return value === phrase ? value : null;
-}
-
 function fmtDate(sec: number): string {
   return new Date(sec * 1000).toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
+}
+// Keep-forever files are stored with the API's FOREVER_EXPIRES_AT
+// (9999-12-31), which would otherwise display as "Dec 31, 9999".
+const FOREVER_EXPIRES_AT = 253402300799;
+function fmtExpiry(sec: number): string {
+  return sec >= FOREVER_EXPIRES_AT ? "Never" : fmtDate(sec);
 }
 function fmtDateTime(sec: number): string {
   return new Date(sec * 1000).toLocaleString(undefined, {
@@ -183,7 +229,29 @@ export default function AdminPanel({
 }) {
   const qc = useQueryClient();
   const { success: toastOk, error: toastErr } = useToast();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [confirmUi, confirm] = useConfirm();
+  const [typedConfirmUi, ownerConfirmation] = useTypedConfirmation();
+  const { data: session } = useSession();
+  const myEmail = session?.user?.email?.toLowerCase() ?? null;
+  const [tab, setTabState] = useState<Tab>(() => tabFromHash() ?? "overview");
+  // Follow #admin/<section> changes made elsewhere (e.g. a notification link)
+  // while the console is already open.
+  useEffect(() => {
+    const sync = () => {
+      const next = tabFromHash();
+      if (next) setTabState(next);
+    };
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  function setTab(next: Tab) {
+    setTabState(next);
+    window.history.replaceState(
+      null,
+      "",
+      `${urlWithoutHash(window.location)}${ADMIN_HASH_PREFIX}/${next}`,
+    );
+  }
   const [userQuery, setUserQuery] = useState("");
   const [userFilter, setUserFilter] = useState("all");
   const [fileQuery, setFileQuery] = useState("");
@@ -200,6 +268,9 @@ export default function AdminPanel({
     dir: "desc",
   });
   const [flagStatus, setFlagStatus] = useState("open");
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityAction, setActivityAction] = useState("");
+  const [activityRange, setActivityRange] = useState("7");
   const [limitFilter, setLimitFilter] = useState("all");
   const [growthMetric, setGrowthMetric] = useState<GrowthMetric>("files");
   const [newAdmin, setNewAdmin] = useState("");
@@ -287,6 +358,35 @@ export default function AdminPanel({
     queryFn: () => adminActivity(200),
     enabled: open && tab === "activity",
   });
+  const activityActions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...(auditQ.data ?? []), ...(activityQ.data ?? [])].map(
+            (row) => row.action,
+          ),
+        ),
+      ).sort((a, b) => activityLabel(a).localeCompare(activityLabel(b))),
+    [auditQ.data, activityQ.data],
+  );
+  function filterActivity<T extends ActivityRow>(rows: T[]): T[] {
+    const q = activitySearch.trim().toLowerCase();
+    const since = activityRange
+      ? Math.floor(Date.now() / 1000) - Number(activityRange) * DAY
+      : 0;
+    return rows.filter((row) => {
+      if (row.createdAt < since) return false;
+      if (activityAction && row.action !== activityAction) return false;
+      if (!q) return true;
+      return [
+        row.actorEmail,
+        row.detail,
+        row.targetId,
+        "ip" in row ? row.ip : null,
+        activityLabel(row.action),
+      ].some((value) => value?.toLowerCase().includes(q));
+    });
+  }
   const settingsQ = useQuery({
     queryKey: ["admin-settings"],
     queryFn: adminSettings,
@@ -472,6 +572,39 @@ export default function AdminPanel({
     },
     onError: onErr("Couldn't ban IP"),
   });
+  // IP bans refuse every request from that address, so always confirm and
+  // spell out the collateral damage on shared networks.
+  async function confirmBan(ip: string, note: string | null) {
+    const ok = await confirm({
+      title: `Ban ${ip}?`,
+      message:
+        "Every request from this IP address will be refused, including sign-in and share links. Anyone else on the same network (home Wi-Fi, office, mobile carrier) is blocked too. You can lift the ban from the Users tab.",
+      confirmLabel: "Ban IP",
+      danger: true,
+    });
+    if (ok) banIpMut.mutate({ ip, note });
+  }
+  async function confirmForceRevoke(id: string, email?: string) {
+    const ok = await confirm({
+      title: "Revoke all share links?",
+      message: `Every public link ${email ? `shared by ${email}` : "this user created"} stops working immediately. Their files are not deleted.`,
+      confirmLabel: "Revoke links",
+      danger: true,
+    });
+    if (ok) forceRevokeMut.mutate(id);
+  }
+  async function confirmApprove(id: string) {
+    const target = usersQ.data?.find((u) => u.id === id);
+    if (target?.emailVerified === false) {
+      const ok = await confirm({
+        title: "Approve an unverified account?",
+        message: `${target.email} hasn't opened their verification link yet, so it isn't confirmed they own this address. They still have to verify before signing in.`,
+        confirmLabel: "Approve anyway",
+      });
+      if (!ok) return;
+    }
+    approveUserMut.mutate(id);
+  }
   const unbanIpMut = useMutation({
     mutationFn: (ip: string) => adminUnbanIp(ip),
     onSuccess: () => {
@@ -615,6 +748,8 @@ export default function AdminPanel({
     else if (userFilter === "pending")
       rows = rows.filter((u) => u.pendingApproval);
     else if (userFilter === "active") rows = rows.filter((u) => !u.suspended);
+    else if (userFilter === "unverified")
+      rows = rows.filter((u) => u.emailVerified === false);
     if (q)
       rows = rows.filter((u) => {
         const ipHay =
@@ -674,6 +809,11 @@ export default function AdminPanel({
       : rows.filter((r) => r.status === limitFilter);
   }, [limitRequestsQ.data, limitFilter]);
   const settings = policyDraft ?? settingsQ.data?.settings ?? {};
+  const policyDirty =
+    policyDraft != null &&
+    Object.keys(
+      changedPolicySettings(settingsQ.data?.settings ?? {}, policyDraft),
+    ).length > 0;
   const policyReviewChanges = useMemo(() => {
     if (!policyReview) return [];
     const before = settingsQ.data?.settings ?? {};
@@ -686,27 +826,39 @@ export default function AdminPanel({
     [ipBansQ.data],
   );
 
+  const visibleTabIds = allowedTabs(role, canOperate);
+  useEffect(() => {
+    // A link or bookmark can name a section this role cannot open.
+    if (open && role && !visibleTabIds.includes(tab))
+      setTab(visibleTabIds[0] ?? "flags");
+  }, [open, role, tab]);
+  // Overview alerts jump straight to the list that needs attention.
+  function openAlert(id: string) {
+    if (id === "flags") {
+      setFlagStatus("open");
+      setTab("flags");
+    } else if (id === "approval") {
+      setSelectedUserId(null);
+      setUserFilter("pending");
+      setTab("users");
+    } else if (id === "quota" || id === "inactive") {
+      setSelectedUserId(null);
+      setUserFilter("all");
+      setUserSort({ key: "storage", dir: id === "quota" ? "desc" : "asc" });
+      setTab("users");
+    } else if (id === "unprotected" || id === "unlimited") {
+      setFileFilter("shared");
+      setTab("files");
+    } else if (id === "large") {
+      setFileFilter("all");
+      setFileSort({ key: "size", dir: "desc" });
+      setTab("files");
+    } else if (id === "pending") {
+      setTab("operations");
+    }
+  }
+
   if (!open) return null;
-  const allTabs: { id: Tab; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "operations", label: "Operations" },
-    { id: "users", label: "Users" },
-    { id: "files", label: "Files" },
-    { id: "flags", label: "Flags" },
-    { id: "admins", label: "Roles" },
-    { id: "settings", label: "Policies" },
-    { id: "requests", label: "Requests" },
-    { id: "limit-requests", label: "Limit Requests" },
-    { id: "activity", label: "Activity" },
-    { id: "notifications", label: "Notifications" },
-  ];
-  const tabs = allTabs.filter((item) =>
-    canOperate
-      ? true
-      : role === "auditor"
-        ? ["flags", "settings", "activity", "operations"].includes(item.id)
-        : ["flags", "settings"].includes(item.id),
-  );
   const s = statsQ.data;
 
   return (
@@ -752,32 +904,57 @@ export default function AdminPanel({
             </button>
           </div>
         </div>
-        <div className="flex gap-1 overflow-x-auto border-b border-slate-200 px-4">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={
-                "shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition " +
-                (tab === t.id
-                  ? "border-drift-500 text-drift-700"
-                  : "border-transparent text-slate-500 hover:text-slate-700")
-              }
-            >
-              {t.label}
-              {t.id === "flags" && s && s.flagCount > 0 && (
-                <span className="ml-1.5 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  {s.flagCount}
+        <nav
+          aria-label="Admin sections"
+          className="flex flex-wrap gap-x-5 gap-y-1 border-b border-slate-200 px-4 pt-1"
+          data-ui="admin-tabs"
+        >
+          {TAB_GROUPS.map((group) => {
+            const groupTabs = group.tabs.filter((id) =>
+              visibleTabIds.includes(id),
+            );
+            if (!groupTabs.length) return null;
+            return (
+              <div
+                key={group.label}
+                role="group"
+                aria-label={group.label}
+                className="flex items-center gap-0.5"
+              >
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  {group.label}
                 </span>
-              )}
-              {t.id === "users" && s && (s.pendingApprovalCount ?? 0) > 0 && (
-                <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  {s.pendingApprovalCount}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+                {groupTabs.map((id) => (
+                  <button
+                    key={id}
+                    onClick={() => setTab(id)}
+                    aria-current={tab === id ? "page" : undefined}
+                    className={
+                      "shrink-0 border-b-2 px-2.5 py-2.5 text-sm font-medium transition " +
+                      (tab === id
+                        ? "border-drift-500 text-drift-700"
+                        : "border-transparent text-slate-500 hover:text-slate-700")
+                    }
+                  >
+                    {TAB_LABELS[id]}
+                    {id === "flags" && s && s.flagCount > 0 && (
+                      <span className="ml-1.5 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        {s.flagCount}
+                      </span>
+                    )}
+                    {id === "users" &&
+                      s &&
+                      (s.pendingApprovalCount ?? 0) > 0 && (
+                        <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                          {s.pendingApprovalCount}
+                        </span>
+                      )}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+        </nav>
         <div className="p-6">
           {tab === "operations" && <AdminOperations isOwner={isOwner} />}
           {tab === "overview" &&
@@ -821,7 +998,7 @@ export default function AdminPanel({
                     value={String(s.pendingApprovalCount ?? 0)}
                   />
                 </div>
-                <Alerts alerts={s.alerts ?? []} />
+                <Alerts alerts={s.alerts ?? []} onSelect={openAlert} />
                 <div>
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -881,9 +1058,10 @@ export default function AdminPanel({
                 onChanged={refresh}
                 onSuspend={(id) => suspendMut.mutate(id)}
                 onUnsuspend={(id) => unsuspendMut.mutate(id)}
-                onApprove={(id) => approveUserMut.mutate(id)}
-                onForceRevoke={(id) => forceRevokeMut.mutate(id)}
-                onBanIp={(ip, note) => banIpMut.mutate({ ip, note })}
+                onApprove={(id) => void confirmApprove(id)}
+                onForceRevoke={(id) => void confirmForceRevoke(id)}
+                onBanIp={(ip, note) => void confirmBan(ip, note ?? null)}
+                selfEmail={myEmail}
                 onUnbanIp={(ip) => unbanIpMut.mutate(ip)}
               />
             ) : usersQ.isLoading ? (
@@ -909,6 +1087,7 @@ export default function AdminPanel({
                     <option value="active">Active</option>
                     <option value="pending">Pending approval</option>
                     <option value="suspended">Suspended</option>
+                    <option value="unverified">Email unverified</option>
                   </select>
                   <button
                     onClick={() =>
@@ -973,9 +1152,9 @@ export default function AdminPanel({
                     </button>
                     {isOwner && (
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           const confirmation =
-                            ownerConfirmation("EXPIRE USER FILES");
+                            await ownerConfirmation("EXPIRE USER FILES");
                           if (confirmation)
                             bulkUserMut.mutate({
                               action: "expireFiles",
@@ -1018,10 +1197,7 @@ export default function AdminPanel({
                       <button
                         onClick={() =>
                           ipDraft.trim() &&
-                          banIpMut.mutate({
-                            ip: ipDraft.trim(),
-                            note: ipNote.trim() || null,
-                          })
+                          void confirmBan(ipDraft.trim(), ipNote.trim() || null)
                         }
                         disabled={banIpMut.isPending || !ipDraft.trim()}
                         className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
@@ -1178,6 +1354,11 @@ export default function AdminPanel({
                             ) : (
                               <span className="text-slate-500">Active</span>
                             )}
+                            {u.emailVerified === false && (
+                              <span className="mt-0.5 block text-[11px] font-medium text-amber-700">
+                                Email unverified
+                              </span>
+                            )}
                           </td>
                           <td
                             className="px-3 py-2.5"
@@ -1186,7 +1367,7 @@ export default function AdminPanel({
                             <div className="flex items-center justify-end gap-1">
                               {u.pendingApproval && (
                                 <button
-                                  onClick={() => approveUserMut.mutate(u.id)}
+                                  onClick={() => void confirmApprove(u.id)}
                                   className="mini-good"
                                 >
                                   Approve
@@ -1194,9 +1375,7 @@ export default function AdminPanel({
                               )}
                               <button
                                 onClick={() =>
-                                  window.confirm(
-                                    `Revoke all share links for ${u.email}?`,
-                                  ) && forceRevokeMut.mutate(u.id)
+                                  void confirmForceRevoke(u.id, u.email)
                                 }
                                 className="mini"
                               >
@@ -1204,13 +1383,14 @@ export default function AdminPanel({
                               </button>
                               {isOwner &&
                                 u.lastIp &&
+                                u.email.toLowerCase() !== myEmail &&
                                 !ipBanMap.has(u.lastIp) && (
                                   <button
                                     onClick={() =>
-                                      banIpMut.mutate({
-                                        ip: u.lastIp!,
-                                        note: `Banned from ${u.email}`,
-                                      })
+                                      void confirmBan(
+                                        u.lastIp!,
+                                        `Banned from ${u.email}`,
+                                      )
                                     }
                                     className="mini-danger"
                                   >
@@ -1399,14 +1579,23 @@ export default function AdminPanel({
                           }
                           onRevoke={() => revokeMut.mutate(f.id)}
                           onExtend={() => extendMut.mutate(f.id)}
-                          onExpire={() => expireMut.mutate(f.id)}
+                          onExpire={async () => {
+                            const ok = await confirm({
+                              title: `Expire ${f.filename} now?`,
+                              message:
+                                "The file and its share links stop working immediately, and the next hourly cleanup deletes it permanently.",
+                              confirmLabel: "Expire now",
+                              danger: true,
+                            });
+                            if (ok) expireMut.mutate(f.id);
+                          }}
                           onDelete={() => deleteMut.mutate(f.id)}
                           onRestore={() => restoreMut.mutate(f.id)}
                           onPermanent={
                             isOwner
-                              ? () => {
+                              ? async () => {
                                   const confirmation =
-                                    ownerConfirmation("PERMANENTLY DELETE");
+                                    await ownerConfirmation("PERMANENTLY DELETE");
                                   if (confirmation)
                                     permanentMut.mutate({
                                       id: f.id,
@@ -1620,9 +1809,9 @@ export default function AdminPanel({
                             fl.contentHash &&
                             fl.encryptionMode !== "aes-gcm" && (
                               <button
-                                onClick={() => {
+                                onClick={async () => {
                                   const confirmation =
-                                    ownerConfirmation("BAN HASH");
+                                    await ownerConfirmation("BAN HASH");
                                   if (confirmation)
                                     banHashMut.mutate({
                                       id: fl.id,
@@ -1637,9 +1826,9 @@ export default function AdminPanel({
                             )}
                           {isOwner && (
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 const confirmation =
-                                  ownerConfirmation("DELETE REPORT");
+                                  await ownerConfirmation("DELETE REPORT");
                                 if (confirmation)
                                   deleteFlagMut.mutate({
                                     id: fl.id,
@@ -1698,10 +1887,10 @@ export default function AdminPanel({
             ) : (
               <div>
                 <form
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     if (!newAdmin.trim()) return;
-                    const confirmation = ownerConfirmation("GRANT ROLE");
+                    const confirmation = await ownerConfirmation("GRANT ROLE");
                     if (confirmation) addAdminMut.mutate(confirmation);
                   }}
                   className="flex flex-wrap items-center gap-2"
@@ -1765,8 +1954,9 @@ export default function AdminPanel({
                         )}
                       </div>
                       <button
-                        onClick={() => {
-                          const confirmation = ownerConfirmation("REMOVE ROLE");
+                        onClick={async () => {
+                          const confirmation =
+                            await ownerConfirmation("REMOVE ROLE");
                           if (confirmation)
                             removeAdminMut.mutate({
                               email: a.email,
@@ -1821,18 +2011,20 @@ export default function AdminPanel({
                       settings={settings}
                       setSettings={setPolicyDraft}
                     />
-                    <PolicyInput
-                      label="Max upload bytes"
+                    <GbPolicyInput
+                      label="Max upload size (GB)"
                       k="maxUploadBytes"
                       settings={settings}
                       setSettings={setPolicyDraft}
+                      step="0.1"
+                      hint="Largest single file anyone can upload. 0 means no limit."
                     />
                     <GbPolicyInput
                       label="Default quota (GB)"
                       k="defaultQuotaBytes"
                       settings={settings}
                       setSettings={setPolicyDraft}
-                      hint="New users get this much space unless given a custom quota. Stored as bytes."
+                      hint="New users get this much space unless given a custom quota."
                     />
                     <GbPolicyInput
                       label="Admin quota adjustment cap (GB)"
@@ -1867,7 +2059,7 @@ export default function AdminPanel({
                       settings={settings}
                       setSettings={setPolicyDraft}
                     />
-                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
+                    <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
                       <input
                         type="checkbox"
                         checked={settings.signupMode === "approval"}
@@ -1877,16 +2069,25 @@ export default function AdminPanel({
                             signupMode: e.target.checked ? "approval" : "open",
                           })
                         }
+                        className="mt-0.5"
                       />{" "}
                       <span>
-                        Invite-only signups — require admin approval before new
-                        accounts can be used
+                        Require admin approval for new accounts
+                        <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                          Anyone can still sign up, but they can't use Dropvault
+                          until an admin approves them under Users.
+                        </span>
                       </span>
                     </label>
                   </div>
                   <RolePermsEditor />
                 </fieldset>
-                <div>
+                {/* Stays in view while scrolling the long form, and says when
+                    there is something to save. */}
+                <div
+                  className="sticky bottom-0 z-10 -mx-6 flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white/95 px-6 py-3 backdrop-blur"
+                  data-ui="policy-save-bar"
+                >
                   <button
                     onClick={() =>
                       setPolicyReview({
@@ -1899,10 +2100,25 @@ export default function AdminPanel({
                   >
                     Save workspace settings
                   </button>
-                  {!isOwner && (
-                    <span className="ml-2 text-xs text-amber-600">
-                      Owner only
+                  {policyDirty ? (
+                    <>
+                      <span className="text-sm font-medium text-amber-700">
+                        Unsaved changes
+                      </span>
+                      <button
+                        onClick={() => setPolicyDraft(null)}
+                        className="text-sm text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                      >
+                        Discard
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-sm text-slate-400">
+                      All changes saved
                     </span>
+                  )}
+                  {!isOwner && (
+                    <span className="text-xs text-amber-600">Owner only</span>
                   )}
                 </div>
                 <section className="rounded-2xl border border-slate-200 p-4">
@@ -1979,84 +2195,110 @@ export default function AdminPanel({
                 <h3 className="font-semibold text-slate-800">
                   Create upload request link
                 </h3>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <input
-                    value={requestDraft.title}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        title: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Title"
-                  />
-                  <input
-                    value={requestDraft.password}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        password: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Password optional"
-                  />
-                  <input
-                    value={requestDraft.maxFileSizeGb}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        maxFileSizeGb: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Max file size GB"
-                  />
-                  <input
-                    value={requestDraft.allowedTypes}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        allowedTypes: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Allowed types"
-                  />
-                  <input
-                    value={requestDraft.uploadLimit}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        uploadLimit: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Upload limit"
-                  />
-                  <input
-                    value={requestDraft.expiresInDays}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        expiresInDays: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Expires in days"
-                  />
-                  <textarea
-                    value={requestDraft.instructions}
-                    onChange={(e) =>
-                      setRequestDraft({
-                        ...requestDraft,
-                        instructions: e.target.value,
-                      })
-                    }
-                    className="input sm:col-span-2"
-                    placeholder="Instructions"
-                  />
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <RequestField label="Title">
+                    <input
+                      value={requestDraft.title}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          title: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="Upload files"
+                    />
+                  </RequestField>
+                  <RequestField label="Password">
+                    <input
+                      value={requestDraft.password}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          password: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="Optional"
+                      type="password"
+                      autoComplete="new-password"
+                    />
+                  </RequestField>
+                  <RequestField label="Max file size (GB)">
+                    <input
+                      value={requestDraft.maxFileSizeGb}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          maxFileSizeGb: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="No limit"
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                    />
+                  </RequestField>
+                  <RequestField label="Allowed file types"
+                    hint="Comma-separated, e.g. image/*,application/pdf">
+                    <input
+                      value={requestDraft.allowedTypes}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          allowedTypes: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="Any type"
+                    />
+                  </RequestField>
+                  <RequestField label="Max number of uploads">
+                    <input
+                      value={requestDraft.uploadLimit}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          uploadLimit: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="Unlimited"
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                    />
+                  </RequestField>
+                  <RequestField label="Link expires after (days)">
+                    <input
+                      value={requestDraft.expiresInDays}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          expiresInDays: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="7"
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                    />
+                  </RequestField>
+                  <RequestField label="Instructions for uploaders" wide>
+                    <textarea
+                      value={requestDraft.instructions}
+                      onChange={(e) =>
+                        setRequestDraft({
+                          ...requestDraft,
+                          instructions: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                      placeholder="Optional"
+                    />
+                  </RequestField>
                   <label className="flex items-center gap-2 text-sm text-slate-600">
                     <input
                       type="checkbox"
@@ -2203,12 +2445,53 @@ export default function AdminPanel({
             ))}
 
           {tab === "activity" && (
-            <div className="grid gap-5 lg:grid-cols-2">
-              <ActivityTable title="Admin audit" rows={auditQ.data ?? []} />
-              <ActivityTable
-                title="User activity"
-                rows={activityQ.data ?? []}
-              />
+            <div className="space-y-4">
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_minmax(0,11rem)]">
+                <input
+                  value={activitySearch}
+                  onChange={(e) => setActivitySearch(e.target.value)}
+                  placeholder="Filter by person, IP or item"
+                  aria-label="Filter activity by person, IP or item"
+                  className="input"
+                />
+                <select
+                  value={activityAction}
+                  onChange={(e) => setActivityAction(e.target.value)}
+                  aria-label="Filter activity by action"
+                  className="input"
+                >
+                  <option value="">All actions</option>
+                  {activityActions.map((action) => (
+                    <option key={action} value={action}>
+                      {activityLabel(action)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={activityRange}
+                  onChange={(e) => setActivityRange(e.target.value)}
+                  aria-label="Filter activity by time"
+                  className="input"
+                >
+                  <option value="1">Last 24 hours</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="">All time</option>
+                </select>
+              </div>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <ActivityTable
+                  title="Admin audit"
+                  rows={filterActivity(auditQ.data ?? [])}
+                />
+                <ActivityTable
+                  title="User activity"
+                  rows={filterActivity(activityQ.data ?? [])}
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                Showing the most recent 200 entries of each log.
+              </p>
             </div>
           )}
           {tab === "notifications" &&
@@ -2296,12 +2579,13 @@ export default function AdminPanel({
                   saveSettingsMut.isPending ||
                   rollbackPolicyMut.isPending
                 }
-                onClick={() => {
+                onClick={async () => {
                   if (
                     policyReview.mode === "rollback" &&
                     policyReview.version
                   ) {
-                    const confirmation = ownerConfirmation("RESTORE POLICY");
+                    const confirmation =
+                      await ownerConfirmation("RESTORE POLICY");
                     if (confirmation)
                       rollbackPolicyMut.mutate({
                         versionId: policyReview.version.id,
@@ -2313,7 +2597,7 @@ export default function AdminPanel({
                     SECURITY_POLICY_KEYS.has(change.key),
                   );
                   const confirmation = needsConfirmation
-                    ? ownerConfirmation("APPLY POLICY")
+                    ? await ownerConfirmation("APPLY POLICY")
                     : undefined;
                   if (needsConfirmation && !confirmation) return;
                   const changedSettings = changedPolicySettings(
@@ -2335,7 +2619,31 @@ export default function AdminPanel({
           </div>
         </div>
       )}
+      {confirmUi}
+      {typedConfirmUi}
     </div>
+  );
+}
+
+function RequestField({
+  label,
+  hint,
+  wide = false,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={"block text-sm " + (wide ? "sm:col-span-2" : "")}>
+      <span className="mb-1 block text-xs font-medium text-slate-600">
+        {label}
+      </span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>}
+    </label>
   );
 }
 
@@ -2351,10 +2659,12 @@ function UserDetail({
   onForceRevoke,
   onBanIp,
   onUnbanIp,
+  selfEmail,
 }: {
   id: string;
   isOwner: boolean;
   bannedIps: IpBanEntry[];
+  selfEmail?: string | null;
   onBack: () => void;
   onChanged: () => void;
   onSuspend: (id: string) => void;
@@ -2370,6 +2680,12 @@ function UserDetail({
     queryFn: () => adminUser(id),
   });
   const [gb, setGb] = useState("");
+  const resendMut = useMutation({
+    mutationFn: () => adminResendVerification(id),
+    onSuccess: () => toastOk("Verification email sent"),
+    onError: (e) =>
+      toastErr((e as Error)?.message || "Couldn't send verification email"),
+  });
   const quotaMut = useMutation({
     mutationFn: (bytes: number | null) => adminSetQuota(id, bytes),
     onSuccess: () => {
@@ -2419,6 +2735,22 @@ function UserDetail({
               {q.data.user.name}
             </h3>
             <p className="text-sm text-slate-500">{q.data.user.email}</p>
+            {q.data.user.emailVerified === false && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <span>Email address not verified yet.</span>
+                {q.data.emailDelivery && (
+                  <button
+                    onClick={() => resendMut.mutate()}
+                    disabled={resendMut.isPending}
+                    className="mini"
+                  >
+                    {resendMut.isPending
+                      ? "Sending…"
+                      : "Resend verification email"}
+                  </button>
+                )}
+              </div>
+            )}
             <p className="mt-1 text-xs text-slate-400">
               Joined {fmtDate(q.data.user.createdAt)} · {q.data.user.fileCount}{" "}
               files · {formatBytes(q.data.user.totalBytes)}
@@ -2440,20 +2772,21 @@ function UserDetail({
                   Approve
                 </button>
               )}
+              {/* A pending account is suspended until approved, so Approve
+                  is its only meaningful state change here. */}
+              {!q.data.user.pendingApproval && (
+                <button
+                  onClick={() => {
+                    q.data?.user.suspended ? onUnsuspend(id) : onSuspend(id);
+                    q.refetch();
+                  }}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+                >
+                  {q.data.user.suspended ? "Unsuspend" : "Suspend"}
+                </button>
+              )}
               <button
-                onClick={() => {
-                  q.data?.user.suspended ? onUnsuspend(id) : onSuspend(id);
-                  q.refetch();
-                }}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                {q.data.user.suspended ? "Unsuspend" : "Suspend"}
-              </button>
-              <button
-                onClick={() =>
-                  window.confirm("Revoke all share links for this user?") &&
-                  onForceRevoke(id)
-                }
+                onClick={() => onForceRevoke(id)}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
               >
                 Revoke all shares
@@ -2589,7 +2922,7 @@ function UserDetail({
                         <button onClick={() => onUnbanIp(ip)} className="mini">
                           Unban
                         </button>
-                      ) : (
+                      ) : q.data.user.email.toLowerCase() === selfEmail ? null : (
                         <button
                           onClick={() =>
                             onBanIp(ip, `Banned from ${q.data.user.email}`)
@@ -2663,7 +2996,9 @@ function FileRow({
       <td className="px-3 py-2.5 text-slate-600">
         {formatBytes(file.sizeBytes)}
       </td>
-      <td className="px-3 py-2.5 text-slate-500">{fmtDate(file.expiresAt)}</td>
+      <td className="px-3 py-2.5 text-slate-500">
+        {fmtExpiry(file.expiresAt)}
+      </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-end gap-1">
           {canViewContent && adminFileContentAvailable(file) && (
@@ -2694,20 +3029,34 @@ function FileRow({
               target="_blank"
               rel="noopener"
               className="icon-btn"
+              aria-label={`Open public link for ${file.filename}`}
+              title="Open public link"
             >
               <ExternalLink size={15} />
             </a>
           )}
-          <button onClick={onExtend} className="icon-btn">
+          <button
+            onClick={onExtend}
+            className="icon-btn"
+            aria-label={`Extend ${file.filename} by 7 days`}
+            title="Extend expiry by 7 days"
+          >
             <Clock size={15} />
           </button>
-          <button onClick={onExpire} className="icon-btn">
+          <button
+            onClick={onExpire}
+            className="icon-btn"
+            aria-label={`Expire ${file.filename} now`}
+            title="Expire now"
+          >
             <Ban size={15} />
           </button>
           <button
             onClick={onRevoke}
             disabled={!file.shared}
             className="icon-btn disabled:opacity-30"
+            aria-label={`Revoke share link for ${file.filename}`}
+            title={file.shared ? "Revoke share link" : "Not shared"}
           >
             <Link2 size={15} />
           </button>
@@ -2716,7 +3065,12 @@ function FileRow({
               Restore
             </button>
           ) : (
-            <button onClick={onDelete} className="icon-danger">
+            <button
+              onClick={onDelete}
+              className="icon-danger"
+              aria-label={`Move ${file.filename} to Trash`}
+              title="Move to Trash"
+            >
               <Trash2 size={15} />
             </button>
           )}
@@ -2732,77 +3086,105 @@ function FileRow({
 }
 function Alerts({
   alerts,
+  onSelect,
 }: {
   alerts: Array<{ id: string; label: string; count: number; level: string }>;
+  onSelect: (id: string) => void;
 }) {
+  // Zero-count alerts are noise; only show what needs a look.
+  const active = alerts.filter((a) => a.count > 0);
   return (
     <div>
       <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
         Alerts
       </h3>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {alerts.map((a) => (
-          <div
-            key={a.id}
-            className={
-              "rounded-xl border px-3 py-2 text-sm " +
-              (a.level === "high"
-                ? "border-red-200 bg-red-50 text-red-700"
-                : a.level === "medium"
-                  ? "border-amber-200 bg-amber-50 text-amber-700"
-                  : "border-slate-200 bg-white text-slate-600")
-            }
-          >
-            <b>{a.count}</b> {a.label}
-          </div>
-        ))}
-      </div>
+      {active.length === 0 ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          No alerts. Nothing needs attention right now.
+        </p>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {active.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => onSelect(a.id)}
+              className={
+                "flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition hover:brightness-95 " +
+                (a.level === "high"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : a.level === "medium"
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : "border-slate-200 bg-white text-slate-600")
+              }
+            >
+              <span>
+                <b>{a.count}</b> {a.label}
+              </span>
+              <ChevronRight size={15} className="shrink-0 opacity-60" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+type ActivityRow =
+  | ActivityEntry
+  | {
+      id: string;
+      actorEmail?: string | null;
+      action: string;
+      targetType?: string | null;
+      targetId?: string | null;
+      detail?: string | null;
+      createdAt: number;
+    };
+const ACTIVITY_PAGE = 25;
 function ActivityTable({
   title,
   rows,
 }: {
   title: string;
-  rows: Array<
-    | ActivityEntry
-    | {
-        id: string;
-        actorEmail?: string | null;
-        action: string;
-        targetType?: string | null;
-        targetId?: string | null;
-        detail?: string | null;
-        createdAt: number;
-      }
-  >;
+  rows: ActivityRow[];
 }) {
+  const [shown, setShown] = useState(ACTIVITY_PAGE);
+  useEffect(() => setShown(ACTIVITY_PAGE), [rows]);
+  const visible = rows.slice(0, shown);
   return (
     <div>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        {title}
+        {title}{" "}
+        <span className="font-normal normal-case tracking-normal text-slate-400">
+          ({rows.length})
+        </span>
       </h3>
-      <div className="max-h-96 overflow-y-auto rounded-xl border border-slate-200">
+      <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-slate-200">
         <table className="w-full text-left text-sm">
           <tbody className="divide-y divide-slate-100">
-            {rows.map((r) => (
+            {visible.map((r) => (
               <tr key={r.id}>
-                <td className="px-3 py-2.5 text-slate-500">
+                <td className="whitespace-nowrap px-3 py-2.5 align-top text-slate-500">
                   {fmtDateTime(r.createdAt)}
                 </td>
                 <td className="px-3 py-2.5">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                    {r.action}
+                  <span
+                    className="font-medium text-slate-700"
+                    title={r.action}
+                  >
+                    {activityLabel(r.action)}
                   </span>
-                  <div className="text-xs text-slate-400">
+                  <div className="text-xs text-slate-500">
                     {r.actorEmail ?? r.detail ?? r.targetId ?? "—"}
                   </div>
                   {"ip" in r && r.ip && (
-                    <div className="mt-1 text-[11px] text-slate-400">
+                    <div
+                      className="mt-1 text-[11px] text-slate-400"
+                      title={("userAgent" in r && r.userAgent) || undefined}
+                    >
                       IP {r.ip}
                       {"userAgent" in r && r.userAgent
-                        ? ` · ${r.userAgent}`
+                        ? ` · ${browserSummary(r.userAgent)}`
                         : ""}
                     </div>
                   )}
@@ -2811,7 +3193,15 @@ function ActivityTable({
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && <Empty label="No activity yet." />}
+        {rows.length === 0 && <Empty label="No matching activity." />}
+        {rows.length > shown && (
+          <button
+            onClick={() => setShown((n) => n + ACTIVITY_PAGE)}
+            className="w-full border-t border-slate-100 px-3 py-2 text-sm font-medium text-drift-600 hover:bg-slate-50"
+          >
+            Show {Math.min(ACTIVITY_PAGE, rows.length - shown)} more
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2913,12 +3303,14 @@ function GbPolicyInput({
   settings,
   setSettings,
   hint,
+  step = "0.5",
 }: {
   label: string;
   k: string;
   settings: AdminSettings;
   setSettings: (s: AdminSettings) => void;
   hint?: string;
+  step?: string;
 }) {
   const raw = settings[k] ?? "";
   const n = Number(raw);
@@ -2930,7 +3322,7 @@ function GbPolicyInput({
       <input
         type="number"
         min="0"
-        step="0.5"
+        step={step}
         value={gb}
         onChange={(e) => {
           const v = e.target.value;
@@ -3032,6 +3424,14 @@ function NotificationsForm({
   saving: boolean;
   isOwner: boolean;
 }) {
+  const { success: toastOk, error: toastErr } = useToast();
+  const testMut = useMutation({
+    mutationFn: (url: string) => adminTestWebhook(url),
+    onSuccess: (result) =>
+      toastOk(`Test sent. The webhook answered HTTP ${result.status}.`),
+    onError: (e) =>
+      toastErr((e as Error)?.message || "Couldn't send the test notification"),
+  });
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-2xl border border-drift-200 bg-drift-50 p-5">
@@ -3048,20 +3448,29 @@ function NotificationsForm({
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <PolicyInput
-          label="Notification webhook URL"
-          k="notifyWebhookUrl"
-          settings={settings}
-          setSettings={setSettings}
-          hint="e.g. a Slack/Discord incoming webhook or your own endpoint."
-        />
-        <PolicyInput
-          label="Notification email (for reference)"
-          k="notifyEmail"
-          settings={settings}
-          setSettings={setSettings}
-          hint="Stored for your records; delivery uses the webhook."
-        />
+        <div className="sm:col-span-2">
+          <PolicyInput
+            label="Notification webhook URL"
+            k="notifyWebhookUrl"
+            settings={settings}
+            setSettings={setSettings}
+            hint="e.g. a Slack/Discord incoming webhook or your own endpoint."
+          />
+          <button
+            type="button"
+            onClick={() =>
+              testMut.mutate(String(settings.notifyWebhookUrl ?? "").trim())
+            }
+            disabled={
+              !isOwner ||
+              testMut.isPending ||
+              !String(settings.notifyWebhookUrl ?? "").trim()
+            }
+            className="mt-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {testMut.isPending ? "Sending test…" : "Send test notification"}
+          </button>
+        </div>
         <TogglePolicy
           label="Notify on new abuse flag"
           k="notifyOnFlag"

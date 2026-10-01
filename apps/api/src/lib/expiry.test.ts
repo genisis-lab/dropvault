@@ -4,6 +4,8 @@ import {
   clampExtension,
   isExpired,
   DAY_SECONDS,
+  expiryCountdownLabel,
+  FOREVER_EXPIRES_AT,
 } from "./expiry";
 import type { Bindings } from "../types";
 
@@ -31,5 +33,22 @@ describe("expiry", () => {
   it("detects expiry correctly", () => {
     expect(isExpired(t0, t0 + 1)).toBe(true);
     expect(isExpired(t0 + 10, t0)).toBe(false);
+  });
+});
+
+describe("expiryCountdownLabel", () => {
+  const now = 1_700_000_000;
+  it("shows keep-forever files as never expiring", () => {
+    expect(expiryCountdownLabel(FOREVER_EXPIRES_AT, now)).toBe("Never expires");
+  });
+  it("counts down in days, hours, then minutes", () => {
+    expect(expiryCountdownLabel(now + 3 * DAY_SECONDS + 60, now)).toBe(
+      "Expires in 3 days",
+    );
+    expect(expiryCountdownLabel(now + 2 * 3600 + 60, now)).toBe(
+      "Expires in 2 hours",
+    );
+    expect(expiryCountdownLabel(now + 30, now)).toBe("Expires in 1 minute");
+    expect(expiryCountdownLabel(now - 1, now)).toBe("Expired");
   });
 });
