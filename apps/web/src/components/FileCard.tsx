@@ -86,6 +86,7 @@ type Props = {
   onRestore?: (id: string) => void;
   onPermanentDelete?: (id: string) => void;
   canKeepForever?: boolean;
+  trashRetentionDays?: number;
   onKeepForever?: (id: string) => void;
   onUnkeepForever?: (id: string) => void;
   selected?: boolean;
@@ -122,6 +123,7 @@ export default function FileCard({
   onRestore,
   onPermanentDelete,
   canKeepForever = false,
+  trashRetentionDays,
   onKeepForever,
   onUnkeepForever,
   selected = false,
@@ -137,7 +139,13 @@ export default function FileCard({
     !encrypted && (file.contentType || "").startsWith("image/");
   const canPreview =
     !encrypted && (isImage || (file.contentType || "").includes("pdf"));
-  const [left, setLeft] = useState(() => timeLeft(file.expiresAt));
+  // Trashed files count down to their permanent deletion instead of expiry.
+  const purgeAt =
+    file.deletedAt && trashRetentionDays
+      ? file.deletedAt + trashRetentionDays * 86400
+      : null;
+  const countdownTo = purgeAt ?? file.expiresAt;
+  const [left, setLeft] = useState(() => timeLeft(countdownTo));
   const [menuOpen, setMenuOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -151,9 +159,10 @@ export default function FileCard({
   const menuPanelRef = useRef<HTMLDivElement>(null);
   const focusMenuOnOpenRef = useRef(false);
   useEffect(() => {
-    const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30000);
+    setLeft(timeLeft(countdownTo));
+    const t = setInterval(() => setLeft(timeLeft(countdownTo)), 30000);
     return () => clearInterval(t);
-  }, [file.expiresAt]);
+  }, [countdownTo]);
   useEffect(() => {
     const mq = window.matchMedia("(pointer: coarse)");
     const update = () => setCoarsePointer(mq.matches);
@@ -285,17 +294,24 @@ export default function FileCard({
       : file.keepForever
         ? "text-drift-600"
         : "";
+  // Trash's "Time left" column header and policy note supply the context.
   const chipLabel = file.deletedAt
-    ? "Trash"
+    ? purgeAt
+      ? left.label.replace(/ left$/, "")
+      : "Trash"
     : file.keepForever
       ? "Forever"
       : left.label;
-  const chipIcon =
-    file.keepForever && !file.deletedAt ? (
-      <InfinityIcon size={11} />
-    ) : (
-      <Clock size={11} />
-    );
+  const chipIcon = file.deletedAt ? (
+    <Trash2 size={11} />
+  ) : file.keepForever ? (
+    <InfinityIcon size={11} />
+  ) : (
+    <Clock size={11} />
+  );
+  const chipTitle = purgeAt
+    ? `Permanently deleted ${new Date(purgeAt * 1000).toLocaleString()}`
+    : undefined;
   const dlText =
     file.shareToken && file.shareDownloadLimit
       ? `${file.shareDownloadCount ?? 0}/${file.shareDownloadLimit}`
@@ -711,6 +727,7 @@ export default function FileCard({
             <span aria-hidden="true">·</span>
             <span
               className={"inline-flex items-center gap-0.5 " + inlineExpiryTone}
+              title={chipTitle}
             >
               {chipIcon} {chipLabel}
             </span>
@@ -722,6 +739,7 @@ export default function FileCard({
         </div>
         <span
           className={"hidden sm:inline-flex " + chipShape + chipTone}
+          title={chipTitle}
           data-ui="file-expiry"
         >
           {chipIcon} {chipLabel}
@@ -789,7 +807,10 @@ export default function FileCard({
         {onToggleSelect && (
           <div className="absolute left-2 top-2">{checkbox}</div>
         )}
-        <span className={"absolute right-2 top-2 " + chipClass}>
+        <span
+          className={"absolute right-2 top-2 " + chipClass}
+          title={chipTitle}
+        >
           {chipIcon} {chipLabel}
         </span>
       </div>

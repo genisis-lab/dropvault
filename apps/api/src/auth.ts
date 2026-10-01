@@ -21,7 +21,7 @@ function nowSec() {
 // Reads the configured signup mode from app_settings. "open" (default) lets
 // anyone sign up immediately; "approval" creates the account but parks it as a
 // suspended/pending user until an admin approves it.
-async function getSignupMode(db: ReturnType<typeof getDb>): Promise<string> {
+export async function getSignupMode(db: ReturnType<typeof getDb>): Promise<string> {
   const row = await db
     .select()
     .from(schema.appSettings)

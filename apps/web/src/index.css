@@ -538,7 +538,6 @@ html.quiet [data-ui="new-upload"] {
   border-radius: 0.6rem !important;
   box-shadow: 0 2px 6px rgb(21 94 239 / 0.18) !important;
 }
-html.quiet [data-ui="new-folder"],
 html.quiet [data-ui="storage-card"] {
   border-radius: 0.6rem !important;
 }
@@ -667,8 +666,7 @@ html.pressroom [data-ui="search"] {
   background: #faf8f2 !important;
   box-shadow: 3px 3px 0 rgb(21 25 24 / 0.14);
 }
-html.pressroom [data-ui="new-upload"],
-html.pressroom [data-ui="new-folder"] {
+html.pressroom [data-ui="new-upload"] {
   border: 1px solid #151918 !important;
   border-radius: 0.2rem !important;
   color: #151918 !important;
@@ -682,11 +680,7 @@ html.pressroom [data-ui="new-folder"] {
 html.pressroom [data-ui="new-upload"] {
   background: #ff765f !important;
 }
-html.pressroom [data-ui="new-folder"] {
-  background: #c8f45b !important;
-}
 html.pressroom [data-ui="new-upload"]:active,
-html.pressroom [data-ui="new-folder"]:active,
 html.pressroom button.drive-shadow:active {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0 rgb(21 25 24 / 0.18) !important;
@@ -847,14 +841,12 @@ html.neubrutalism [data-ui="workspace"] {
   max-width: none;
   padding: 2rem 1.75rem 4rem;
 }
-html.neubrutalism [data-ui="new-upload"],
-html.neubrutalism [data-ui="new-folder"] {
+html.neubrutalism [data-ui="new-upload"] {
   border: 2px solid #111 !important;
   box-shadow: 5px 5px 0 #111 !important;
   text-transform: uppercase;
 }
 html.neubrutalism [data-ui="new-upload"]:active,
-html.neubrutalism [data-ui="new-folder"]:active,
 html.neubrutalism button.drive-shadow:active {
   transform: translate(3px, 3px);
   box-shadow: 2px 2px 0 #111 !important;

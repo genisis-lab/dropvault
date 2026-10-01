@@ -27,6 +27,14 @@ export default function App() {
   const isRequestPage =
     typeof window !== "undefined" &&
     window.location.pathname.startsWith("/request/");
+  // better-auth marks a signed-out refetch (e.g. right after sign-up) as
+  // pending. Only the first load may swap in the loading screen; otherwise
+  // AuthScreen remounts and drops its "check your inbox" confirmation.
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  useEffect(() => {
+    if (!isPending) setSessionLoaded(true);
+  }, [isPending]);
+  const showSessionLoading = isPending && !sessionLoaded;
   const [status, setStatus] = useState<AccountStatus | null>(null);
   const [statusChecked, setStatusChecked] = useState(false);
 
@@ -79,7 +87,7 @@ export default function App() {
     <>
       <div className="canvas-glow" aria-hidden="true" />
       <Suspense fallback={<LoadingScreen />}>
-        {isPending ? (
+        {showSessionLoading ? (
           <LoadingScreen />
         ) : session?.user ? (
           !statusChecked ? (

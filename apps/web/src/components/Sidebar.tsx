@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
   FolderOpen,
-  FolderPlus,
   HardDrive,
   LogOut,
   Plus,
@@ -38,7 +37,6 @@ const drawerTransition = { type: "tween", duration: 0.22 } as const;
 
 type SidebarProps = {
   onNew: () => void;
-  onNewFolder: () => void;
   totalBytes: number;
   fileCount: number;
   sharedCount: number;
@@ -109,7 +107,6 @@ export default function Sidebar(props: SidebarProps) {
 
 function SidebarContent({
   onNew,
-  onNewFolder,
   totalBytes,
   fileCount,
   sharedCount,
@@ -166,17 +163,7 @@ function SidebarContent({
           className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-3 pl-4 pr-5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:shadow-glow-500/40"
           data-ui="new-upload"
         >
-          <Plus size={20} /> New
-        </motion.button>
-        <motion.button
-          whileTap={newTap}
-          onClick={run(onNewFolder)}
-          title="New folder"
-          aria-label="New folder"
-          className="grid h-12 w-12 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-drift-300 hover:text-drift-600"
-          data-ui="new-folder"
-        >
-          <FolderPlus size={20} />
+          <Plus size={20} /> Upload
         </motion.button>
       </div>
       <nav className="mt-7 space-y-1">

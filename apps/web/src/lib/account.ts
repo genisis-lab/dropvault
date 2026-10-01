@@ -13,6 +13,8 @@ export type AccountStatus = {
   adminRole?: string | null;
   keepFilesForever?: boolean;
   canKeepFilesForever?: boolean;
+  // Days a trashed file is kept before it is permanently deleted.
+  trashRetentionDays?: number;
 };
 
 export async function accountStatus(): Promise<AccountStatus> {
