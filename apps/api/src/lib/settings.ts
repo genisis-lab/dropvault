@@ -1,4 +1,12 @@
 export const DEFAULT_MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+export const DEFAULT_TRASH_RETENTION_DAYS = 30;
+
+// app_settings.trashRetentionDays: how long a trashed file is kept before the
+// hourly sweep purges it. Unset or invalid values fall back to 30 days.
+export function parseTrashRetentionDays(value: string | null | undefined): number {
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? days : DEFAULT_TRASH_RETENTION_DAYS;
+}
 
 // A missing or malformed policy must retain the advertised default. An
 // explicit zero keeps the existing "unlimited" setting semantics.

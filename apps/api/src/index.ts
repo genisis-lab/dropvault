@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createAuth } from "./auth";
+import { createAuth, getSignupMode } from "./auth";
 import { getDb } from "./db";
 import operationsRoute from "./routes/operations";
 import { recordOperation, refreshOperationalAlerts } from "./lib/operations";
@@ -148,6 +148,13 @@ app.get("/health", (c) => healthCheck(c));
 app.get("/api/health", (c) => healthCheck(c));
 app.get("/api/theme", async (c) =>
   c.json({ theme: await workspaceDefaultTheme(c.env.DB) }),
+);
+// Public so the sign-up screen can say whether a new account waits for admin
+// approval. Reveals only the workspace policy, nothing about any account.
+app.get("/api/signup-policy", async (c) =>
+  c.json({
+    approvalRequired: (await getSignupMode(getDb(c.env.DB))) === "approval",
+  }),
 );
 
 app.on(["GET", "POST"], "/api/auth/*", (c) =>

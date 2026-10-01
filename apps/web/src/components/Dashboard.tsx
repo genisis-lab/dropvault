@@ -278,6 +278,10 @@ export default function Dashboard({
   });
   const quotaBytes = accountQuery.data?.quotaBytes ?? null;
   const canKeepForever = accountQuery.data?.canKeepFilesForever ?? false;
+  const trashRetentionDays = accountQuery.data?.trashRetentionDays;
+  // Eligible accounts keep uploads forever unless they pick an expiry.
+  const [keepUploadsForever, setKeepUploadsForever] = useState(true);
+  const uploadsKeptForever = canKeepForever && keepUploadsForever;
   const [dismissedQuota, setDismissedQuota] = useState<number | null>(() => {
     const v = localStorage.getItem("dropvault-storage-notice-dismissed");
     return v == null || v === "" ? null : Number(v);
@@ -1122,7 +1126,6 @@ export default function Dashboard({
     <div data-ui="dashboard-shell" data-layout={layout}>
       <Sidebar
         onNew={() => uploadInputRef.current?.click()}
-        onNewFolder={() => setDialog({ mode: "create" })}
         totalBytes={totalBytes}
         fileCount={liveFiles.length}
         sharedCount={sharedCount}
@@ -1171,6 +1174,12 @@ export default function Dashboard({
                 {heading}
               </h1>
               <p className="text-sm text-slate-500">{subtitle}</p>
+              {filter === "trash" && trashRetentionDays && (
+                <p className="mt-1 text-sm text-slate-500">
+                  Items in Trash are permanently deleted after{" "}
+                  {trashRetentionDays} day{trashRetentionDays === 1 ? "" : "s"}.
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               {filter === "trash" && trashFiles.length > 0 && (
@@ -1217,24 +1226,31 @@ export default function Dashboard({
                   </option>
                 ))}
               </select>
-              {/* Upload lifetime only matters where uploads happen, and the
-                  label keeps the bare "7 days" select meaningful on phones. */}
+              {/* Upload lifetime only matters where uploads happen. Options
+                  read on their own, and "Keep forever" appears only for
+                  accounts allowed to keep files. */}
               {filter !== "trash" && (
-                <label className="flex items-center gap-2">
-                  <span className="text-slate-400">Expire in</span>
-                  <select
-                    value={expiryDays}
-                    onChange={(e) => setExpiryDays(Number(e.target.value))}
-                    aria-label="Upload expiration"
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
-                  >
-                    {EXPIRY_OPTIONS.map((d) => (
-                      <option key={d} value={d}>
-                        {d} day{d === 1 ? "" : "s"}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <select
+                  value={uploadsKeptForever ? "forever" : String(expiryDays)}
+                  onChange={(e) => {
+                    if (e.target.value === "forever") {
+                      setKeepUploadsForever(true);
+                      return;
+                    }
+                    setKeepUploadsForever(false);
+                    setExpiryDays(Number(e.target.value));
+                  }}
+                  aria-label="Upload expiration"
+                  title="How long new uploads are kept"
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
+                >
+                  {canKeepForever && <option value="forever">Keep forever</option>}
+                  {EXPIRY_OPTIONS.map((d) => (
+                    <option key={d} value={d}>
+                      Expire in {d} day{d === 1 ? "" : "s"}
+                    </option>
+                  ))}
+                </select>
               )}
             </div>
           </div>
@@ -1289,7 +1305,8 @@ export default function Dashboard({
               selectionActive={selCount > 0}
               ref={uploadZoneRef}
               expiryDays={expiryDays}
-              keepForever={canKeepForever}
+              keepForever={keepUploadsForever}
+              onKeepForeverChange={setKeepUploadsForever}
               onUploaded={invalidate}
               inputRef={uploadInputRef}
               folderId={currentFolderId}
@@ -1442,6 +1459,7 @@ export default function Dashboard({
                           })
                         }
                         canKeepForever={canKeepForever}
+                        trashRetentionDays={trashRetentionDays}
                         onKeepForever={(id) => keepForeverMut.mutate(id)}
                         onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
                         selected={selected.has(f.id)}
@@ -1473,7 +1491,7 @@ export default function Dashboard({
                     <span />
                     <span>Name</span>
                     <span>Security</span>
-                    <span>Expires</span>
+                    <span>{filter === "trash" ? "Time left" : "Expires"}</span>
                     <span className="text-right">Size</span>
                     <span>
                       <span className="sr-only">Actions</span>
@@ -1522,6 +1540,7 @@ export default function Dashboard({
                           })
                         }
                         canKeepForever={canKeepForever}
+                        trashRetentionDays={trashRetentionDays}
                         onKeepForever={(id) => keepForeverMut.mutate(id)}
                         onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
                         selected={selected.has(f.id)}

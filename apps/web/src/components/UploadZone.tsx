@@ -82,7 +82,10 @@ type UploadZoneProps = {
   hidden?: boolean;
   selectionActive?: boolean;
   expiryDays: number;
+  // Whether uploads should be kept forever when the account allows it. The
+  // dashboard owns this so its expiration menu and this checkbox agree.
   keepForever?: boolean;
+  onKeepForeverChange?: (keepForever: boolean) => void;
   onUploaded: () => void;
   inputRef?: RefObject<HTMLInputElement>;
   folderId?: string | null;
@@ -198,6 +201,7 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
       selectionActive = false,
       expiryDays,
       keepForever = false,
+      onKeepForeverChange,
       onUploaded,
       inputRef,
       folderId = null,
@@ -211,7 +215,6 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
     const [dragging, setDragging] = useState(false);
     const [jobs, setJobs] = useState<Record<string, Job>>({});
     const [canKeepForever, setCanKeepForever] = useState(false);
-    const [keepForeverChoice, setKeepForeverChoice] = useState(keepForever);
     const [encryptChoice, setEncryptChoice] = useState(false);
     const [accountRecoveryAvailable, setAccountRecoveryAvailable] =
       useState(false);
@@ -262,15 +265,13 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
       accountStatus()
         .then((status) => {
           if (!alive) return;
-          const allowed = !!status.canKeepFilesForever;
-          setCanKeepForever(allowed);
-          setKeepForeverChoice(allowed || keepForever);
+          setCanKeepForever(!!status.canKeepFilesForever);
         })
         .catch(() => {});
       return () => {
         alive = false;
       };
-    }, [keepForever]);
+    }, []);
 
     useEffect(() => {
       let alive = true;
@@ -303,11 +304,7 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
       };
     }, []);
 
-    useEffect(() => {
-      if (keepForever) setKeepForeverChoice(true);
-    }, [keepForever]);
-
-    const effectiveKeepForever = canKeepForever && keepForeverChoice;
+    const effectiveKeepForever = canKeepForever && keepForever;
     const expiryText = effectiveKeepForever
       ? "Keep forever"
       : `Auto-expires in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`;
@@ -856,16 +853,17 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
                 <label className="flex cursor-pointer items-start gap-2 font-semibold">
                   <input
                     type="checkbox"
-                    checked={keepForeverChoice}
-                    onChange={(e) => setKeepForeverChoice(e.target.checked)}
+                    checked={keepForever}
+                    onChange={(e) => onKeepForeverChange?.(e.target.checked)}
                     className="mt-0.5"
                   />
                   <span>Keep these uploads forever</span>
                 </label>
                 <p className="mt-1 leading-5 text-drift-700">
-                  This is enabled by default with your permission. Turn it off
-                  to use the {expiryDays}-day expiration. You can change
-                  expiration later from the file details.
+                  On by default for your account. Turn it off to expire these
+                  uploads after {expiryDays} day{expiryDays === 1 ? "" : "s"}{" "}
+                  instead. You can change expiration later from the file
+                  details.
                 </p>
               </div>
             )}
