@@ -374,9 +374,11 @@ export default function Dashboard({
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteFile(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       invalidate();
-      toastOk("Moved to Trash");
+      toastOk("Moved to Trash", {
+        action: { label: "Undo", onClick: () => restoreMut.mutate(id) },
+      });
     },
     onError: errHandler("Couldn't delete file"),
   });
@@ -473,17 +475,31 @@ export default function Dashboard({
     ids: string[],
     opts?: { folderId?: string | null; tags?: string[] },
     okMsg?: (n: number) => string,
+    undo?: () => void,
   ) {
     if (ids.length === 0) return;
     try {
       const res = await bulkMut.mutateAsync({ action, ids, opts });
-      if (okMsg) toastOk(okMsg(res.count));
+      if (okMsg)
+        toastOk(
+          okMsg(res.count),
+          undo ? { action: { label: "Undo", onClick: undo } } : undefined,
+        );
     } catch (e) {
       toastErr((e as Error)?.message || "Couldn't complete that action");
     } finally {
       invalidate();
       clearSelection();
     }
+  }
+  function restoreBatch(ids: string[]) {
+    return () =>
+      runBulk(
+        "restore",
+        ids,
+        undefined,
+        (n) => `${n} file${n === 1 ? "" : "s"} restored`,
+      );
   }
   async function handleShare(id: string): Promise<string> {
     try {
@@ -926,13 +942,16 @@ export default function Dashboard({
       message: `Move ${expiredFiles.length} expired file${expiredFiles.length === 1 ? "" : "s"} to Trash?`,
       danger: true,
       confirmLabel: "Move to Trash",
-      onConfirm: () =>
+      onConfirm: () => {
+        const ids = expiredFiles.map((f) => f.id);
         runBulk(
           "trash",
-          expiredFiles.map((f) => f.id),
+          ids,
           undefined,
           (n) => `${n} file${n === 1 ? "" : "s"} moved to Trash`,
-        ),
+          restoreBatch(ids),
+        );
+      },
     });
   }
   const scopeOptions =
@@ -1076,13 +1095,16 @@ export default function Dashboard({
       message: `Move ${selCount} file${selCount === 1 ? "" : "s"} to Trash?`,
       danger: true,
       confirmLabel: "Move to Trash",
-      onConfirm: () =>
+      onConfirm: () => {
+        const ids = Array.from(selected);
         runBulk(
           "trash",
-          Array.from(selected),
+          ids,
           undefined,
           (n) => `${n} file${n === 1 ? "" : "s"} moved to Trash`,
-        ),
+          restoreBatch(ids),
+        );
+      },
     });
   }
   const dialogTitle =
@@ -1175,12 +1197,14 @@ export default function Dashboard({
                   <Clock size={16} /> Extend {expiringSoon.length} expiring
                 </button>
               )}
-              <button
-                onClick={() => setDialog({ mode: "create" })}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
-              >
-                <FolderPlus size={16} /> New folder
-              </button>
+              {filter !== "trash" && (
+                <button
+                  onClick={() => setDialog({ mode: "create" })}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
+                >
+                  <FolderPlus size={16} /> New folder
+                </button>
+              )}
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
@@ -1193,19 +1217,25 @@ export default function Dashboard({
                   </option>
                 ))}
               </select>
-              <span className="hidden text-slate-400 sm:inline">Expire in</span>
-              <select
-                value={expiryDays}
-                onChange={(e) => setExpiryDays(Number(e.target.value))}
-                aria-label="Upload expiration"
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
-              >
-                {EXPIRY_OPTIONS.map((d) => (
-                  <option key={d} value={d}>
-                    {d} day{d === 1 ? "" : "s"}
-                  </option>
-                ))}
-              </select>
+              {/* Upload lifetime only matters where uploads happen, and the
+                  label keeps the bare "7 days" select meaningful on phones. */}
+              {filter !== "trash" && (
+                <label className="flex items-center gap-2">
+                  <span className="text-slate-400">Expire in</span>
+                  <select
+                    value={expiryDays}
+                    onChange={(e) => setExpiryDays(Number(e.target.value))}
+                    aria-label="Upload expiration"
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
+                  >
+                    {EXPIRY_OPTIONS.map((d) => (
+                      <option key={d} value={d}>
+                        {d} day{d === 1 ? "" : "s"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           </div>
           {filter !== "trash" && (
@@ -1353,6 +1383,7 @@ export default function Dashboard({
                   hasFiles={liveFiles.length > 0 || folders.length > 0}
                   search={search}
                   inFolder={!!currentFolder}
+                  onClearSearch={() => setSearch("")}
                 />
               ) : view === "grid" ? (
                 <motion.div
@@ -1444,7 +1475,9 @@ export default function Dashboard({
                     <span>Security</span>
                     <span>Expires</span>
                     <span className="text-right">Size</span>
-                    <span className="text-right">Actions</span>
+                    <span>
+                      <span className="sr-only">Actions</span>
+                    </span>
                   </div>
                   <AnimatePresence>
                     {pagedFiles.map((f) => (
@@ -1844,11 +1877,13 @@ function EmptyState({
   hasFiles,
   search,
   inFolder,
+  onClearSearch,
 }: {
   filter: Filter;
   hasFiles: boolean;
   search: string;
   inFolder: boolean;
+  onClearSearch: () => void;
 }) {
   const msg = search.trim()
     ? "No files match your search."
@@ -1869,6 +1904,14 @@ function EmptyState({
     <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center text-sm text-slate-400">
       <HardDrive size={28} className="mb-2 text-slate-300" />
       {msg}
+      {search.trim() && (
+        <button
+          onClick={onClearSearch}
+          className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
+        >
+          Clear search
+        </button>
+      )}
     </div>
   );
 }
