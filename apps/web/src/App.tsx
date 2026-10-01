@@ -40,6 +40,12 @@ export default function App() {
 
   const userEmail = session?.user?.email;
 
+  // Signing up from a /signup invite link should land on the dashboard at /.
+  useEffect(() => {
+    if (userEmail && window.location.pathname.startsWith("/signup"))
+      window.history.replaceState({}, "", "/");
+  }, [userEmail]);
+
   useEffect(() => {
     let active = true;
     if (userEmail && !isRequestPage) {

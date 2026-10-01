@@ -80,6 +80,9 @@ export type UploadZoneHandle = {
 
 type UploadZoneProps = {
   hidden?: boolean;
+  // A one-line bar instead of the large drop target, for views that already
+  // list files. Dropping anywhere on the dashboard still uploads.
+  compact?: boolean;
   selectionActive?: boolean;
   expiryDays: number;
   // Whether uploads should be kept forever when the account allows it. The
@@ -198,6 +201,7 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
   function UploadZone(
     {
       hidden = false,
+      compact = false,
       selectionActive = false,
       expiryDays,
       keepForever = false,
@@ -778,10 +782,37 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
     const batchPct =
       totalBytes > 0 ? Math.round((completedBytes / totalBytes) * 100) : 0;
 
+    // Summarize only options that differ from a plain upload.
+    const optionSummary = [
+      encryptChoice && "Encrypted",
+      releaseAtInput && "Scheduled release",
+      expireAfterDownloadChoice && "Expires after first download",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const destination = folderName
+      ? `Upload to “${folderName}”`
+      : "Upload to My Drive";
+    const UploadIcon = effectiveKeepForever ? Infinity : UploadCloud;
+    const iconClass =
+      "grid shrink-0 place-items-center bg-gradient-to-br from-drift-500 via-glow-500 to-blush-500 text-white shadow-lg shadow-glow-500/25 ";
+    const optionsToggle = (
+      <button
+        type="button"
+        aria-expanded={optionsOpen}
+        aria-controls="upload-options"
+        onClick={() => setOptionsOpen(!optionsOpen)}
+        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+      >
+        Upload options <ChevronDown size={16} />
+      </button>
+    );
+
     return (
       <div data-ui="upload-zone">
         <motion.div
           data-hidden={hidden || undefined}
+          data-compact={compact || undefined}
           animate={dragging ? zoneActive : zoneIdle}
           onDragOver={(e) => {
             e.preventDefault();
@@ -793,59 +824,90 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
             setDragging(false);
             filesFromDrop(e.dataTransfer).then(handleFiles);
           }}
-          className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-6 text-center drive-shadow transition sm:py-8"
+          className={
+            compact
+              ? "flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border-2 border-dashed bg-white px-4 py-3 drive-shadow transition"
+              : "flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-6 text-center drive-shadow transition sm:py-8"
+          }
           data-ui="upload-target"
         >
-          <motion.div
-            animate={dragging ? iconUp : iconDown}
-            className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-drift-500 via-glow-500 to-blush-500 text-white shadow-lg shadow-glow-500/25 sm:h-16 sm:w-16"
-            data-ui="upload-icon"
-          >
-            {effectiveKeepForever ? (
-              <Infinity size={28} />
-            ) : (
-              <UploadCloud size={28} />
-            )}
-          </motion.div>
-          <div data-ui="upload-copy">
-            <button
-              type="button"
-              onClick={() => ref.current?.click()}
-              className="rounded-xl bg-drift-600 px-6 py-3 font-semibold text-white hover:bg-drift-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              Choose files
-            </button>
-            <p className="mt-3 text-sm font-medium text-slate-700">
-              {folderName ? `Upload to “${folderName}”` : "Upload to My Drive"}
-            </p>
-            <p className="mt-1 hidden text-xs text-slate-500 sm:block">
-              Or drag files and folders here
-            </p>
-            <p className="mt-0.5 text-sm text-slate-400">
-              Up to {MAX_BATCH_FILES} files per batch · {expiryText}
-            </p>
-          </div>
-          {/* Summarize only options that differ from a plain upload. */}
-          {(encryptChoice || releaseAtInput || expireAfterDownloadChoice) && (
-            <p className="text-xs text-slate-600" data-ui="upload-summary">
-              {[
-                encryptChoice && "Encrypted",
-                releaseAtInput && "Scheduled release",
-                expireAfterDownloadChoice && "Expires after first download",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
+          {compact ? (
+            <>
+              <div
+                className="flex min-w-0 flex-1 basis-60 items-center gap-3"
+                data-ui="upload-copy"
+              >
+                <motion.div
+                  animate={dragging ? iconUp : iconDown}
+                  className={iconClass + "h-10 w-10 rounded-xl"}
+                  data-ui="upload-icon"
+                >
+                  <UploadIcon size={20} />
+                </motion.div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-700">
+                    {destination}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    <span className="hidden sm:inline">
+                      Drop files anywhere ·{" "}
+                    </span>
+                    Up to {MAX_BATCH_FILES} per batch · {expiryText}
+                    {optionSummary && (
+                      <span data-ui="upload-summary">
+                        {" "}
+                        · {optionSummary}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {optionsToggle}
+                <button
+                  type="button"
+                  onClick={() => ref.current?.click()}
+                  className="rounded-xl bg-drift-600 px-4 py-2 text-sm font-semibold text-white hover:bg-drift-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  Choose files
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <motion.div
+                animate={dragging ? iconUp : iconDown}
+                className={iconClass + "h-14 w-14 rounded-2xl sm:h-16 sm:w-16"}
+                data-ui="upload-icon"
+              >
+                <UploadIcon size={28} />
+              </motion.div>
+              <div data-ui="upload-copy">
+                <button
+                  type="button"
+                  onClick={() => ref.current?.click()}
+                  className="rounded-xl bg-drift-600 px-6 py-3 font-semibold text-white hover:bg-drift-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  Choose files
+                </button>
+                <p className="mt-3 text-sm font-medium text-slate-700">
+                  {destination}
+                </p>
+                <p className="mt-1 hidden text-xs text-slate-500 sm:block">
+                  Or drag files and folders here
+                </p>
+                <p className="mt-0.5 text-sm text-slate-400">
+                  Up to {MAX_BATCH_FILES} files per batch · {expiryText}
+                </p>
+              </div>
+              {optionSummary && (
+                <p className="text-xs text-slate-600" data-ui="upload-summary">
+                  {optionSummary}
+                </p>
+              )}
+              {optionsToggle}
+            </>
           )}
-          <button
-            type="button"
-            aria-expanded={optionsOpen}
-            aria-controls="upload-options"
-            onClick={() => setOptionsOpen(!optionsOpen)}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
-            Upload options <ChevronDown size={16} />
-          </button>
           <div
             id="upload-options"
             hidden={!optionsOpen}

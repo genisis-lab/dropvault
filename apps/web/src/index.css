@@ -566,21 +566,51 @@ html.quiet [data-ui="detail-panel"] {
   max-width: 21rem;
   box-shadow: -12px 0 32px -28px rgba(16, 24, 40, 0.5) !important;
 }
+/* File rows switch from the compact layout (size and expiry under the name)
+   to columns based on the list's own width, not the viewport: the sidebar
+   takes 15rem from tablets and small laptops, which pushed the Size and
+   actions columns off-screen. 40rem fits the narrowest column template. */
+[data-ui="file-list"] {
+  container: file-list / inline-size;
+  --file-columns: 1.25rem 2.25rem minmax(10rem, 1.8fr) minmax(0, 1fr) 7rem
+    5rem 2.25rem;
+}
+[data-ui="file-list-header"],
+[data-ui="file-security"],
+[data-ui="file-expiry"],
+[data-ui="file-size"] {
+  display: none;
+}
+@container file-list (min-width: 40rem) {
+  [data-ui="file-inline-meta"] {
+    display: none;
+  }
+  [data-ui="file-security"] {
+    display: flex;
+  }
+  [data-ui="file-expiry"] {
+    display: inline-flex;
+  }
+  [data-ui="file-size"] {
+    display: block;
+  }
+  html.quiet [data-ui="file-list-header"],
+  html.pressroom [data-ui="file-list-header"],
+  html.neubrutalism [data-ui="file-list-header"] {
+    display: grid;
+  }
+}
 html.quiet [data-ui="file-list-header"],
 html.pressroom [data-ui="file-list-header"],
 html.neubrutalism [data-ui="file-list-header"] {
-  grid-template-columns:
-    1.25rem 2.25rem minmax(12rem, 1.8fr) minmax(11rem, 1fr) 7rem 5rem
-    2.25rem;
+  grid-template-columns: var(--file-columns);
   column-gap: 0.75rem;
 }
-@media (min-width: 640px) {
+@container file-list (min-width: 40rem) {
   html.quiet [data-ui="file-row"],
   html.pressroom [data-ui="file-row"] {
     display: grid;
-    grid-template-columns:
-      1.25rem 2.25rem minmax(12rem, 1.8fr) minmax(11rem, 1fr) 7rem 5rem
-      2.25rem;
+    grid-template-columns: var(--file-columns);
     column-gap: 0.75rem;
   }
   html.quiet [data-ui="file-security"],
@@ -885,6 +915,12 @@ html.neubrutalism [data-ui="upload-icon"] {
   border-radius: 0 !important;
   box-shadow: 5px 5px 0 #111 !important;
 }
+html.neubrutalism [data-ui="upload-target"][data-compact] {
+  padding: 0.75rem 1rem !important;
+}
+html.neubrutalism [data-ui="upload-target"][data-compact] [data-ui="upload-icon"] {
+  box-shadow: 3px 3px 0 #111 !important;
+}
 html.neubrutalism [data-ui="upload-encryption-help"] {
   text-align: left;
 }
@@ -926,13 +962,11 @@ html.neubrutalism [data-ui="file-list-header"] {
   border-bottom: 2px solid #111;
   color: #111 !important;
 }
-@media (min-width: 640px) {
+@container file-list (min-width: 40rem) {
   html.neubrutalism [data-ui="file-row"] {
     display: grid;
     min-height: 4.85rem;
-    grid-template-columns:
-      1.25rem 2.25rem minmax(12rem, 1.8fr) minmax(11rem, 1fr) 7rem 5rem
-      2.25rem;
+    grid-template-columns: var(--file-columns);
     column-gap: 0.75rem;
   }
   html.neubrutalism [data-ui="file-security"] {
@@ -1083,7 +1117,8 @@ html.neubrutalism [data-ui="upload-tray"] {
 /* The workspace-wide button border rule otherwise boxes the tray's text
    toggle and icon buttons; keep borders only where the markup asks for one. */
 html.neubrutalism [data-ui="upload-tray"] button:not(.border),
-html.neubrutalism [data-ui="workspace"] [data-ui="folder-path"] button {
+html.neubrutalism [data-ui="workspace"] [data-ui="folder-path"] button,
+html.neubrutalism [data-ui="workspace"] [data-file-open] {
   border-width: 0;
 }
 /* Only the productivity themes lay file rows out in columns. Elsewhere rows
