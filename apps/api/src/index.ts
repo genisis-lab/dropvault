@@ -114,7 +114,14 @@ app.use("/api/share/*", async (c, next) => {
     );
   }
   c.header("X-Content-Type-Options", "nosniff");
-  c.header("Referrer-Policy", "no-referrer");
+  // Share pages post their own forms (password unlock, abuse report, guest
+  // email check). Under "no-referrer" browsers send `Origin: null` on those
+  // form posts, which the trusted-origin CSRF check rightly rejects, so every
+  // unlock failed with 403. "same-origin" keeps the share URL (and its token)
+  // from leaking to other sites while letting same-site forms identify
+  // themselves. Responses that set their own policy (raw inline bytes) keep it.
+  if (!c.res.headers.get("Referrer-Policy"))
+    c.header("Referrer-Policy", "same-origin");
   c.header(
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=(), payment=()",

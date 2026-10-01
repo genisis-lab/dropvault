@@ -1,6 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, HardDrive, Tags as TagsIcon, X } from "lucide-react";
+import {
+  AlertTriangle,
+  HardDrive,
+  ShieldAlert,
+  Tags as TagsIcon,
+  X,
+} from "lucide-react";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.96, y: 10 };
@@ -18,6 +31,7 @@ function Shell({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  useEscapeToClose(true, onClose);
   return (
     <motion.div
       variants={backdrop}
@@ -25,7 +39,7 @@ function Shell({
       animate="show"
       exit="hidden"
       onClick={onClose}
-      className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[97] grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm"
     >
       <motion.div
         initial={panelInitial}
@@ -377,4 +391,152 @@ export function LimitRequestDialog({
       )}
     </AnimatePresence>
   );
+}
+
+type ConfirmOptions = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+};
+
+// In-app replacement for window.confirm: render the returned element once,
+// then `await confirm({...})` resolves true only when the user confirms.
+export function useConfirm(): [
+  ReactNode,
+  (options: ConfirmOptions) => Promise<boolean>,
+] {
+  const [options, setOptions] = useState<ConfirmOptions | null>(null);
+  const [open, setOpen] = useState(false);
+  const resolveRef = useRef<((ok: boolean) => void) | null>(null);
+  const confirm = useCallback((next: ConfirmOptions) => {
+    resolveRef.current?.(false);
+    setOptions(next);
+    setOpen(true);
+    return new Promise<boolean>((resolve) => {
+      resolveRef.current = resolve;
+    });
+  }, []);
+  const settle = (ok: boolean) => {
+    resolveRef.current?.(ok);
+    resolveRef.current = null;
+    setOpen(false);
+  };
+  const element = (
+    <ConfirmDialog
+      open={open}
+      title={options?.title ?? ""}
+      message={options?.message ?? ""}
+      confirmLabel={options?.confirmLabel}
+      danger={options?.danger}
+      onConfirm={() => settle(true)}
+      onCancel={() => settle(false)}
+    />
+  );
+  return [element, confirm];
+}
+
+function TypedConfirmDialog({
+  phrase,
+  onConfirm,
+  onCancel,
+}: {
+  phrase: string | null;
+  onConfirm: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!phrase) return;
+    setValue("");
+    const t = setTimeout(() => inputRef.current?.focus(), 30);
+    return () => clearTimeout(t);
+  }, [phrase]);
+  const matches = phrase != null && value === phrase;
+  return (
+    <AnimatePresence>
+      {phrase && (
+        <Shell
+          title="Owner confirmation required"
+          icon={
+            <div className="grid h-9 w-9 place-items-center rounded-lg bg-red-50 text-red-600">
+              <ShieldAlert size={18} />
+            </div>
+          }
+          onClose={onCancel}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (matches) onConfirm(value);
+            }}
+          >
+            <label className="block px-5 py-4 text-sm text-slate-600">
+              Type{" "}
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-800">
+                {phrase}
+              </span>{" "}
+              to continue.
+              <input
+                ref={inputRef}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                aria-label={`Type ${phrase} to continue`}
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm outline-none transition focus:border-red-400"
+              />
+            </label>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3.5">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!matches}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-red-500 disabled:opacity-50"
+              >
+                Confirm
+              </button>
+            </div>
+          </form>
+        </Shell>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// In-app replacement for the "type PHRASE to continue" window.prompt. Resolves
+// to the phrase once typed exactly, or null if the dialog is dismissed.
+export function useTypedConfirmation(): [
+  ReactNode,
+  (phrase: string) => Promise<string | null>,
+] {
+  const [phrase, setPhrase] = useState<string | null>(null);
+  const resolveRef = useRef<((value: string | null) => void) | null>(null);
+  const request = useCallback((next: string) => {
+    resolveRef.current?.(null);
+    setPhrase(next);
+    return new Promise<string | null>((resolve) => {
+      resolveRef.current = resolve;
+    });
+  }, []);
+  const settle = (value: string | null) => {
+    resolveRef.current?.(value);
+    resolveRef.current = null;
+    setPhrase(null);
+  };
+  const element = (
+    <TypedConfirmDialog
+      phrase={phrase}
+      onConfirm={(value) => settle(value)}
+      onCancel={() => settle(null)}
+    />
+  );
+  return [element, request];
 }

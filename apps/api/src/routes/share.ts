@@ -3,7 +3,11 @@ import { and, desc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { getCookie, setCookie } from "hono/cookie";
 import { createAuth } from "../auth";
 import { getDb, schema } from "../db";
-import { isExpired, nowSeconds } from "../lib/expiry";
+import {
+  expiryCountdownLabel,
+  isExpired,
+  nowSeconds,
+} from "../lib/expiry";
 import { hashSecret, verifySecret } from "../lib/hash";
 import { notifyAdmins } from "../lib/notifications";
 import { deliverPendingEvents, enqueueEvent } from "../lib/delivery";
@@ -41,14 +45,7 @@ function fmtBytes(n: number): string {
   return `${(n / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 function humanLeft(expiresAt: number): string {
-  const secs = expiresAt - nowSeconds();
-  if (secs <= 0) return "Expired";
-  const d = Math.floor(secs / 86400);
-  const h = Math.floor((secs % 86400) / 3600);
-  if (d >= 1) return `Expires in ${d} day${d === 1 ? "" : "s"}`;
-  if (h >= 1) return `Expires in ${h} hour${h === 1 ? "" : "s"}`;
-  const m = Math.max(1, Math.floor((secs % 3600) / 60));
-  return `Expires in ${m} minute${m === 1 ? "" : "s"}`;
+  return expiryCountdownLabel(expiresAt);
 }
 function list(raw: string | null): string[] {
   try {
@@ -431,7 +428,7 @@ h1 { margin: 0 0 5px; font-size: clamp(22px, 4vw, 27px); line-height: 1.16; lett
 .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: 3px 3px 0 var(--accent-shadow); }.btn.ghost { background: var(--card); color: var(--strong); }.btn:hover { transform: translate(-1px, -1px); }.btn.primary:hover { box-shadow: 5px 5px 0 var(--accent-shadow); }.btn.ghost:hover { background: var(--hover); }.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--accent-shadow); }
 .pwform { display: flex; max-width: 320px; flex-direction: column; gap: 12px; margin: 22px auto 0; }.pwin { width: 100%; border: 1px solid var(--line); border-radius: var(--shape); background: var(--card); padding: 12px 14px; color: var(--strong); font: inherit; font-size: 15px; outline: none; }.pwin:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0 0 7px; }.badge { display: inline-block; border: 1px solid var(--line); border-radius: 999px; background: var(--accent-soft); color: var(--strong); padding: 4px 10px; font-size: 12px; font-weight: 700; }.err { margin: 0; color: #dc2626; font-size: 14px; }.pimg, .pvid { display: block; max-width: 100%; margin: 0 auto 18px; border: 1px solid var(--line); border-radius: var(--shape); background: #000; }.pimg { max-height: 74vh; width: auto; object-fit: contain; }.pvid { width: 100%; max-height: 74vh; } footer { margin-top: 30px; color: var(--faint); font-size: 12px; text-align: center; }
-body[data-theme="neubrutalism"] .card, body[data-theme="neubrutalism"] .list, body[data-theme="neubrutalism"] .empty, body[data-theme="neubrutalism"] .btn, body[data-theme="neubrutalism"] .dl, body[data-theme="neubrutalism"] .pwin, body[data-theme="neubrutalism"] .pimg, body[data-theme="neubrutalism"] .pvid { border-width: 2px; } body[data-theme="neubrutalism"] .brand b, body[data-theme="neubrutalism"] h1 { font-family: "Arial Black", Impact, Inter, system-ui, sans-serif; letter-spacing: -.055em; text-transform: uppercase; } body[data-theme="neubrutalism"] .btn, body[data-theme="neubrutalism"] .dl, body[data-theme="neubrutalism"] .badge, body[data-theme="neubrutalism"] footer { text-transform: uppercase; letter-spacing: .025em; } body[data-theme="pressroom"] h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; } body[data-theme="pressroom"] .btn, body[data-theme="pressroom"] .dl, body[data-theme="pressroom"] .badge, body[data-theme="pressroom"] footer { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .025em; text-transform: uppercase; }
+body[data-theme="neubrutalism"] .card, body[data-theme="neubrutalism"] .list, body[data-theme="neubrutalism"] .empty, body[data-theme="neubrutalism"] .btn, body[data-theme="neubrutalism"] .dl, body[data-theme="neubrutalism"] .pwin, body[data-theme="neubrutalism"] .pimg, body[data-theme="neubrutalism"] .pvid { border-width: 2px; } body[data-theme="neubrutalism"] .brand b, body[data-theme="neubrutalism"] h1 { font-family: "Arial Black", Impact, Inter, system-ui, sans-serif; letter-spacing: -.055em; text-transform: uppercase; } body[data-theme="neubrutalism"] .btn, body[data-theme="neubrutalism"] .dl, body[data-theme="neubrutalism"] .badge, body[data-theme="neubrutalism"] footer { text-transform: uppercase; letter-spacing: .025em; } body[data-theme="pressroom"] h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; } body[data-theme] h1.fname { text-transform: none; letter-spacing: -.02em; overflow-wrap: anywhere; } body[data-theme="pressroom"] .btn, body[data-theme="pressroom"] .dl, body[data-theme="pressroom"] .badge, body[data-theme="pressroom"] footer { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .025em; text-transform: uppercase; }
 @media (max-width: 560px) { .wrap { padding: 24px 16px 48px; }.card { padding: 28px 18px; }.btn { width: 100%; }.btns { display: grid; }.pvid { max-height: 56vh; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
 `;
@@ -441,7 +438,7 @@ function pageShell(
   inner: string,
   head = "",
 ): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${esc(title)} \u00b7 Dropvault</title>${head}<style>${STYLE}</style></head><body data-theme="${theme}"><div class="wrap"><div class="brand"><div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 16a4 4 0 0 1 .9-7.9A5 5 0 0 1 16 7a3.5 3.5 0 0 1 .6 6.96" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 10.5v7m0 0 2.4-2.4M12 17.5l-2.4-2.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><b>Drop<span>vault</span></b></div>${inner}<footer>Shared securely with Dropvault \u00b7 links expire automatically.</footer></div></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${esc(title)} \u00b7 Dropvault</title>${head}<style>${STYLE}</style></head><body data-theme="${theme}"><div class="wrap"><div class="brand"><div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 16a4 4 0 0 1 .9-7.9A5 5 0 0 1 16 7a3.5 3.5 0 0 1 .6 6.96" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 10.5v7m0 0 2.4-2.4M12 17.5l-2.4-2.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><b>Drop<span>vault</span></b></div>${inner}<footer>Shared securely with Dropvault.</footer></div></body></html>`;
 }
 function filePage(
   theme: PublicTheme,
@@ -457,7 +454,7 @@ function filePage(
   return pageShell(
     theme,
     name,
-    `<div class="card"><div class="fic">\u2913</div><h1>${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Preview</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
+    `<div class="card"><div class="fic">\u2913</div><h1 class="fname">${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Preview</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
   );
 }
 function encryptedFilePage(
@@ -477,7 +474,7 @@ function encryptedFilePage(
   return pageShell(
     theme,
     name,
-    `<div class="card"><div class="fic">🔐</div><h1>${esc(name)}</h1><p class="muted">${esc(meta)} · end-to-end encrypted</p><div class="btns">${action}</div></div><script nonce="${scriptNonce}">(()=>{const config=${config};const status=document.getElementById("status");const button=document.getElementById("decrypt");if(!button)return;const decode=(value)=>{value=value.replace(/-/g,"+").replace(/_/g,"/");while(value.length%4)value+="=";return Uint8Array.from(atob(value),c=>c.charCodeAt(0))};const fail=(message)=>{status.textContent=message;button.disabled=false};button.addEventListener("click",async()=>{button.disabled=true;status.textContent="Downloading encrypted bytes…";try{const encodedKey=new URLSearchParams(location.hash.slice(1)).get("key");if(!encodedKey)throw new Error("This link is missing its decryption key. Ask the sender for the complete URL.");if(!config.nonce)throw new Error("This encrypted file has no nonce.");const key=await crypto.subtle.importKey("raw",decode(encodedKey),"AES-GCM",false,["decrypt"]);const response=await fetch("/api/share/"+config.token+"?dl=1");if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||"Download failed");status.textContent="Decrypting in this browser…";const clear=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(config.nonce)},key,await response.arrayBuffer());let filename="Decrypted file",contentType="application/octet-stream";try{const metadata=JSON.parse(config.encryptedMetadata);const decoded=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(metadata.nonce)},key,decode(metadata.ciphertext));const parsed=JSON.parse(new TextDecoder().decode(decoded));filename=parsed.filename||filename;contentType=parsed.contentType||contentType}catch{}const url=URL.createObjectURL(new Blob([clear],{type:contentType}));const link=document.createElement("a");link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status.textContent="Decrypted download ready."}catch(error){fail(error instanceof Error?error.message:"Could not decrypt this file")}})})()</script>`,
+    `<div class="card"><div class="fic">🔐</div><h1 class="fname">${esc(name)}</h1><p class="muted">${esc(meta)} · end-to-end encrypted</p><div class="btns">${action}</div></div><script nonce="${scriptNonce}">(()=>{const config=${config};const status=document.getElementById("status");const button=document.getElementById("decrypt");if(!button)return;const decode=(value)=>{value=value.replace(/-/g,"+").replace(/_/g,"/");while(value.length%4)value+="=";return Uint8Array.from(atob(value),c=>c.charCodeAt(0))};const fail=(message)=>{status.textContent=message;button.disabled=false};button.addEventListener("click",async()=>{button.disabled=true;status.textContent="Downloading encrypted bytes…";try{const encodedKey=new URLSearchParams(location.hash.slice(1)).get("key");if(!encodedKey)throw new Error("This link is missing its decryption key. Ask the sender for the complete URL.");if(!config.nonce)throw new Error("This encrypted file has no nonce.");const key=await crypto.subtle.importKey("raw",decode(encodedKey),"AES-GCM",false,["decrypt"]);const response=await fetch("/api/share/"+config.token+"?dl=1");if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||"Download failed");status.textContent="Decrypting in this browser…";const clear=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(config.nonce)},key,await response.arrayBuffer());let filename="Decrypted file",contentType="application/octet-stream";try{const metadata=JSON.parse(config.encryptedMetadata);const decoded=await crypto.subtle.decrypt({name:"AES-GCM",iv:decode(metadata.nonce)},key,decode(metadata.ciphertext));const parsed=JSON.parse(new TextDecoder().decode(decoded));filename=parsed.filename||filename;contentType=parsed.contentType||contentType}catch{}const url=URL.createObjectURL(new Blob([clear],{type:contentType}));const link=document.createElement("a");link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status.textContent="Decrypted download ready."}catch(error){fail(error instanceof Error?error.message:"Could not decrypt this file")}})})()</script>`,
   );
 }
 function imageFilePage(
@@ -495,7 +492,7 @@ function imageFilePage(
   return pageShell(
     theme,
     name,
-    `<div class="card"><img class="pimg" src="/api/share/${token}?raw=1" alt="${esc(name)}"/><h1>${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Open original</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
+    `<div class="card"><img class="pimg" src="/api/share/${token}?raw=1" alt="${esc(name)}"/><h1 class="fname">${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Open original</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
     head,
   );
 }
@@ -515,7 +512,7 @@ function videoFilePage(
   return pageShell(
     theme,
     name,
-    `<div class="card"><video class="pvid" controls preload="metadata" playsinline><source src="/api/share/${token}?raw=1" type="${esc(contentType ?? "video/mp4")}"/></video><h1>${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Open original</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
+    `<div class="card"><video class="pvid" controls preload="metadata" playsinline><source src="/api/share/${token}?raw=1" type="${esc(contentType ?? "video/mp4")}"/></video><h1 class="fname">${esc(name)}</h1><p class="muted">${esc(meta)}</p>${notes}<div class="btns">${dl}<a class="btn ghost" href="/api/share/${token}?raw=1" target="_blank" rel="noopener">Open original</a><a class="btn ghost" href="/api/share/${token}/report">Report</a></div></div>`,
     head,
   );
 }
@@ -590,7 +587,7 @@ function folderPage(
   return pageShell(
     theme,
     name,
-    `<h1>${esc(name)}</h1><p class="muted">${count} file${count === 1 ? "" : "s"} \u00b7 shared folder</p>${notes}${body}`,
+    `<h1 class="fname">${esc(name)}</h1><p class="muted">${count} file${count === 1 ? "" : "s"} \u00b7 shared folder</p>${notes}${body}`,
   );
 }
 // Range-aware streaming for shared objects. Heads the object first so we know

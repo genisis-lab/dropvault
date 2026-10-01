@@ -40,6 +40,7 @@ import {
 } from "../lib/teams";
 import { formatBytes } from "../lib/format";
 import { useToast } from "./Toast";
+import { useConfirm } from "./Dialog";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.96, y: 10 };
@@ -83,6 +84,7 @@ export default function TeamsDialog({
 }) {
   const qc = useQueryClient();
   const { success, error } = useToast();
+  const [confirmUi, confirm] = useConfirm();
   const [name, setName] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -370,11 +372,16 @@ export default function TeamsDialog({
                         </p>
                       </div>
                       <button
-                        onClick={() =>
-                          window.confirm(
-                            "Delete this team? Files and folders will be detached from it, not deleted.",
-                          ) && deleteMut.mutate(selectedTeam.id)
-                        }
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: `Delete ${selectedTeam.name}?`,
+                            message:
+                              "Files and folders are detached from the team, not deleted. Members lose access to anything shared only through it.",
+                            confirmLabel: "Delete team",
+                            danger: true,
+                          });
+                          if (ok) deleteMut.mutate(selectedTeam.id);
+                        }}
                         className="w-full rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 sm:w-auto"
                       >
                         <Trash2 size={14} className="mr-1 inline" /> Delete
@@ -636,6 +643,7 @@ export default function TeamsDialog({
           )}
         </motion.div>
       )}
+      {confirmUi}
     </AnimatePresence>
   );
 }

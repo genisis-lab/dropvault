@@ -10,11 +10,13 @@ import {
 } from "../lib/expiry";
 import {
   addIpBan,
+  banTargetsRequester,
   getIpBans,
   normalizeIp,
   recentIpsFrom,
   removeIpBan,
 } from "../lib/ipAccess";
+import { clientIpInfo } from "../lib/rateLimit";
 import { notifyAdmins, notifyOwners, notifyUser } from "../lib/notifications";
 import { deliverPendingEvents, enqueueEvent } from "../lib/delivery";
 import { requireAuth } from "../middleware/auth";
@@ -28,6 +30,7 @@ import {
   type AdminRole,
 } from "../middleware/admin";
 import { isSafeWebhookUrl } from "../lib/url";
+import { emailDeliveryConfigured } from "../lib/email";
 import { normalizeTheme } from "../lib/theme";
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
 import {
@@ -782,6 +785,7 @@ admin.get("/users", async (c) => {
       id: u.id,
       name: u.name,
       email: u.email,
+      emailVerified: !!u.emailVerified,
       image: u.image,
       createdAt: Math.floor(u.createdAt.getTime() / 1000),
       fileCount: countByUser.get(u.id) ?? 0,
@@ -798,6 +802,7 @@ admin.get("/users", async (c) => {
       lastIp: canSeeIps ? (recentIpByUser.get(u.id)?.[0] ?? null) : null,
       recentIps: canSeeIps ? (recentIpByUser.get(u.id) ?? []) : [],
     })),
+    emailDelivery: emailDeliveryConfigured(c.env),
     nextCursor:
       hasMore && users.length
         ? Math.floor(users[users.length - 1].createdAt.getTime() / 1000)
@@ -888,6 +893,7 @@ admin.get("/users/:id", async (c) => {
       id: u.id,
       name: u.name,
       email: u.email,
+      emailVerified: !!u.emailVerified,
       image: u.image,
       createdAt: Math.floor(u.createdAt.getTime() / 1000),
       fileCount: files.filter((f) => !f.deletedAt).length,
@@ -904,6 +910,7 @@ admin.get("/users/:id", async (c) => {
       lastIp: canSeeIps ? (recentIps[0] ?? null) : null,
       recentIps,
     },
+    emailDelivery: emailDeliveryConfigured(c.env),
     files: files.map((f) => fileRow(f, emailById, nameById)),
     activity: activity.map((row) => ({
       ...row,
@@ -1038,6 +1045,38 @@ admin.post("/users/:id/unsuspend", async (c) => {
     .where(eq(schema.userSuspensions.userId, id))
     .run();
   await logAction(c, db, "user.unsuspend", "user", id, null);
+  return c.json({ ok: true });
+});
+// Re-sends the sign-up verification link for someone whose first email was
+// lost. better-auth issues a fresh token; the address itself never changes.
+admin.post("/users/:id/resend-verification", async (c) => {
+  const denied = await forbidUnlessCan(c, "manageUsers");
+  if (denied) return denied;
+  if (!emailDeliveryConfigured(c.env))
+    return c.json(
+      { error: "Email delivery isn't configured for this workspace." },
+      400,
+    );
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+  const target = await db
+    .select({
+      email: schema.user.email,
+      emailVerified: schema.user.emailVerified,
+    })
+    .from(schema.user)
+    .where(eq(schema.user.id, id))
+    .get();
+  if (!target) return c.json({ error: "not found" }, 404);
+  if (target.emailVerified)
+    return c.json({ error: "This email address is already verified." }, 409);
+  // Loaded on demand: auth pulls in Worker-only modules this router otherwise
+  // never needs.
+  const { createAuth } = await import("../auth");
+  await createAuth(c.env).api.sendVerificationEmail({
+    body: { email: target.email, callbackURL: "/" },
+  });
+  await logAction(c, db, "user.verification_resend", "user", id, null);
   return c.json({ ok: true });
 });
 admin.post("/users/:id/approve", async (c) => {
@@ -2172,6 +2211,53 @@ admin.delete("/admins/:email", async (c) => {
   });
   return c.json({ ok: true });
 });
+// Sends one sample event so an owner can check a webhook before relying on it.
+// Takes the URL from the form so it can be tried before saving.
+admin.post("/notifications/test", async (c) => {
+  const denied = await forbidUnless(c, "owner");
+  if (denied) return denied;
+  const body = await c.req
+    .json<{ url?: string }>()
+    .catch(() => ({}) as { url?: string });
+  const db = getDb(c.env.DB);
+  const url =
+    String(body.url ?? "").trim() ||
+    (await settingsMap(db)).notifyWebhookUrl ||
+    "";
+  if (!isSafeWebhookUrl(url))
+    return c.json(
+      { error: "Enter a public https:// webhook URL first." },
+      400,
+    );
+  let status: number;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "test",
+        message: "Test notification from Dropvault. Webhook delivery works.",
+        at: nowSeconds(),
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    status = response.status;
+  } catch (error) {
+    return c.json(
+      {
+        error: `Couldn't reach the webhook: ${error instanceof Error ? error.message : "request failed"}`,
+      },
+      502,
+    );
+  }
+  await logAction(c, db, "notifications.test", "webhook", null, String(status));
+  if (status < 200 || status >= 300)
+    return c.json(
+      { error: `The webhook answered with HTTP ${status}.`, status },
+      502,
+    );
+  return c.json({ ok: true, status });
+});
 admin.get("/ip-bans", async (c) => {
   const denied = await forbidUnless(c, "owner");
   if (denied) return denied;
@@ -2187,6 +2273,14 @@ admin.post("/ip-bans", async (c) => {
   const db = getDb(c.env.DB);
   const ip = normalizeIp(body.ip ?? null);
   if (!ip) return c.json({ error: "invalid ip" }, 400);
+  if (banTargetsRequester(ip, clientIpInfo(c).all))
+    return c.json(
+      {
+        error:
+          "That is the IP address you are using right now. Banning it would lock you out of Dropvault.",
+      },
+      400,
+    );
   const bans = await addIpBan(
     db,
     ip,

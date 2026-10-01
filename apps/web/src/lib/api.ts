@@ -986,6 +986,8 @@ export type AdminUser = {
   id: string;
   name: string;
   email: string;
+  // False until the person opens their sign-up verification link.
+  emailVerified?: boolean;
   image: string | null;
   createdAt: number;
   fileCount: number;
@@ -1027,6 +1029,8 @@ export type ActivityEntry = {
 };
 export type AdminUserDetail = {
   user: AdminUser;
+  // Whether the workspace can send email (Resend or the notification webhook).
+  emailDelivery?: boolean;
   files: AdminFile[];
   activity?: ActivityEntry[];
 };
@@ -1158,6 +1162,24 @@ export async function adminSuspendUser(id: string, reason?: string) {
 export async function adminUnsuspendUser(id: string) {
   return j<{ ok: true }>(
     await fetch(`${API}/api/admin/users/${id}/unsuspend`, {
+      method: "POST",
+      credentials: "include",
+    }),
+  );
+}
+export async function adminTestWebhook(url: string) {
+  return j<{ ok: true; status: number }>(
+    await fetch(`${API}/api/admin/notifications/test`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
+  );
+}
+export async function adminResendVerification(id: string) {
+  return j<{ ok: true }>(
+    await fetch(`${API}/api/admin/users/${id}/resend-verification`, {
       method: "POST",
       credentials: "include",
     }),
