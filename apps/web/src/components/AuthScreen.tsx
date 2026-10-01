@@ -6,7 +6,14 @@ import {
   type ReactNode,
 } from "react";
 import { motion } from "framer-motion";
-import { KeyRound, Lock, Mail, User as UserIcon } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  KeyRound,
+  Lock,
+  Mail,
+  User as UserIcon,
+} from "lucide-react";
 import { authClient, signIn, signUp } from "../lib/auth-client";
 import {
   clearTwoFactorPending,
@@ -19,6 +26,8 @@ import Turnstile from "./Turnstile";
 const cardInitial = { opacity: 0, y: 16, scale: 0.98 };
 const cardAnimate = { opacity: 1, y: 0, scale: 1 };
 const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+// Mirrors emailAndPassword.minPasswordLength in the API's better-auth config.
+const MIN_PASSWORD_LENGTH = 10;
 
 function authErrorMessage(res: any, fallback: string) {
   const err = res?.error;
@@ -49,6 +58,7 @@ export default function AuthScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -277,7 +287,11 @@ export default function AuthScreen() {
               />{" "}
               Trust this device for 30 days
             </label>
-            {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
+            {errorMsg && (
+              <p role="alert" className="text-sm text-red-500">
+                {errorMsg}
+              </p>
+            )}
             <button
               type="submit"
               disabled={loading || !code.trim()}
@@ -333,7 +347,7 @@ export default function AuthScreen() {
           <p className="mt-1 text-sm text-slate-500">
             {mode === "forgot"
               ? "We'll send a secure, expiring reset link."
-              : "Use at least 10 characters."}
+              : `Use at least ${MIN_PASSWORD_LENGTH} characters.`}
           </p>
           <form onSubmit={submitRecovery} className="mt-6 space-y-3">
             {mode === "forgot" ? (
@@ -341,6 +355,8 @@ export default function AuthScreen() {
                 <input
                   type="email"
                   required
+                  autoComplete="email"
+                  aria-label="Email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Email"
@@ -351,8 +367,10 @@ export default function AuthScreen() {
               <Field icon={<Lock size={16} />}>
                 <input
                   type="password"
-                  minLength={10}
+                  minLength={MIN_PASSWORD_LENGTH}
                   required
+                  autoComplete="new-password"
+                  aria-label="New password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="New password"
@@ -360,9 +378,15 @@ export default function AuthScreen() {
                 />
               </Field>
             )}
-            {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
+            {errorMsg && (
+              <p role="alert" className="text-sm text-red-500">
+                {errorMsg}
+              </p>
+            )}
             {statusMsg && (
-              <p className="text-sm text-emerald-600">{statusMsg}</p>
+              <p role="status" className="text-sm text-emerald-600">
+                {statusMsg}
+              </p>
             )}
             <button
               disabled={loading}
@@ -418,6 +442,8 @@ export default function AuthScreen() {
           {mode === "up" && (
             <Field icon={<UserIcon size={16} />}>
               <input
+                autoComplete="name"
+                aria-label="Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Name"
@@ -429,6 +455,8 @@ export default function AuthScreen() {
             <input
               type="email"
               required
+              autoComplete="email"
+              aria-label="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
@@ -437,14 +465,32 @@ export default function AuthScreen() {
           </Field>
           <Field icon={<Lock size={16} />}>
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               required
+              minLength={mode === "up" ? MIN_PASSWORD_LENGTH : undefined}
+              autoComplete={mode === "up" ? "new-password" : "current-password"}
+              aria-label="Password"
+              aria-describedby={mode === "up" ? "password-hint" : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               className="w-full bg-transparent outline-none placeholder:text-slate-400"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              className="-my-1 shrink-0 rounded-md p-1 text-slate-400 transition hover:text-slate-600"
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
           </Field>
+          {mode === "up" && (
+            <p id="password-hint" className="-mt-1 text-xs text-slate-500">
+              At least {MIN_PASSWORD_LENGTH} characters.
+            </p>
+          )}
           {siteKey && (
             <div className="pt-1">
               <Turnstile
@@ -455,8 +501,16 @@ export default function AuthScreen() {
               />
             </div>
           )}
-          {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
-          {statusMsg && <p className="text-sm text-emerald-600">{statusMsg}</p>}
+          {errorMsg && (
+            <p role="alert" className="text-sm text-red-500">
+              {errorMsg}
+            </p>
+          )}
+          {statusMsg && (
+            <p role="status" className="text-sm text-emerald-600">
+              {statusMsg}
+            </p>
+          )}
           <button
             type="submit"
             disabled={loading || (Boolean(siteKey) && !captchaToken)}
@@ -487,6 +541,7 @@ export default function AuthScreen() {
             onClick={() => {
               setMode(mode === "in" ? "up" : "in");
               setErrorMsg(null);
+              setStatusMsg(null);
             }}
             className="font-semibold text-drift-600 hover:underline"
           >

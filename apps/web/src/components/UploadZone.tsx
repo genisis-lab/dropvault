@@ -759,6 +759,20 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
     const errorCount = jobList.filter(([, j]) => j.state === "error").length;
     const activeCount = jobList.filter(([, j]) => isActive(j.state)).length;
     const doneCount = jobList.filter(([, j]) => j.state === "done").length;
+    // A cleanly finished batch needs no more attention: collapse the tray so
+    // it stops covering the file list, then clear it. Failed or cancelled
+    // uploads stay until the user retries or dismisses them.
+    const batchSucceeded =
+      jobList.length > 0 && doneCount === jobList.length;
+    useEffect(() => {
+      if (!batchSucceeded) return;
+      setTrayOpen(false);
+      const timer = window.setTimeout(() => {
+        jobsRef.current = {};
+        setJobs({});
+      }, 6000);
+      return () => window.clearTimeout(timer);
+    }, [batchSucceeded]);
     const totalBytes = jobList.reduce((sum, [, job]) => sum + job.size, 0);
     const completedBytes = jobList.reduce(
       (sum, [, job]) => sum + job.size * (job.pct / 100),

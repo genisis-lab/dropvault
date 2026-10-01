@@ -37,6 +37,7 @@ import {
 } from "../lib/encryption";
 import { copyTextFrom } from "../lib/clipboard";
 import { formatBytes, timeLeft } from "../lib/format";
+import { focusFirstMenuItem, useEscapeToClose } from "../lib/useEscapeToClose";
 import { useToast } from "./Toast";
 
 export const DRAG_MIME = "application/x-dropvault";
@@ -146,6 +147,9 @@ export default function FileCard({
   const [thumbFailed, setThumbFailed] = useState(false);
   const openedAtRef = useRef(0);
   const justTouchedRef = useRef(false);
+  const menuTriggerRef = useRef<HTMLElement | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
+  const focusMenuOnOpenRef = useRef(false);
   useEffect(() => {
     const t = setInterval(() => setLeft(timeLeft(file.expiresAt)), 30000);
     return () => clearInterval(t);
@@ -163,8 +167,15 @@ export default function FileCard({
     setMoveOpen(false);
     setPos(null);
   }
+  useEscapeToClose(menuOpen, closeMenu, menuTriggerRef);
+  useEffect(() => {
+    if (!menuOpen || !focusMenuOnOpenRef.current) return;
+    focusMenuOnOpenRef.current = false;
+    focusFirstMenuItem(menuPanelRef.current);
+  }, [menuOpen]);
   function openMenuAt(btn: HTMLElement | null) {
     openedAtRef.current = Date.now();
+    menuTriggerRef.current = btn;
     setMoveOpen(false);
     const desktop =
       typeof window !== "undefined" &&
@@ -184,6 +195,7 @@ export default function FileCard({
   function openMenu(e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
     if (justTouchedRef.current) return;
+    focusMenuOnOpenRef.current = e.detail === 0;
     openMenuAt(e.currentTarget);
   }
   function openMenuTouch(e: React.TouchEvent<HTMLButtonElement>) {
@@ -255,15 +267,24 @@ export default function FileCard({
   const showCheckbox = !!onToggleSelect && (anySelected || selected);
   const canDrag = !file.deletedAt && !coarsePointer;
   const clickable = canPreview || !!onOpenDetails;
-  const chipClass =
-    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
-    (file.deletedAt
-      ? "bg-red-50 text-red-600"
+  const chipShape =
+    "items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ";
+  const chipTone = file.deletedAt
+    ? "bg-red-50 text-red-600"
+    : file.keepForever
+      ? "bg-drift-50 text-drift-600"
+      : left.urgent
+        ? "bg-red-50 text-red-600"
+        : "bg-slate-100 text-slate-500";
+  const chipClass = "inline-flex " + chipShape + chipTone;
+  // Phone list rows show expiry inline under the name instead of as a badge,
+  // which leaves room for the filename itself.
+  const inlineExpiryTone =
+    file.deletedAt || (!file.keepForever && left.urgent)
+      ? "text-red-600"
       : file.keepForever
-        ? "bg-drift-50 text-drift-600"
-        : left.urgent
-          ? "bg-red-50 text-red-600"
-          : "bg-slate-100 text-slate-500");
+        ? "text-drift-600"
+        : "";
   const chipLabel = file.deletedAt
     ? "Trash"
     : file.keepForever
@@ -351,6 +372,7 @@ export default function FileCard({
           }
         >
           <motion.div
+            ref={menuPanelRef}
             onClick={(e) => e.stopPropagation()}
             initial={menuInitial}
             animate={menuAnimate}
@@ -631,7 +653,14 @@ export default function FileCard({
         data-ui="file-row"
       >
         {onToggleSelect && (
-          <div className="flex w-5 justify-center">{checkbox}</div>
+          <div
+            className={
+              "w-5 justify-center " +
+              (showCheckbox ? "flex" : "hidden sm:flex")
+            }
+          >
+            {checkbox}
+          </div>
         )}
         <button
           type="button"
@@ -677,15 +706,24 @@ export default function FileCard({
             {file.filename}
           </p>
           {tagLine}
-          <p className="text-xs text-slate-400 sm:hidden">
+          <p className="flex items-center gap-1 text-xs text-slate-400 sm:hidden">
             {formatBytes(file.sizeBytes)}
+            <span aria-hidden="true">·</span>
+            <span
+              className={"inline-flex items-center gap-0.5 " + inlineExpiryTone}
+            >
+              {chipIcon} {chipLabel}
+            </span>
           </p>
         </div>
         <div className="hidden items-center gap-1.5 sm:flex" data-ui="file-security">
           {encryptedPill}
           {sharedPill}
         </div>
-        <span className={chipClass} data-ui="file-expiry">
+        <span
+          className={"hidden sm:inline-flex " + chipShape + chipTone}
+          data-ui="file-expiry"
+        >
           {chipIcon} {chipLabel}
         </span>
         <span
@@ -700,6 +738,7 @@ export default function FileCard({
             onClick={openMenu}
             onTouchEnd={openMenuTouch}
             aria-label="File actions"
+            aria-expanded={menuOpen}
             className="grid h-8 w-8 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
           >
             <MoreVertical size={16} />
@@ -798,6 +837,7 @@ export default function FileCard({
             onClick={openMenu}
             onTouchEnd={openMenuTouch}
             aria-label="File actions"
+            aria-expanded={menuOpen}
             className="grid h-7 w-7 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
           >
             <MoreVertical size={16} />

@@ -70,7 +70,7 @@ export async function processUploadComplete(
       userId: file.ownerId,
       type: "upload_complete",
       title: `${file.filename} is ready`,
-      message: "Your upload finished and is available in DropVault.",
+      message: "Your upload finished and is available in Dropvault.",
       targetType: "file",
       targetId: fileId,
     });
