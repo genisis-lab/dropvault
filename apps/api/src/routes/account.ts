@@ -6,6 +6,7 @@ import { adminRole } from "../middleware/admin";
 import { requireAuth } from "../middleware/auth";
 import { deleteFileObjects } from "../lib/fileObjects";
 import { nowSeconds } from "../lib/expiry";
+import { parseTrashRetentionDays } from "../lib/settings";
 import { isSafeWebhookUrl } from "../lib/url";
 import type { Bindings, Variables } from "../types";
 
@@ -58,6 +59,13 @@ account.get("/me", async (c) => {
     quotaBytes = u?.quotaBytes ?? defaultQuota;
   }
   const canKeepFilesForever = roleGetsForever(role) || !!u?.keepFilesForever;
+  // Lets Trash show when each item will be purged by the hourly sweep.
+  const trashSetting = await db
+    .select()
+    .from(schema.appSettings)
+    .where(eq(schema.appSettings.key, "trashRetentionDays"))
+    .get()
+    .catch(() => null);
   return c.json({
     user: {
       id: session.user.id,
@@ -71,6 +79,7 @@ account.get("/me", async (c) => {
     adminRole: role,
     keepFilesForever: !!u?.keepFilesForever,
     canKeepFilesForever,
+    trashRetentionDays: parseTrashRetentionDays(trashSetting?.value),
   });
 });
 

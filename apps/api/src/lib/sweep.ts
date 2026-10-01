@@ -3,6 +3,7 @@ import { getDb, schema } from "../db";
 import { and, eq, inArray, lte, isNull } from "drizzle-orm";
 import { nowSeconds } from "./expiry";
 import { deleteFileObjects } from "./fileObjects";
+import { parseTrashRetentionDays } from "./settings";
 import type { Bindings } from "../types";
 
 export async function sweepExpired(
@@ -18,8 +19,7 @@ export async function sweepExpired(
     .from(schema.appSettings)
     .where(eq(schema.appSettings.key, "trashRetentionDays"))
     .get();
-  const trashDays =
-    Number(trashSetting?.value) > 0 ? Number(trashSetting?.value) : 30;
+  const trashDays = parseTrashRetentionDays(trashSetting?.value);
   const trashCutoff = cutoff - trashDays * 86400;
   const pendingCutoff = cutoff - 24 * 3600;
 

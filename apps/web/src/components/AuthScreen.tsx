@@ -20,6 +20,7 @@ import {
   hasFreshTwoFactorPending,
   markTwoFactorPending,
 } from "../lib/two-factor-state";
+import { signupApprovalRequired, signupConfirmation } from "../lib/signup";
 import Logo from "./Logo";
 import Turnstile from "./Turnstile";
 
@@ -132,10 +133,15 @@ export default function AuthScreen() {
       }
       if (res?.error)
         setErrorMsg(authErrorMessage(res, "Authentication failed"));
-      else if (mode === "up")
+      else if (mode === "up") {
+        const signedIn = Boolean(res?.data?.token);
         setStatusMsg(
-          "Account created. Check your inbox to verify your email. An administrator has also been notified and will review your access request.",
+          signupConfirmation({
+            signedIn,
+            approvalRequired: signedIn ? null : await signupApprovalRequired(),
+          }),
         );
+      }
     } catch (err) {
       if (promptedFor2FA) showTwoFactor();
       else

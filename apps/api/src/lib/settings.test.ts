@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   applyRequestedSettingChanges,
   DEFAULT_MAX_UPLOAD_BYTES,
+  DEFAULT_TRASH_RETENTION_DAYS,
   parseMaxUploadBytes,
+  parseTrashRetentionDays,
 } from "./settings";
 
 type Key = "defaultTheme" | "publicSharingEnabled" | "rolePermissions";
@@ -63,5 +65,15 @@ describe("max upload policy", () => {
     expect(parseMaxUploadBytes("")).toBe(DEFAULT_MAX_UPLOAD_BYTES);
     expect(parseMaxUploadBytes("not-a-number")).toBe(DEFAULT_MAX_UPLOAD_BYTES);
     expect(parseMaxUploadBytes("1.5")).toBe(DEFAULT_MAX_UPLOAD_BYTES);
+  });
+});
+
+describe("trash retention setting", () => {
+  it("uses a positive configured value", () => {
+    expect(parseTrashRetentionDays("7")).toBe(7);
+  });
+  it("falls back to the default when unset or invalid", () => {
+    for (const value of [undefined, null, "", "0", "-3", "soon"])
+      expect(parseTrashRetentionDays(value)).toBe(DEFAULT_TRASH_RETENTION_DAYS);
   });
 });
