@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   LayoutGrid,
   List,
@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  X,
 } from "lucide-react";
 import {
   THEME_OPTIONS,
@@ -49,6 +50,7 @@ export default function Topbar({
   onNotificationNavigate?: (destination: NotificationDestination) => void;
 }) {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const { layout, setLayout } = useLayout();
   const {
     theme,
@@ -110,15 +112,36 @@ export default function Topbar({
             size={18}
             className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
           />
+          {/* A short placeholder still fits beside the phone toolbar; the
+              accessible name keeps the full description. */}
           <input
+            ref={searchRef}
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search in Dropvault"
+            placeholder="Search"
+            aria-label="Search in Dropvault"
             title="Search (press /)"
             aria-keyshortcuts="/"
-            className="w-full rounded-full bg-slate-100 py-2.5 pl-11 pr-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-drift-300"
+            className={
+              "w-full rounded-full bg-slate-100 py-2.5 pl-11 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-drift-300 [&::-webkit-search-cancel-button]:hidden " +
+              (search ? "pr-10" : "pr-4")
+            }
             data-ui="search"
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                searchRef.current?.focus();
+              }}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
         <div className="hidden items-center rounded-full border border-slate-200 bg-white p-0.5 sm:flex">
           {viewButton("grid", "Grid view")}

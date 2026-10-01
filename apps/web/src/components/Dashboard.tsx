@@ -57,6 +57,7 @@ import {
 } from "../lib/adminRoute";
 import { useLayout } from "../lib/layout";
 import { folderPath } from "../lib/folderPath";
+import { dashboardHeading, dashboardSubtitle } from "../lib/dashboardHeading";
 import { isTypingTarget, shortcutFor } from "../lib/shortcuts";
 import type { NotificationDestination } from "../lib/notificationTarget";
 import { useTheme } from "../lib/theme";
@@ -784,6 +785,8 @@ export default function Dashboard({
         if (filter === "shared" && !f.shareToken) return false;
         if (filter === "expiring" && (f.keepForever || f.expiresAt <= now || f.expiresAt - now >= DAY)) return false;
         if (filter === "trash") return true;
+        // "Search in Dropvault" looks inside every folder, not just this one.
+        if (q) return true;
         if (currentFolderId) return f.folderId === currentFolderId;
         if (filter === "all") return !f.folderId;
         return true;
@@ -836,11 +839,12 @@ export default function Dashboard({
   }
   function isSelectionControlTarget(target: EventTarget | null): boolean {
     if (!(target instanceof Element)) return false;
-    return Boolean(
-      target.closest(
-        "[data-file-actions], [data-file-select-toggle], button, a, input, select, textarea",
-      ),
+    const control = target.closest(
+      "[data-file-actions], [data-file-select-toggle], button, a, input, select, textarea",
     );
+    // Filenames are buttons so they can be clicked and focused, but they
+    // cover most of a row: long-press and drag selection still start there.
+    return Boolean(control && !control.hasAttribute("data-file-open"));
   }
   function rectFromPoints(
     startX: number,
@@ -1079,10 +1083,10 @@ export default function Dashboard({
   const visibleFolders = useMemo(
     () =>
       showFolderSection
-        ? folders.filter(
-            (fd) =>
-              (fd.parentId ?? null) === currentFolderId &&
-              (!q || fd.name.toLowerCase().includes(q)),
+        ? folders.filter((fd) =>
+            q
+              ? fd.name.toLowerCase().includes(q)
+              : (fd.parentId ?? null) === currentFolderId,
           )
         : [],
     [folders, q, showFolderSection, currentFolderId],
@@ -1092,15 +1096,19 @@ export default function Dashboard({
     [folders],
   );
   const firstName = userName ? userName.split(" ")[0] : "";
-  const heading = calmHome
-    ? firstName
-      ? `Welcome back, ${firstName}`
-      : "Welcome to Dropvault"
-    : currentFolder
-      ? currentFolder.name
-      : titleFor(filter);
+  const heading = dashboardHeading({
+    search,
+    greet: calmHome,
+    firstName,
+    isNewAccount:
+      filesQuery.isSuccess &&
+      foldersQuery.isSuccess &&
+      liveFiles.length === 0 &&
+      folders.length === 0,
+    title: currentFolder ? currentFolder.name : titleFor(filter),
+  });
   const itemCount = visible.length + visibleFolders.length;
-  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` · ${userName.split(" ")[0]}'s vault` : ""}`;
+  const subtitle = dashboardSubtitle({ search, itemCount, firstName });
   const calmDetails =
     layout === "calm" ? (file: DriftFile) => setDetailFile(file) : undefined;
   function onDialogConfirm(name: string) {
@@ -1268,7 +1276,9 @@ export default function Dashboard({
           className="mx-auto max-w-6xl px-4 py-6 sm:px-6"
           data-ui="workspace"
         >
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          {/* The toolbar wraps under the title when both don't fit, instead
+              of squeezing the title down to "Welcome b…". */}
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
               {currentFolder && (
                 <nav
@@ -1472,6 +1482,9 @@ export default function Dashboard({
             )}
           <UploadZone
               hidden={filter === "trash"}
+              // Once there is something to look at (or a search running),
+              // the files matter more than a large drop target.
+              compact={itemCount > 0 || Boolean(q)}
               selectionActive={selCount > 0}
               ref={uploadZoneRef}
               expiryDays={expiryDays}
@@ -1654,7 +1667,7 @@ export default function Dashboard({
                   data-ui="file-list"
                 >
                   <div
-                    className="hidden px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid"
+                    className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400"
                     data-ui="file-list-header"
                   >
                     <span />
@@ -1924,7 +1937,9 @@ export default function Dashboard({
                   : "Drop to upload to your vault"}
               </p>
               <p className="text-sm text-slate-500">
-                Files expire in {expiryDays} day{expiryDays === 1 ? "" : "s"}
+                {uploadsKeptForever
+                  ? "Files are kept forever"
+                  : `Files expire in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`}
               </p>
             </div>
           </motion.div>

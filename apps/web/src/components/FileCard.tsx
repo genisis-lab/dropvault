@@ -654,6 +654,37 @@ export default function FileCard({
         #{(file.tags ?? []).join(" #")}
       </p>
     ) : null;
+  // The filename is where people click first, so it opens the file just like
+  // the thumbnail does. Trashed files have nothing to open.
+  const openable = clickable && !file.deletedAt;
+  function fileName(className: string) {
+    const content = (
+      <>
+        {file.favorite && (
+          <Star
+            size={12}
+            className="mr-1 inline fill-amber-400 text-amber-400"
+          />
+        )}
+        {file.filename}
+      </>
+    );
+    return openable ? (
+      <button
+        type="button"
+        onClick={(e) => preview(e)}
+        title={file.filename}
+        data-file-open
+        className={"block max-w-full text-left hover:underline " + className}
+      >
+        {content}
+      </button>
+    ) : (
+      <p className={className} title={file.filename}>
+        {content}
+      </p>
+    );
+  }
   if (view === "list")
     return (
       <motion.div
@@ -685,6 +716,8 @@ export default function FileCard({
           type="button"
           onClick={(e) => preview(e)}
           aria-label={`Open details for ${file.filename}`}
+          // The filename button does the same thing; one tab stop is enough.
+          tabIndex={openable ? -1 : undefined}
           className={
             "grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " +
             tone.bg +
@@ -712,20 +745,15 @@ export default function FileCard({
           )}
         </button>
         <div className="min-w-0 flex-1" data-ui="file-name">
-          <p
-            className="truncate text-sm font-medium text-slate-800"
-            title={file.filename}
-          >
-            {file.favorite && (
-              <Star
-                size={12}
-                className="mr-1 inline fill-amber-400 text-amber-400"
-              />
-            )}
-            {file.filename}
-          </p>
+          {fileName("truncate text-sm font-medium text-slate-800")}
           {tagLine}
-          <p className="flex items-center gap-1 text-xs text-slate-400 sm:hidden">
+          {/* Narrow lists (phones, and tablets beside the sidebar) show size,
+              expiry and sharing here instead of in columns; index.css
+              switches between the two by the list's width. */}
+          <p
+            className="flex items-center gap-1 text-xs text-slate-400"
+            data-ui="file-inline-meta"
+          >
             {formatBytes(file.sizeBytes)}
             <span aria-hidden="true">·</span>
             <span
@@ -734,21 +762,29 @@ export default function FileCard({
             >
               {chipIcon} {chipLabel}
             </span>
+            {file.shareToken && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-0.5 text-drift-600">
+                  <Link2 size={11} /> Shared
+                </span>
+              </>
+            )}
           </p>
         </div>
-        <div className="hidden items-center gap-1.5 sm:flex" data-ui="file-security">
+        <div className="items-center gap-1.5" data-ui="file-security">
           {encryptedPill}
           {sharedPill}
         </div>
         <span
-          className={"hidden sm:inline-flex " + chipShape + chipTone}
+          className={chipShape + chipTone}
           title={chipTitle}
           data-ui="file-expiry"
         >
           {chipIcon} {chipLabel}
         </span>
         <span
-          className="hidden w-20 text-right text-xs text-slate-400 sm:block"
+          className="w-20 text-right text-xs text-slate-400"
           data-ui="file-size"
         >
           {formatBytes(file.sizeBytes)}
@@ -828,18 +864,9 @@ export default function FileCard({
         >
           <Icon size={15} />
         </div>
-        <p
-          className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800"
-          title={file.filename}
-        >
-          {file.favorite && (
-            <Star
-              size={12}
-              className="mr-1 inline fill-amber-400 text-amber-400"
-            />
-          )}
-          {file.filename}
-        </p>
+        {fileName(
+          "min-w-0 flex-1 truncate text-sm font-medium text-slate-800",
+        )}
         {file.shareToken && (
           <Link2 size={13} className="shrink-0 text-drift-500" />
         )}
