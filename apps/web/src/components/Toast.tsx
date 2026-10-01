@@ -9,13 +9,21 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Check, Info, X } from "lucide-react";
 
 type ToastKind = "success" | "error" | "info";
-type ToastItem = { id: number; kind: ToastKind; message: string };
+// An optional inline action, e.g. "Undo" after moving a file to Trash.
+type ToastAction = { label: string; onClick: () => void };
+type ToastOptions = { action?: ToastAction };
+type ToastItem = {
+  id: number;
+  kind: ToastKind;
+  message: string;
+  action?: ToastAction;
+};
 
 type ToastApi = {
-  toast: (message: string, kind?: ToastKind) => void;
-  success: (message: string) => void;
-  error: (message: string) => void;
-  info: (message: string) => void;
+  toast: (message: string, kind?: ToastKind, options?: ToastOptions) => void;
+  success: (message: string, options?: ToastOptions) => void;
+  error: (message: string, options?: ToastOptions) => void;
+  info: (message: string, options?: ToastOptions) => void;
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -39,25 +47,33 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toast = useCallback(
-    (message: string, kind: ToastKind = "info") => {
+    (message: string, kind: ToastKind = "info", options?: ToastOptions) => {
       const id = ++counter;
-      setToasts((prev) => [...prev, { id, kind, message }]);
-      setTimeout(() => remove(id), 4000);
+      setToasts((prev) => [
+        ...prev,
+        { id, kind, message, action: options?.action },
+      ]);
+      // Leave actionable toasts up long enough to reach the button.
+      setTimeout(() => remove(id), options?.action ? 8000 : 4000);
     },
     [remove],
   );
 
   const api: ToastApi = {
     toast,
-    success: (m) => toast(m, "success"),
-    error: (m) => toast(m, "error"),
-    info: (m) => toast(m, "info"),
+    success: (m, o) => toast(m, "success", o),
+    error: (m, o) => toast(m, "error", o),
+    info: (m, o) => toast(m, "info", o),
   };
 
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(92vw,22rem)] flex-col gap-2">
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(92vw,22rem)] flex-col gap-2"
+      >
         <AnimatePresence>
           {toasts.map((t) => (
             <motion.div
@@ -94,6 +110,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 )}
               </span>
               <p className="flex-1 leading-snug text-slate-700">{t.message}</p>
+              {t.action && (
+                <button
+                  onClick={() => {
+                    t.action?.onClick();
+                    remove(t.id);
+                  }}
+                  className="-my-0.5 shrink-0 rounded-md px-1.5 py-0.5 font-semibold text-drift-600 transition hover:bg-drift-50 hover:text-drift-700"
+                >
+                  {t.action.label}
+                </button>
+              )}
               <button
                 onClick={() => remove(t.id)}
                 aria-label="Dismiss"

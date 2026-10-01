@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
@@ -16,6 +16,7 @@ import {
 import type { Folder as FolderT } from "../lib/api";
 import { folderShareUrl } from "../lib/api";
 import { copyTextFrom } from "../lib/clipboard";
+import { focusFirstMenuItem, useEscapeToClose } from "../lib/useEscapeToClose";
 import { useToast } from "./Toast";
 
 export const DRAG_MIME = "application/x-dropvault";
@@ -56,6 +57,19 @@ export default function FolderCard({
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dropActive, setDropActive] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
+  const focusMenuOnOpenRef = useRef(false);
+  useEscapeToClose(menuOpen, () => setMenuOpen(false), menuTriggerRef);
+  useEffect(() => {
+    if (!menuOpen || !focusMenuOnOpenRef.current) return;
+    focusMenuOnOpenRef.current = false;
+    focusFirstMenuItem(menuPanelRef.current);
+  }, [menuOpen]);
+  function toggleMenu(e: React.MouseEvent) {
+    focusMenuOnOpenRef.current = !menuOpen && e.detail === 0;
+    setMenuOpen((v) => !v);
+  }
 
   async function copyLink() {
     setBusy(true);
@@ -109,6 +123,7 @@ export default function FolderCard({
             onClick={() => setMenuOpen(false)}
           />
           <motion.div
+            ref={menuPanelRef}
             initial={menuInitial}
             animate={menuAnimate}
             exit={menuInitial}
@@ -230,8 +245,10 @@ export default function FolderCard({
         {shareBadge}
         <div className="relative">
           <button
-            onClick={() => setMenuOpen((v) => !v)}
+            ref={menuTriggerRef}
+            onClick={toggleMenu}
             aria-label="Folder actions"
+            aria-expanded={menuOpen}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
           >
             <MoreVertical size={16} />
@@ -279,8 +296,10 @@ export default function FolderCard({
       </button>
       <div className="relative">
         <button
-          onClick={() => setMenuOpen((v) => !v)}
+          ref={menuTriggerRef}
+          onClick={toggleMenu}
           aria-label="Folder actions"
+          aria-expanded={menuOpen}
           className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
         >
           <MoreVertical size={16} />

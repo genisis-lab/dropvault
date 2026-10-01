@@ -878,60 +878,30 @@ html.neubrutalism [data-ui="storage-card"] {
   background: #fffdf6 !important;
   box-shadow: 4px 4px 0 #111;
 }
+/* The upload target keeps the shared centered column layout. Earlier grid
+   placement rules left `align-self: end` behind, which pushed the primary
+   "Choose files" block to the far right of the card. */
 html.neubrutalism [data-ui="upload-target"] {
-  display: grid !important;
-  grid-template-columns: 4.5rem minmax(18rem, 1fr) minmax(16rem, auto) auto;
-  grid-template-rows: auto auto auto auto;
-  justify-content: stretch;
-  gap: 0.5rem 1.25rem;
   border: 2px dashed #111 !important;
   border-radius: 0 !important;
   background: #fffdf6 !important;
   box-shadow: none !important;
-  padding: 1.25rem !important;
-  text-align: left;
+  padding: 1.5rem !important;
 }
 html.neubrutalism [data-ui="upload-icon"] {
-  grid-column: 1;
-  grid-row: 1 / 5;
   border: 2px solid #111;
   border-radius: 0 !important;
   box-shadow: 5px 5px 0 #111 !important;
 }
-html.neubrutalism [data-ui="upload-copy"] {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: end;
-}
-html.neubrutalism [data-ui="upload-encryption"] {
-  grid-column: 2;
-  grid-row: 2;
-  justify-self: start;
-}
-html.neubrutalism [data-ui="upload-lifetime"],
-html.neubrutalism [data-ui="upload-lifetime-help"] {
-  grid-column: 3;
-  grid-row: 1 / 3;
-  align-self: center;
-  justify-content: flex-start;
-}
 html.neubrutalism [data-ui="upload-encryption-help"] {
-  grid-column: 2 / 4;
-  grid-row: 3;
-  justify-self: start;
   text-align: left;
 }
 html.neubrutalism [data-ui="upload-schedule"] {
-  grid-column: 2 / 4;
-  grid-row: 4;
   justify-content: flex-start;
 }
-html.neubrutalism [data-ui="upload-folder"] {
-  grid-column: 4;
-  grid-row: 1 / 5;
-  align-self: center;
-}
-html.neubrutalism [data-ui="upload-target"] label,
+/* Only thicken controls that already draw a border; plain checkbox labels
+   ("Expire after first download", "Release at") stay borderless. */
+html.neubrutalism [data-ui="upload-target"] label.border,
 html.neubrutalism [data-ui="upload-target"] button,
 html.neubrutalism [data-ui="workspace"] select,
 html.neubrutalism [data-ui="workspace"] > div button,
@@ -1042,19 +1012,6 @@ html.neubrutalism ::selection {
     padding-inline: 0.75rem;
   }
 }
-@media (max-width: 1100px) {
-  html.neubrutalism [data-ui="upload-target"] {
-    display: flex !important;
-    padding-block: 2rem !important;
-    text-align: center;
-  }
-  html.neubrutalism [data-ui="upload-target"] > div,
-  html.neubrutalism [data-ui="upload-target"] > label,
-  html.neubrutalism [data-ui="upload-target"] > button,
-  html.neubrutalism [data-ui="upload-target"] > p {
-    align-self: auto;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1104,11 +1061,6 @@ html.neubrutalism ::selection {
 /* Shared refinements preserve every palette while keeping controls readable. */
 [data-ui="upload-target"] [hidden] { display: none !important; }
 html [data-ui="upload-zone"] [data-ui="upload-target"][data-hidden="true"] { display: none !important; }
-html.neubrutalism [data-ui="upload-target"] {
-  display: flex !important;
-  padding: 1.5rem !important;
-  text-align: center;
-}
 [data-ui="upload-target"] #upload-options {
   color: rgb(var(--c-strong));
   background: rgb(var(--c-hover));
@@ -1124,6 +1076,16 @@ html.neubrutalism [data-ui="upload-target"] {
 html.neubrutalism [data-ui="upload-tray"] {
   border: 2px solid #111;
   border-radius: 0.5rem;
+}
+/* The workspace-wide button border rule otherwise boxes the tray's text
+   toggle and icon buttons; keep borders only where the markup asks for one. */
+html.neubrutalism [data-ui="upload-tray"] button:not(.border) {
+  border-width: 0;
+}
+/* Only the productivity themes lay file rows out in columns. Elsewhere rows
+   are flex, so the column header would stack its labels vertically. */
+html:not(.quiet):not(.pressroom):not(.neubrutalism) [data-ui="file-list-header"] {
+  display: none;
 }
 [data-ui="upload-tray"] button,
 [data-ui="admin-operations"] button { min-height: 2.5rem; }
