@@ -212,6 +212,18 @@ export async function removeIpBan(
   return next;
 }
 
+// True when banning `target` would block the person making the request. Bans
+// apply to every route, so an owner banning their own address would lose
+// access to the admin panel needed to lift it.
+export function banTargetsRequester(
+  target: string | null | undefined,
+  requesterIps: readonly string[],
+): boolean {
+  const ip = normalizeIp(target);
+  if (!ip) return false;
+  return requesterIps.some((candidate) => normalizeIp(candidate) === ip);
+}
+
 export async function isIpBanned(
   db: ReturnType<typeof getDb>,
   rawIp: string | null | undefined,

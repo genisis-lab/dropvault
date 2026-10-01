@@ -19,6 +19,7 @@ import {
 } from "../lib/theme";
 import { LayoutToggle, useLayout, type Layout } from "../lib/layout";
 import NotificationsBell from "./NotificationsBell";
+import type { NotificationDestination } from "../lib/notificationTarget";
 
 export type ViewMode = "grid" | "list";
 
@@ -33,6 +34,7 @@ export default function Topbar({
   onOpenMenu,
   onOpenSecurity,
   onOpenTeams,
+  onNotificationNavigate,
 }: {
   search: string;
   setSearch: (s: string) => void;
@@ -44,6 +46,7 @@ export default function Topbar({
   onOpenMenu?: () => void;
   onOpenSecurity?: () => void;
   onOpenTeams?: () => void;
+  onNotificationNavigate?: (destination: NotificationDestination) => void;
 }) {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const { layout, setLayout } = useLayout();
@@ -111,6 +114,8 @@ export default function Topbar({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search in Dropvault"
+            title="Search (press /)"
+            aria-keyshortcuts="/"
             className="w-full rounded-full bg-slate-100 py-2.5 pl-11 pr-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-drift-300"
             data-ui="search"
           />
@@ -123,7 +128,7 @@ export default function Topbar({
           <LayoutToggle />
           <ThemeToggle />
         </div>
-        <NotificationsBell />
+        <NotificationsBell onNavigate={onNotificationNavigate} />
         <div className="relative sm:hidden">
           <button
             onClick={() => setMobileActionsOpen((v) => !v)}

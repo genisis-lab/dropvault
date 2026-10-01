@@ -37,3 +37,20 @@ export function isExpired(
 ): boolean {
   return expiresAt <= at;
 }
+
+// Human countdown for public pages. Keep-forever files store
+// FOREVER_EXPIRES_AT, which would otherwise read "Expires in 2912169 days".
+export function expiryCountdownLabel(
+  expiresAt: number,
+  now: number = nowSeconds(),
+): string {
+  if (expiresAt >= FOREVER_EXPIRES_AT) return "Never expires";
+  const secs = expiresAt - now;
+  if (secs <= 0) return "Expired";
+  const d = Math.floor(secs / DAY_SECONDS);
+  const h = Math.floor((secs % DAY_SECONDS) / 3600);
+  if (d >= 1) return `Expires in ${d} day${d === 1 ? "" : "s"}`;
+  if (h >= 1) return `Expires in ${h} hour${h === 1 ? "" : "s"}`;
+  const m = Math.max(1, Math.floor((secs % 3600) / 60));
+  return `Expires in ${m} minute${m === 1 ? "" : "s"}`;
+}

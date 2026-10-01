@@ -162,6 +162,8 @@ function SidebarContent({
           onClick={run(onNew)}
           className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-3 pl-4 pr-5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:shadow-glow-500/40"
           data-ui="new-upload"
+          title="Upload files (U)"
+          aria-keyshortcuts="u"
         >
           <Plus size={20} /> Upload
         </motion.button>

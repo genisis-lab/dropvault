@@ -440,8 +440,11 @@ export default function FileCard({
                           downloadDecryptedFile(
                             file,
                             downloadUrl(file.id),
-                          ).catch((error) =>
-                            window.alert((error as Error).message),
+                          ).catch((err) =>
+                            error(
+                              (err as Error).message ||
+                                "Couldn't decrypt this file",
+                            ),
                           );
                         }}
                         className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"

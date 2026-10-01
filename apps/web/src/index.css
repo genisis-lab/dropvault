@@ -897,7 +897,18 @@ html.neubrutalism [data-ui="upload-target"] label.border,
 html.neubrutalism [data-ui="upload-target"] button,
 html.neubrutalism [data-ui="workspace"] select,
 html.neubrutalism [data-ui="workspace"] > div button,
-html.neubrutalism [data-ui="admin-console"] button,
+html.neubrutalism
+  [data-ui="admin-console"]
+  :is(
+    button.border,
+    .mini,
+    .mini-good,
+    .mini-danger,
+    .icon-btn,
+    .icon-danger,
+    .pill,
+    .pill-danger
+  ),
 html.neubrutalism [data-ui="admin-console"] input,
 html.neubrutalism [data-ui="admin-console"] select,
 html.neubrutalism [data-ui="admin-console"] textarea {
@@ -1071,7 +1082,8 @@ html.neubrutalism [data-ui="upload-tray"] {
 }
 /* The workspace-wide button border rule otherwise boxes the tray's text
    toggle and icon buttons; keep borders only where the markup asks for one. */
-html.neubrutalism [data-ui="upload-tray"] button:not(.border) {
+html.neubrutalism [data-ui="upload-tray"] button:not(.border),
+html.neubrutalism [data-ui="workspace"] [data-ui="folder-path"] button {
   border-width: 0;
 }
 /* Only the productivity themes lay file rows out in columns. Elsewhere rows

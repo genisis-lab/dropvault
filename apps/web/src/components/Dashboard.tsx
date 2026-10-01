@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Clock,
+  Lightbulb,
   Download,
   FolderInput,
   FolderPlus,
@@ -49,7 +50,15 @@ import {
 import { signOut } from "../lib/auth-client";
 import { accountStatus } from "../lib/account";
 import { formatBytes } from "../lib/format";
+import {
+  ADMIN_HASH_PREFIX,
+  isAdminHash,
+  urlWithoutHash,
+} from "../lib/adminRoute";
 import { useLayout } from "../lib/layout";
+import { folderPath } from "../lib/folderPath";
+import { isTypingTarget, shortcutFor } from "../lib/shortcuts";
+import type { NotificationDestination } from "../lib/notificationTarget";
 import { useTheme } from "../lib/theme";
 import {
   hasStoredView,
@@ -89,6 +98,8 @@ const TeamsDialog = lazy(() => import("./TeamsDialog"));
 const EXPIRY_OPTIONS = [1, 2, 7, 14, 30];
 const DAY = 86400;
 const PAGE_SIZE = 60;
+const RECENT_STRIP_MIN_FILES = 12;
+const FIRST_RUN_TIP_KEY = "dropvault-first-run-tip-dismissed";
 type SortKey = "newest" | "name" | "size" | "expiring";
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "newest", label: "Newest" },
@@ -211,7 +222,87 @@ export default function Dashboard({
   const [detailFile, setDetailFile] = useState<DriftFile | null>(null);
   const [detailFolderId, setDetailFolderId] = useState<string | null>(null);
   const [versionsFile, setVersionsFile] = useState<DriftFile | null>(null);
-  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(() =>
+    isAdminHash(window.location.hash),
+  );
+  // Back/forward and hand-edited #admin URLs open and close the console.
+  useEffect(() => {
+    const sync = () => setAdminOpen(isAdminHash(window.location.hash));
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  function openAdmin() {
+    if (!isAdminHash(window.location.hash))
+      window.location.hash = ADMIN_HASH_PREFIX.slice(1);
+    setAdminOpen(true);
+  }
+  // Keyboard shortcuts: "/" search, "u" upload, Delete moves the selection to
+  // Trash (with the usual confirmation). Skipped while any dialog is open.
+  const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  shortcutRef.current = (event: KeyboardEvent) => {
+    const dialogOpen = Boolean(
+      dialog ||
+        confirmState ||
+        tagsTarget ||
+        limitOpen ||
+        shareFile ||
+        shareFolderTarget ||
+        previewFile ||
+        versionsFile ||
+        adminOpen ||
+        securityOpen ||
+        teamsOpen ||
+        menuOpen,
+    );
+    const shortcut = shortcutFor(event, {
+      typing: isTypingTarget(event.target),
+      dialogOpen,
+    });
+    if (shortcut === "search") {
+      const input = document.querySelector<HTMLInputElement>(
+        '[data-ui="search"]',
+      );
+      if (!input) return;
+      event.preventDefault();
+      input.focus();
+      input.select();
+    } else if (shortcut === "upload" && filter !== "trash") {
+      event.preventDefault();
+      uploadInputRef.current?.click();
+    } else if (shortcut === "trash" && selected.size > 0 && filter !== "trash") {
+      event.preventDefault();
+      bulkDelete();
+    }
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => shortcutRef.current(event);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  function goToNotification(destination: NotificationDestination) {
+    if (destination.kind === "drive") {
+      setFilterState("all");
+      setCurrentFolderId(null);
+      setTypeScope("all");
+      setSearch("");
+      setSort("newest");
+      clearSelection();
+    } else if (destination.kind === "expiring") {
+      setFilterState("expiring");
+      setCurrentFolderId(null);
+      clearSelection();
+    } else if (destination.kind === "security") {
+      setSecurityOpen(true);
+    } else if (isAdmin) {
+      window.location.hash = `${ADMIN_HASH_PREFIX.slice(1)}/${destination.section}`;
+      setAdminOpen(true);
+    }
+  }
+  function closeAdmin() {
+    if (isAdminHash(window.location.hash))
+      window.history.replaceState(null, "", urlWithoutHash(window.location));
+    setAdminOpen(false);
+  }
   const [securityOpen, setSecurityOpen] = useState(false);
   const [teamsOpen, setTeamsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -281,6 +372,19 @@ export default function Dashboard({
   const trashRetentionDays = accountQuery.data?.trashRetentionDays;
   // Eligible accounts keep uploads forever unless they pick an expiry.
   const [keepUploadsForever, setKeepUploadsForever] = useState(true);
+  const [firstRunTipDismissed, setFirstRunTipDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(FIRST_RUN_TIP_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  function dismissFirstRunTip() {
+    setFirstRunTipDismissed(true);
+    try {
+      localStorage.setItem(FIRST_RUN_TIP_KEY, "1");
+    } catch {}
+  }
   const uploadsKeptForever = canKeepForever && keepUploadsForever;
   const [dismissedQuota, setDismissedQuota] = useState<number | null>(() => {
     const v = localStorage.getItem("dropvault-storage-notice-dismissed");
@@ -597,6 +701,10 @@ export default function Dashboard({
       setCurrentFolderId(null);
   }, [currentFolderId, folders, foldersQuery.data]);
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
+  const currentFolderPath = useMemo(
+    () => folderPath(folders, currentFolderId),
+    [folders, currentFolderId],
+  );
   const detailFolder = folders.find((f) => f.id === detailFolderId) ?? null;
   const atRoot = currentFolderId === null;
   const calmHome = layout === "calm" && atRoot && filter === "all";
@@ -695,6 +803,9 @@ export default function Dashboard({
     () => [...liveFiles].sort((a, b) => b.createdAt - a.createdAt).slice(0, 8),
     [liveFiles],
   );
+  // On a small drive the list already shows everything, so a "Recent" strip
+  // would only repeat it.
+  const showRecentStrip = liveFiles.length > RECENT_STRIP_MIN_FILES;
   const detailFileLive = useMemo(
     () =>
       detailFile
@@ -1132,7 +1243,7 @@ export default function Dashboard({
         filter={filter}
         setFilter={setFilter}
         isAdmin={isAdmin}
-        onOpenAdmin={() => setAdminOpen(true)}
+        onOpenAdmin={openAdmin}
         onSignOut={() => signOut()}
         mobileOpen={menuOpen}
         onCloseMobile={() => setMenuOpen(false)}
@@ -1151,6 +1262,7 @@ export default function Dashboard({
           onOpenMenu={() => setMenuOpen(true)}
           onOpenSecurity={() => setSecurityOpen(true)}
           onOpenTeams={() => setTeamsOpen(true)}
+          onNotificationNavigate={goToNotification}
         />
         <main
           className="mx-auto max-w-6xl px-4 py-6 sm:px-6"
@@ -1159,16 +1271,41 @@ export default function Dashboard({
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
               {currentFolder && (
-                <button
-                  onClick={goToRoot}
-                  className="mb-1 flex items-center gap-1 text-sm text-slate-500 hover:text-drift-600"
+                <nav
+                  aria-label="Folder path"
+                  data-ui="folder-path"
+                  className="mb-1 flex min-w-0 flex-wrap items-center gap-1 text-sm text-slate-500"
                 >
-                  <span>My Drive</span>
-                  <ChevronRight size={14} />
-                  <span className="font-medium text-slate-700">
-                    {currentFolder.name}
-                  </span>
-                </button>
+                  <button
+                    onClick={goToRoot}
+                    className="hover:text-drift-600"
+                  >
+                    My Drive
+                  </button>
+                  {currentFolderPath.map((folder, index) => (
+                    <span
+                      key={folder.id}
+                      className="flex min-w-0 items-center gap-1"
+                    >
+                      <ChevronRight size={14} className="shrink-0" />
+                      {index === currentFolderPath.length - 1 ? (
+                        <span
+                          aria-current="page"
+                          className="truncate font-medium text-slate-700"
+                        >
+                          {folder.name}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => openFolder(folder.id)}
+                          className="truncate hover:text-drift-600"
+                        >
+                          {folder.name}
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </nav>
               )}
               <h1 className="truncate text-xl font-bold text-slate-800 sm:text-2xl">
                 {heading}
@@ -1300,6 +1437,39 @@ export default function Dashboard({
                 </div>
               </div>
             )}
+          {!firstRunTipDismissed &&
+            filesQuery.isSuccess &&
+            liveFiles.length === 0 &&
+            filter === "all" &&
+            !currentFolder && (
+              <div
+                className="mb-4 flex items-start gap-3 rounded-xl border border-drift-200 bg-drift-50/70 px-4 py-3 text-sm text-slate-700"
+                data-ui="first-run-tip"
+              >
+                <Lightbulb
+                  size={18}
+                  className="mt-0.5 shrink-0 text-drift-600"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-slate-800">
+                    Welcome to Dropvault
+                  </p>
+                  <p className="mt-0.5">
+                    {uploadsKeptForever
+                      ? "Your uploads are kept forever by default. Pick an expiry from the menu next to Sort if you'd rather they disappear on their own."
+                      : `Files you upload delete themselves after ${expiryDays} day${expiryDays === 1 ? "" : "s"}. Change that from the menu next to Sort before uploading, or later from a file's details.`}
+                  </p>
+                </div>
+                <button
+                  onClick={dismissFirstRunTip}
+                  aria-label="Dismiss tip"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-600"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            )}
           <UploadZone
               hidden={filter === "trash"}
               selectionActive={selCount > 0}
@@ -1316,7 +1486,7 @@ export default function Dashboard({
             !isProductivityTheme &&
             !q &&
             typeScope === "all" &&
-            recentFiles.length > 0 && (
+            showRecentStrip && (
             <div className="mt-6">
               <RecentStrip
                 files={recentFiles}
@@ -1566,7 +1736,7 @@ export default function Dashboard({
             calmHome &&
             !q &&
             typeScope === "all" &&
-            recentFiles.length > 0 && (
+            showRecentStrip && (
               <div className="mt-6">
                 <RecentStrip
                   files={recentFiles}
@@ -1833,8 +2003,8 @@ export default function Dashboard({
         onClose={() => setVersionsFile(null)}
       />
       <Suspense fallback={null}>
-        {adminOpen && (
-          <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
+        {adminOpen && isAdmin && (
+          <AdminPanel open={adminOpen} onClose={closeAdmin} />
         )}
         {securityOpen && (
           <AccountSecurityDialog
