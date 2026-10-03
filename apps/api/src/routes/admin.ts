@@ -31,7 +31,7 @@ import {
 } from "../middleware/admin";
 import { isSafeWebhookUrl } from "../lib/url";
 import { emailDeliveryConfigured } from "../lib/email";
-import { normalizeTheme } from "../lib/theme";
+import { DEFAULT_THEME, normalizeTheme } from "../lib/theme";
 import { deleteFileObjects, deleteOneFileObjects } from "../lib/fileObjects";
 import {
   applyRequestedSettingChanges,
@@ -399,7 +399,7 @@ async function settingsMap(db: ReturnType<typeof getDb>) {
     adminMaxQuotaBytes: "10737418240",
     requirePasswordForShares: "false",
     publicSharingEnabled: "true",
-    defaultTheme: "neubrutalism",
+    defaultTheme: DEFAULT_THEME,
     signupMode: "open",
     trashRetentionDays: "30",
     notifyEmail: "",
@@ -412,6 +412,7 @@ async function settingsMap(db: ReturnType<typeof getDb>) {
   for (const row of rows)
     if (settingsKeys.includes(row.key as SettingsKey))
       out[row.key as SettingsKey] = row.value;
+  out.defaultTheme = normalizeTheme(out.defaultTheme);
   return out;
 }
 

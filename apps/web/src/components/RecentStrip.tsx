@@ -1,44 +1,13 @@
 import { motion } from "framer-motion";
-import {
-  Archive,
-  Clock,
-  FileText,
-  Film,
-  Image as ImageIcon,
-  Link2,
-  Music,
-} from "lucide-react";
+import { Users } from "lucide-react";
 import type { DriftFile } from "../lib/api";
 import { inlineUrl } from "../lib/api";
 import { isEndToEndEncrypted } from "../lib/encryption";
+import { fileKind } from "../lib/fileKind";
 import { formatBytes } from "../lib/format";
 
-type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
-const TINT: Record<Tint, { bg: string; fg: string }> = {
-  indigo: { bg: "bg-indigo-50", fg: "text-indigo-500" },
-  emerald: { bg: "bg-emerald-50", fg: "text-emerald-500" },
-  rose: { bg: "bg-rose-50", fg: "text-rose-500" },
-  violet: { bg: "bg-violet-50", fg: "text-violet-500" },
-  red: { bg: "bg-red-50", fg: "text-red-500" },
-  amber: { bg: "bg-amber-50", fg: "text-amber-500" },
-};
-function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } {
-  if (!type) return { Icon: FileText, tint: "indigo" };
-  if (type.startsWith("image/")) return { Icon: ImageIcon, tint: "emerald" };
-  if (type.startsWith("video/")) return { Icon: Film, tint: "rose" };
-  if (type.startsWith("audio/")) return { Icon: Music, tint: "violet" };
-  if (type.includes("pdf")) return { Icon: FileText, tint: "red" };
-  if (
-    type.includes("zip") ||
-    type.includes("compressed") ||
-    type.includes("tar")
-  )
-    return { Icon: Archive, tint: "amber" };
-  return { Icon: FileText, tint: "indigo" };
-}
-
-// Horizontally scrolling shelf of recently added files, shown on the Calm
-// Workspace home. Clicking a card opens the slide-in detail panel.
+// "Suggested" shelf of recently added files on the Calm home, styled like
+// Drive's suggested files. Clicking a card opens the slide-in detail panel.
 export default function RecentStrip({
   files,
   onOpen,
@@ -48,14 +17,16 @@ export default function RecentStrip({
 }) {
   if (files.length === 0) return null;
   return (
-    <div className="mt-2">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+    <section aria-labelledby="recent-files-heading">
+      <h2
+        id="recent-files-heading"
+        className="mb-3 px-1 text-base font-medium text-strong"
+      >
         Recent
       </h2>
       <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
         {files.map((f) => {
-          const { Icon, tint } = kindOf(f.contentType);
-          const tone = TINT[tint];
+          const { Icon, tint } = fileKind(f.contentType);
           const isImage =
             !isEndToEndEncrypted(f) &&
             (f.contentType || "").startsWith("image/");
@@ -64,55 +35,37 @@ export default function RecentStrip({
               layout
               key={f.id}
               onClick={() => onOpen(f)}
-              className="group flex w-44 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left drive-shadow transition hover:border-slate-300 hover:shadow-md"
+              className="flex w-52 shrink-0 flex-col rounded-xl bg-slate-100 px-1 pb-1 text-left transition-colors hover:bg-[rgb(var(--c-strong)/0.1)]"
             >
-              <div
-                className={
-                  "relative flex h-20 items-center justify-center overflow-hidden " +
-                  tone.bg
-                }
-              >
+              <span className="flex h-11 items-center gap-2 px-2.5">
+                <Icon size={16} className={"shrink-0 " + tint} />
+                <span
+                  className="min-w-0 flex-1 truncate text-sm font-medium text-strong"
+                  title={f.filename}
+                >
+                  {f.filename}
+                </span>
+              </span>
+              <span className="relative flex h-28 items-center justify-center overflow-hidden rounded-lg bg-white">
                 {isImage ? (
                   <img
                     src={inlineUrl(f.id)}
-                    alt={f.filename}
+                    alt=""
                     className="h-full w-full object-cover"
                     loading="lazy"
                   />
                 ) : (
-                  <Icon size={28} className={tone.fg} />
+                  <Icon size={44} strokeWidth={1.4} className={tint} />
                 )}
-                {f.shareToken && (
-                  <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-drift-500">
-                    <Link2 size={11} />
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2">
-                <div
-                  className={
-                    "grid h-6 w-6 shrink-0 place-items-center rounded-md " +
-                    tone.bg +
-                    " " +
-                    tone.fg
-                  }
-                >
-                  <Icon size={13} />
-                </div>
-                <p
-                  className="min-w-0 flex-1 truncate text-xs font-medium text-slate-800"
-                  title={f.filename}
-                >
-                  {f.filename}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 px-3 pb-2 text-[11px] text-slate-400">
-                <Clock size={10} /> {formatBytes(f.sizeBytes)}
-              </div>
+              </span>
+              <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted">
+                {f.shareToken && <Users size={12} aria-label="Shared" />}
+                {formatBytes(f.sizeBytes)}
+              </span>
             </motion.button>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }

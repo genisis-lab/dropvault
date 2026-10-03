@@ -80,11 +80,11 @@ export default function NotificationsBell({
               initial={popInitial}
               animate={popAnimate}
               exit={popExit}
-              className="absolute right-0 top-11 z-50 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white drive-shadow-lg"
+              className="absolute right-0 top-11 z-50 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-[28px] bg-menu drive-shadow-lg"
             >
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800">
+                  <h2 className="text-xl font-normal text-strong">
                     Notifications
                   </h2>
                   <p className="text-xs text-slate-400">{unread} unread</p>
@@ -100,7 +100,7 @@ export default function NotificationsBell({
                   <button
                     title="Close"
                     onClick={() => setOpen(false)}
-                    className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    className="icon-round"
                   >
                     <X size={16} />
                   </button>

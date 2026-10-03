@@ -11,6 +11,7 @@ import {
 import { downloadUrl, inlineUrl, type DriftFile } from "../lib/api";
 import { downloadOwnedFile } from "../lib/encryption";
 import { useToast } from "./Toast";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.97 };
@@ -40,6 +41,7 @@ export default function PreviewModal({
   useEffect(() => {
     setFailed(false);
   }, [file?.id]);
+  useEscapeToClose(true, onClose);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
@@ -52,7 +54,6 @@ export default function PreviewModal({
   }, []);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
       if (e.target instanceof HTMLVideoElement) return;
       if (e.key === "ArrowLeft" && previous) onNavigate?.(previous);
       if (e.key === "ArrowRight" && next) onNavigate?.(next);
@@ -112,7 +113,7 @@ export default function PreviewModal({
           animate="show"
           exit="hidden"
           onClick={onClose}
-          className="fixed inset-0 z-[70] flex flex-col bg-slate-900/80 p-3 backdrop-blur-sm sm:p-6"
+          className="fixed inset-0 z-[70] flex flex-col bg-black/85 p-3 sm:p-6"
         >
           <div
             className="mb-3 flex items-center justify-between gap-3 text-white"
@@ -124,7 +125,7 @@ export default function PreviewModal({
             >
               {file.filename}
               {index >= 0 && (
-                <span className="ml-2 text-xs text-slate-300">
+                <span className="ml-2 text-xs text-white/70">
                   {index + 1} / {files.length}
                 </span>
               )}
@@ -134,7 +135,7 @@ export default function PreviewModal({
                 type="button"
                 disabled={downloading}
                 onClick={() => void download()}
-                className="flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium hover:bg-white/25"
+                className="flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium hover:bg-white/10"
               >
                 {downloading ? (
                   <LoaderCircle className="animate-spin" size={15} />
@@ -148,7 +149,7 @@ export default function PreviewModal({
               <button
                 onClick={onClose}
                 aria-label="Close preview"
-                className="grid h-9 w-9 place-items-center rounded-lg bg-white/15 hover:bg-white/25"
+                className="grid h-10 w-10 place-items-center rounded-full hover:bg-white/10"
               >
                 <X size={18} />
               </button>
@@ -245,7 +246,7 @@ export default function PreviewModal({
                 aria-label="Previous file"
                 disabled={!previous}
                 onClick={() => previous && onNavigate(previous)}
-                className="rounded-xl bg-white/15 p-3 disabled:opacity-30"
+                className="rounded-full bg-white/10 p-3 hover:bg-white/20 disabled:opacity-30"
               >
                 <ChevronLeft />
               </button>
@@ -253,7 +254,7 @@ export default function PreviewModal({
                 aria-label="Next file"
                 disabled={!next}
                 onClick={() => next && onNavigate(next)}
-                className="rounded-xl bg-white/15 p-3 disabled:opacity-30"
+                className="rounded-full bg-white/10 p-3 hover:bg-white/20 disabled:opacity-30"
               >
                 <ChevronRight />
               </button>

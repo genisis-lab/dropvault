@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 import {
   CalendarClock,
   Check,
@@ -86,28 +87,27 @@ function Body({
       setBusy(false);
     }
   }
-  const row =
-    "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50";
+  const row = "menu-item rounded-full";
   return (
     <>
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5">
-        <h2 className="text-sm font-semibold text-slate-800">Folder details</h2>
+      <div className="flex items-center justify-between py-3 pl-5 pr-2">
+        <h2 className="text-base font-normal text-strong">Folder details</h2>
         <button
           onClick={onClose}
           aria-label="Close"
-          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          className="icon-round"
         >
           <X size={16} />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="flex flex-col items-center gap-3 border-b border-slate-100 pb-5 text-center">
-          <div className="grid h-16 w-16 place-items-center rounded-2xl bg-amber-50 text-amber-500">
-            <Folder size={30} />
+      <div className="flex-1 overflow-y-auto px-5 pb-4">
+        <div className="flex flex-col items-center gap-3 border-b border-slate-200 pb-5 text-center">
+          <div className="grid aspect-[4/3] w-full place-items-center rounded-xl bg-slate-100 text-[#5f6368] dark:text-[#c4c7c5]">
+            <Folder size={64} strokeWidth={1.3} className="fill-current" />
           </div>
           <div className="min-w-0">
             <p
-              className="truncate text-sm font-semibold text-slate-800"
+              className="truncate text-base text-strong"
               title={folder.name}
             >
               {folder.name}
@@ -118,7 +118,7 @@ function Body({
             </p>
           </div>
         </div>
-        <dl className="space-y-2.5 border-b border-slate-100 py-4 text-sm">
+        <dl className="space-y-2.5 border-b border-slate-200 py-4 text-sm">
           <div className="flex justify-between gap-3">
             <dt className="text-slate-400">Created</dt>
             <dd className="text-slate-600">{when(folder.createdAt)}</dd>
@@ -163,8 +163,8 @@ function Body({
             </>
           )}
         </dl>
-        <div className="border-b border-slate-100 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="border-b border-slate-200 py-4">
+          <p className="text-sm font-medium text-strong">
             Upload automation
           </p>
           <label className="mt-2 block text-xs text-slate-500">
@@ -176,7 +176,7 @@ function Body({
               value={defaultDays}
               onChange={(e) => setDefaultDays(e.target.value)}
               placeholder="Use workspace default"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+              className="mt-1 drive-field"
             />
           </label>
           <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
@@ -196,7 +196,7 @@ function Body({
               setAutomationSaved(true);
               setTimeout(() => setAutomationSaved(false), 1600);
             }}
-            className="mt-2 rounded-lg bg-drift-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-drift-600"
+            className="btn-filled mt-3 !min-h-9 !px-4"
           >
             {automationSaved ? "Saved" : "Save automation"}
           </button>
@@ -209,18 +209,18 @@ function Body({
             }}
             className={row}
           >
-            <FolderOpen size={15} /> Open folder
+            <FolderOpen size={18} /> Open folder
           </button>
           <button disabled={busy} onClick={copyLink} className={row}>
             {copied ? (
-              <Check size={15} className="text-emerald-500" />
+              <Check size={18} className="text-emerald-500" />
             ) : (
-              <Link2 size={15} />
+              <Link2 size={18} />
             )}{" "}
             {shared ? "Copy link" : "Get link"}
           </button>
           <button onClick={() => onOpenShare(folder.id)} className={row}>
-            <SlidersHorizontal size={15} /> Share settings
+            <SlidersHorizontal size={18} /> Share settings
           </button>
           {shared && (
             <a
@@ -229,25 +229,25 @@ function Body({
               rel="noreferrer"
               className={row}
             >
-              <Download size={15} /> Open public view
+              <Download size={18} /> Open public view
             </a>
           )}
           {shared && (
             <button onClick={() => onRevoke(folder.id)} className={row}>
-              <X size={15} /> Revoke link
+              <X size={18} /> Revoke link
             </button>
           )}
           <button onClick={() => onRename(folder.id)} className={row}>
-            <Pencil size={15} /> Rename
+            <Pencil size={18} /> Rename
           </button>
           <button
             onClick={() => {
               onDelete(folder.id);
               onClose();
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-600 transition hover:bg-red-50"
+            className="menu-item rounded-full"
           >
-            <Trash2 size={15} /> Delete folder
+            <Trash2 size={18} /> Delete folder
           </button>
         </div>
       </div>
@@ -257,6 +257,7 @@ function Body({
 
 export default function FolderDetailPanel(props: Props) {
   const { folder, onClose } = props;
+  useEscapeToClose(!!folder, onClose);
   return (
     <AnimatePresence>
       {folder && (
@@ -266,7 +267,7 @@ export default function FolderDetailPanel(props: Props) {
           animate="show"
           exit="hidden"
           onClick={onClose}
-          className="fixed inset-0 z-[65] bg-slate-900/30 backdrop-blur-sm"
+          className="fixed inset-0 z-[65] bg-black/40"
         >
           <motion.aside
             initial={panelInitial}
@@ -274,7 +275,7 @@ export default function FolderDetailPanel(props: Props) {
             exit={panelInitial}
             transition={panelTransition}
             onClick={(e) => e.stopPropagation()}
-            className="absolute inset-y-0 right-0 flex w-full max-w-sm flex-col bg-white drive-shadow-lg"
+            className="absolute inset-y-0 right-0 flex w-full max-w-sm flex-col bg-sheet drive-shadow-lg md:inset-y-2 md:right-2 md:rounded-2xl"
           >
             <Body {...props} folder={folder} />
           </motion.aside>

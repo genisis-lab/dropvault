@@ -7,17 +7,18 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
   CheckCircle2,
-  FolderUp,
-  Infinity,
-  LockKeyhole,
-  UploadCloud,
-  X,
   ChevronDown,
+  ChevronUp,
+  FileUp,
+  FolderUp,
+  LockKeyhole,
+  X,
 } from "lucide-react";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 import {
   complete,
   cancelUpload,
@@ -76,16 +77,24 @@ type Job = {
 export type UploadZoneHandle = {
   uploadFiles: (files: FileList | File[] | null) => Promise<void>;
   uploadDrop: (dataTransfer: DataTransfer) => Promise<void>;
+  openFilePicker: () => void;
+  openFolderPicker: () => void;
+  openCamera: () => void;
+  openOptions: () => void;
 };
 
 type UploadZoneProps = {
-  hidden?: boolean;
-  selectionActive?: boolean;
   expiryDays: number;
+  // Offered lifetimes, in days, for accounts that pick an expiry.
+  expiryOptions?: number[];
+  onExpiryDaysChange?: (days: number) => void;
   // Whether uploads should be kept forever when the account allows it. The
-  // dashboard owns this so its expiration menu and this checkbox agree.
+  // dashboard owns this so its expiration chip and this checkbox agree.
   keepForever?: boolean;
   onKeepForeverChange?: (keepForever: boolean) => void;
+  // Reports the upload options that differ from a plain upload, so the
+  // dashboard can show them next to its filters.
+  onSummaryChange?: (summary: string) => void;
   onUploaded: () => void;
   inputRef?: RefObject<HTMLInputElement>;
   folderId?: string | null;
@@ -98,13 +107,10 @@ const UPLOAD_CONCURRENCY = 3;
 const MAX_BATCH_FILES = 100;
 const MAX_ATTEMPTS = 3;
 
-const zoneIdle = { borderColor: "#cbd5e1", backgroundColor: "#ffffff" };
-const zoneActive = {
-  borderColor: "#7c3aed",
-  backgroundColor: "rgba(124,58,237,0.06)",
-};
-const iconUp = { y: -6 };
-const iconDown = { y: 0 };
+const dialogInitial = { opacity: 0, scale: 0.96 };
+const dialogAnimate = { opacity: 1, scale: 1 };
+const fadeInitial = { opacity: 0 };
+const fadeAnimate = { opacity: 1 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -197,11 +203,12 @@ async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
 const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
   function UploadZone(
     {
-      hidden = false,
-      selectionActive = false,
       expiryDays,
+      expiryOptions = [1, 2, 7, 14, 30],
+      onExpiryDaysChange,
       keepForever = false,
       onKeepForeverChange,
+      onSummaryChange,
       onUploaded,
       inputRef,
       folderId = null,
@@ -212,7 +219,6 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
     const controllers = useRef(new Map<string, AbortController>());
     const [trayOpen, setTrayOpen] = useState(true);
     const [optionsOpen, setOptionsOpen] = useState(false);
-    const [dragging, setDragging] = useState(false);
     const [jobs, setJobs] = useState<Record<string, Job>>({});
     const [canKeepForever, setCanKeepForever] = useState(false);
     const [encryptChoice, setEncryptChoice] = useState(false);
@@ -305,9 +311,6 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
     }, []);
 
     const effectiveKeepForever = canKeepForever && keepForever;
-    const expiryText = effectiveKeepForever
-      ? "Keep forever"
-      : `Auto-expires in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`;
 
     const uploadOne = useCallback(
       async (key: string, file: File) => {
@@ -708,8 +711,12 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
         uploadDrop: async (dataTransfer) => {
           await handleFiles(await filesFromDrop(dataTransfer));
         },
+        openFilePicker: () => ref.current?.click(),
+        openFolderPicker: () => folderInputRef.current?.click(),
+        openCamera: () => cameraInputRef.current?.click(),
+        openOptions: () => setOptionsOpen(true),
       }),
-      [handleFiles],
+      [handleFiles, ref],
     );
 
     const retryJob = useCallback(
@@ -778,377 +785,461 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
     const batchPct =
       totalBytes > 0 ? Math.round((completedBytes / totalBytes) * 100) : 0;
 
+    const summary = [
+      encryptChoice && "Encrypted",
+      releaseAtInput && "Scheduled release",
+      expireAfterDownloadChoice && "Expires after first download",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    useEffect(() => {
+      onSummaryChange?.(summary);
+    }, [summary, onSummaryChange]);
+    useEscapeToClose(optionsOpen, () => setOptionsOpen(false));
+    const destination = folderName ? `“${folderName}”` : "My Drive";
+    const failedCount = errorCount;
+    const trayTitle = activeCount
+      ? `Uploading ${activeCount} item${activeCount === 1 ? "" : "s"}`
+      : failedCount
+        ? `${failedCount} upload${failedCount === 1 ? "" : "s"} failed`
+        : `${doneCount} upload${doneCount === 1 ? "" : "s"} complete`;
+
     return (
       <div data-ui="upload-zone">
-        <motion.div
-          data-hidden={hidden || undefined}
-          animate={dragging ? zoneActive : zoneIdle}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
+        <input
+          ref={ref}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            void handleFiles(files);
+            e.currentTarget.value = "";
           }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            filesFromDrop(e.dataTransfer).then(handleFiles);
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            void handleFiles(files);
+            e.currentTarget.value = "";
           }}
-          className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-6 text-center drive-shadow transition sm:py-8"
-          data-ui="upload-target"
-        >
-          <motion.div
-            animate={dragging ? iconUp : iconDown}
-            className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-drift-500 via-glow-500 to-blush-500 text-white shadow-lg shadow-glow-500/25 sm:h-16 sm:w-16"
-            data-ui="upload-icon"
-          >
-            {effectiveKeepForever ? (
-              <Infinity size={28} />
-            ) : (
-              <UploadCloud size={28} />
-            )}
-          </motion.div>
-          <div data-ui="upload-copy">
-            <button
-              type="button"
-              onClick={() => ref.current?.click()}
-              className="rounded-xl bg-drift-600 px-6 py-3 font-semibold text-white hover:bg-drift-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              Choose files
-            </button>
-            <p className="mt-3 text-sm font-medium text-slate-700">
-              {folderName ? `Upload to “${folderName}”` : "Upload to My Drive"}
-            </p>
-            <p className="mt-1 hidden text-xs text-slate-500 sm:block">
-              Or drag files and folders here
-            </p>
-            <p className="mt-0.5 text-sm text-slate-400">
-              Up to {MAX_BATCH_FILES} files per batch · {expiryText}
-            </p>
-          </div>
-          {/* Summarize only options that differ from a plain upload. */}
-          {(encryptChoice || releaseAtInput || expireAfterDownloadChoice) && (
-            <p className="text-xs text-slate-600" data-ui="upload-summary">
-              {[
-                encryptChoice && "Encrypted",
-                releaseAtInput && "Scheduled release",
-                expireAfterDownloadChoice && "Expires after first download",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          )}
-          <button
-            type="button"
-            aria-expanded={optionsOpen}
-            aria-controls="upload-options"
-            onClick={() => setOptionsOpen(!optionsOpen)}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
-            Upload options <ChevronDown size={16} />
-          </button>
-          <div
-            id="upload-options"
-            hidden={!optionsOpen}
-            className="w-full max-w-2xl space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left"
-          >
-            {canKeepForever && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="max-w-xl rounded-xl border border-drift-200 bg-drift-50 px-3 py-2 text-left text-xs text-drift-800"
-                data-ui="upload-lifetime"
-              >
-                <label className="flex cursor-pointer items-start gap-2 font-semibold">
-                  <input
-                    type="checkbox"
-                    checked={keepForever}
-                    onChange={(e) => onKeepForeverChange?.(e.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>Keep these uploads forever</span>
-                </label>
-                <p className="mt-1 leading-5 text-drift-700">
-                  On by default for your account. Turn it off to expire these
-                  uploads after {expiryDays} day{expiryDays === 1 ? "" : "s"}{" "}
-                  instead. You can change expiration later from the file
-                  details.
-                </p>
-              </div>
-            )}
-            {!canKeepForever && (
-              <p
-                className="max-w-xl text-center text-xs leading-5 text-slate-500"
-                data-ui="upload-lifetime-help"
-              >
-                These files will expire in {expiryDays} day
-                {expiryDays === 1 ? "" : "s"}. Change the upload lifetime before
-                choosing files, or adjust it later from file details.
-              </p>
-            )}
-            <label
-              onClick={(e) => e.stopPropagation()}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"
-              data-ui="upload-encryption"
-            >
-              <input
-                type="checkbox"
-                checked={encryptChoice}
-                disabled={activeCount > 0 || e2eCapability !== "available"}
-                onChange={(e) => setEncryptChoice(e.target.checked)}
-              />
-              <LockKeyhole size={13} />{" "}
-              {e2eCapability === "checking"
-                ? "Checking encryption support…"
-                : e2eCapability === "unavailable"
-                  ? "Encryption unavailable — backend upgrade required"
-                  : `Encrypt in this browser (up to ${formatBytes(
-                      MAX_BROWSER_ENCRYPTION_BYTES,
-                    )})`}
-            </label>
-            {encryptChoice && (
-              <p
-                onClick={(e) => e.stopPropagation()}
-                className="max-w-xl text-center text-xs leading-5 text-slate-500"
-                data-ui="upload-encryption-help"
-              >
-                Encryption happens in this browser before upload. Choose how the
-                file can be recovered on another device below. Encrypted batches
-                process one file at a time to limit memory use.
-              </p>
-            )}
-            {encryptChoice && (
-              <div
-                onClick={(event) => event.stopPropagation()}
-                className="w-full max-w-xl space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-left text-xs text-slate-600"
-                data-ui="upload-recovery"
-              >
-                <div>
-                  <p className="font-semibold text-slate-800">
-                    Cross-device recovery
-                  </p>
-                  <p className="mt-0.5 leading-5">
-                    Signed-in recovery is the easiest option. Password recovery
-                    keeps a separately wrapped key for this file.
-                  </p>
-                </div>
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={accountRecoveryChoice}
-                    disabled={!accountRecoveryAvailable || activeCount > 0}
-                    onChange={(event) =>
-                      setAccountRecoveryChoice(event.target.checked)
-                    }
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="font-semibold text-slate-700">
-                      Recover after signing in
-                    </span>
-                    <span className="mt-0.5 block leading-5 text-slate-500">
-                      Dropvault stores a service-wrapped copy of the file key.
-                      This is convenient, but is not strict end-to-end
-                      encryption.
-                    </span>
-                  </span>
-                </label>
-                {!accountRecoveryAvailable && (
-                  <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-700">
-                    Signed-in recovery is unavailable right now; use a recovery
-                    password instead.
-                  </p>
-                )}
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={passwordRecoveryChoice}
-                    disabled={!passwordRecoveryAvailable || activeCount > 0}
-                    onChange={(event) => {
-                      setPasswordRecoveryChoice(event.target.checked);
-                      if (!event.target.checked) setDuressChoice(false);
-                    }}
-                    className="mt-0.5"
-                  />
-                  <span className="font-semibold text-slate-700">
-                    Add a recovery password
-                  </span>
-                </label>
-                {!passwordRecoveryAvailable && (
-                  <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-700">
-                    Password recovery is unavailable until the recovery key
-                    service is configured.
-                  </p>
-                )}
-                {passwordRecoveryChoice && (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={recoveryPassword}
-                      disabled={activeCount > 0}
-                      onChange={(event) =>
-                        setRecoveryPassword(event.target.value)
-                      }
-                      placeholder="Recovery password"
-                      className="rounded-xl border border-emerald-200 bg-white px-3 py-2 outline-none focus:border-drift-400"
-                    />
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={recoveryPasswordConfirm}
-                      disabled={activeCount > 0}
-                      onChange={(event) =>
-                        setRecoveryPasswordConfirm(event.target.value)
-                      }
-                      placeholder="Confirm recovery password"
-                      className="rounded-xl border border-emerald-200 bg-white px-3 py-2 outline-none focus:border-drift-400"
-                    />
-                  </div>
-                )}
-                {passwordRecoveryChoice && (
-                  <label className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-2.5 text-red-700">
-                    <input
-                      type="checkbox"
-                      checked={duressChoice}
-                      disabled={activeCount > 0}
-                      onChange={(event) =>
-                        setDuressChoice(event.target.checked)
-                      }
-                      className="mt-0.5"
-                    />
-                    <span>
-                      <span className="font-semibold">
-                        Add a duress password
-                      </span>
-                      <span className="mt-0.5 block leading-5">
-                        Entering it during password unlock permanently removes
-                        the file, versions, shares, folder entry, and Trash
-                        entry.
-                      </span>
-                    </span>
-                  </label>
-                )}
-                {passwordRecoveryChoice && duressChoice && (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={duressPassword}
-                      disabled={activeCount > 0}
-                      onChange={(event) =>
-                        setDuressPassword(event.target.value)
-                      }
-                      placeholder="Duress password"
-                      className="rounded-xl border border-red-200 bg-white px-3 py-2 outline-none focus:border-red-400"
-                    />
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={duressPasswordConfirm}
-                      disabled={activeCount > 0}
-                      onChange={(event) =>
-                        setDuressPasswordConfirm(event.target.value)
-                      }
-                      placeholder="Confirm duress password"
-                      className="rounded-xl border border-red-200 bg-white px-3 py-2 outline-none focus:border-red-400"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="flex min-w-0 flex-wrap items-center justify-center gap-2 text-xs text-slate-600"
-              data-ui="upload-schedule"
-            >
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={expireAfterDownloadChoice}
-                  onChange={(e) =>
-                    setExpireAfterDownloadChoice(e.target.checked)
-                  }
-                />{" "}
-                Expire after first download
-              </label>
-              <label className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
-                Release at{" "}
-                <input
-                  type="datetime-local"
-                  value={releaseAtInput}
-                  onChange={(e) => setReleaseAtInput(e.target.value)}
-                  className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2 py-1 outline-none focus:border-drift-400"
-                />
-              </label>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                folderInputRef.current?.click();
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
-              data-ui="upload-folder"
-            >
-              <FolderUp size={14} /> Upload a folder
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                cameraInputRef.current?.click();
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600 sm:hidden"
-            >
-              Use camera
-            </button>
-          </div>
-          <input
-            ref={ref}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = e.currentTarget.files;
-              void handleFiles(files);
-              e.currentTarget.value = "";
-            }}
-          />
-          <input
-            ref={folderInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = e.currentTarget.files;
-              void handleFiles(files);
-              e.currentTarget.value = "";
-            }}
-            {...({ webkitdirectory: "", directory: "" } as Record<
-              string,
-              string
-            >)}
-          />
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*,video/*"
-            capture="environment"
-            hidden
-            onChange={(e) => {
-              const files = e.currentTarget.files;
-              void handleFiles(files);
-              e.currentTarget.value = "";
-            }}
-          />
-        </motion.div>
+          {...({ webkitdirectory: "", directory: "" } as Record<
+            string,
+            string
+          >)}
+        />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*,video/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            void handleFiles(files);
+            e.currentTarget.value = "";
+          }}
+        />
 
-        {batchError && (
+        <AnimatePresence>
+          {optionsOpen && (
+            <motion.div
+              initial={fadeInitial}
+              animate={fadeAnimate}
+              exit={fadeInitial}
+              className="fixed inset-0 z-[90] grid place-items-center bg-black/40 p-4"
+              onClick={() => setOptionsOpen(false)}
+            >
+              <motion.div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="upload-options-title"
+                initial={dialogInitial}
+                animate={dialogAnimate}
+                exit={dialogInitial}
+                onClick={(e) => e.stopPropagation()}
+                className="flex max-h-[min(90vh,46rem)] w-full max-w-xl flex-col overflow-hidden rounded-[28px] bg-sheet drive-shadow-lg"
+                data-ui="upload-options"
+              >
+                <div className="flex items-start gap-3 px-6 pb-2 pt-6">
+                  <div className="min-w-0 flex-1">
+                    <h2
+                      id="upload-options-title"
+                      className="text-2xl text-strong"
+                    >
+                      Upload options
+                    </h2>
+                    <p className="mt-1 text-sm text-muted">
+                      Applies to the next files you upload to {destination}.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOptionsOpen(false)}
+                    aria-label="Close upload options"
+                    className="icon-round -mr-2 -mt-1"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <div
+                  id="upload-options"
+                  className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-3 text-sm"
+                >
+                  {batchError && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700"
+                    >
+                      <AlertCircle className="mt-0.5 shrink-0" size={16} />
+                      <span>{batchError}</span>
+                    </div>
+                  )}
+                  <section data-ui="upload-lifetime-section">
+                    <h3 className="text-sm font-medium text-strong">
+                      How long to keep uploads
+                    </h3>
+                    {canKeepForever && (
+                      <div className="mt-2" data-ui="upload-lifetime">
+                        <label className="flex cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={keepForever}
+                            onChange={(e) =>
+                              onKeepForeverChange?.(e.target.checked)
+                            }
+                            className="mt-0.5 h-4 w-4"
+                          />
+                          <span>
+                            <span className="block text-strong">
+                              Keep these uploads forever
+                            </span>
+                            <span className="mt-0.5 block text-xs leading-5 text-muted">
+                              On by default for your account. Turn it off to
+                              expire these uploads after the time below. You
+                              can change expiration later from file details.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    )}
+                    {(!canKeepForever || !keepForever) && (
+                      <label className="mt-3 flex flex-wrap items-center gap-2 text-muted">
+                        Delete automatically after
+                        <select
+                          value={String(expiryDays)}
+                          onChange={(e) =>
+                            onExpiryDaysChange?.(Number(e.target.value))
+                          }
+                          aria-label="Days before uploads expire"
+                          className="chip !text-strong"
+                        >
+                          {expiryOptions.map((d) => (
+                            <option key={d} value={d}>
+                              {d} day{d === 1 ? "" : "s"}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {!canKeepForever && (
+                      <p
+                        className="mt-2 text-xs leading-5 text-muted"
+                        data-ui="upload-lifetime-help"
+                      >
+                        These files will expire in {expiryDays} day
+                        {expiryDays === 1 ? "" : "s"}. You can adjust it later
+                        from file details.
+                      </p>
+                    )}
+                  </section>
+                  <section className="border-t border-slate-200 pt-4">
+                    <h3 className="text-sm font-medium text-strong">
+                      Encryption
+                    </h3>
+                    <label
+                      className="mt-2 flex cursor-pointer items-start gap-3"
+                      data-ui="upload-encryption"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={encryptChoice}
+                        disabled={
+                          activeCount > 0 || e2eCapability !== "available"
+                        }
+                        onChange={(e) => setEncryptChoice(e.target.checked)}
+                        className="mt-0.5 h-4 w-4"
+                      />
+                      <span className="flex items-start gap-2 text-strong">
+                        <LockKeyhole size={15} className="mt-0.5 shrink-0" />
+                        {e2eCapability === "checking"
+                          ? "Checking encryption support…"
+                          : e2eCapability === "unavailable"
+                            ? "Encryption unavailable — backend upgrade required"
+                            : `Encrypt in this browser (up to ${formatBytes(
+                                MAX_BROWSER_ENCRYPTION_BYTES,
+                              )})`}
+                      </span>
+                    </label>
+                    {encryptChoice && (
+                      <p
+                        className="mt-2 text-xs leading-5 text-muted"
+                        data-ui="upload-encryption-help"
+                      >
+                        Encryption happens in this browser before upload.
+                        Choose how the file can be recovered on another device
+                        below. Encrypted batches process one file at a time to
+                        limit memory use.
+                      </p>
+                    )}
+                    {encryptChoice && (
+                      <div
+                        className="mt-3 space-y-3 rounded-2xl bg-slate-50 p-4 text-xs text-muted"
+                        data-ui="upload-recovery"
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-strong">
+                            Cross-device recovery
+                          </p>
+                          <p className="mt-0.5 leading-5">
+                            Signed-in recovery is the easiest option. Password
+                            recovery keeps a separately wrapped key for this
+                            file.
+                          </p>
+                        </div>
+                        <label className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={accountRecoveryChoice}
+                            disabled={
+                              !accountRecoveryAvailable || activeCount > 0
+                            }
+                            onChange={(event) =>
+                              setAccountRecoveryChoice(event.target.checked)
+                            }
+                            className="mt-0.5 h-4 w-4"
+                          />
+                          <span>
+                            <span className="text-sm text-strong">
+                              Recover after signing in
+                            </span>
+                            <span className="mt-0.5 block leading-5">
+                              Dropvault stores a service-wrapped copy of the
+                              file key. This is convenient, but is not strict
+                              end-to-end encryption.
+                            </span>
+                          </span>
+                        </label>
+                        {!accountRecoveryAvailable && (
+                          <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-800">
+                            Signed-in recovery is unavailable right now; use a
+                            recovery password instead.
+                          </p>
+                        )}
+                        <label className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={passwordRecoveryChoice}
+                            disabled={
+                              !passwordRecoveryAvailable || activeCount > 0
+                            }
+                            onChange={(event) => {
+                              setPasswordRecoveryChoice(event.target.checked);
+                              if (!event.target.checked)
+                                setDuressChoice(false);
+                            }}
+                            className="mt-0.5 h-4 w-4"
+                          />
+                          <span className="text-sm text-strong">
+                            Add a recovery password
+                          </span>
+                        </label>
+                        {!passwordRecoveryAvailable && (
+                          <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-800">
+                            Password recovery is unavailable until the recovery
+                            key service is configured.
+                          </p>
+                        )}
+                        {passwordRecoveryChoice && (
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              value={recoveryPassword}
+                              disabled={activeCount > 0}
+                              onChange={(event) =>
+                                setRecoveryPassword(event.target.value)
+                              }
+                              placeholder="Recovery password"
+                              aria-label="Recovery password"
+                              className="drive-field bg-white"
+                            />
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              value={recoveryPasswordConfirm}
+                              disabled={activeCount > 0}
+                              onChange={(event) =>
+                                setRecoveryPasswordConfirm(event.target.value)
+                              }
+                              placeholder="Confirm recovery password"
+                              aria-label="Confirm recovery password"
+                              className="drive-field bg-white"
+                            />
+                          </div>
+                        )}
+                        {passwordRecoveryChoice && (
+                          <label className="flex items-start gap-3 rounded-xl bg-red-50 p-3 text-red-700">
+                            <input
+                              type="checkbox"
+                              checked={duressChoice}
+                              disabled={activeCount > 0}
+                              onChange={(event) =>
+                                setDuressChoice(event.target.checked)
+                              }
+                              className="mt-0.5 h-4 w-4"
+                            />
+                            <span>
+                              <span className="text-sm font-medium">
+                                Add a duress password
+                              </span>
+                              <span className="mt-0.5 block leading-5">
+                                Entering it during password unlock permanently
+                                removes the file, versions, shares, folder
+                                entry, and Trash entry.
+                              </span>
+                            </span>
+                          </label>
+                        )}
+                        {passwordRecoveryChoice && duressChoice && (
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              value={duressPassword}
+                              disabled={activeCount > 0}
+                              onChange={(event) =>
+                                setDuressPassword(event.target.value)
+                              }
+                              placeholder="Duress password"
+                              aria-label="Duress password"
+                              className="drive-field bg-white"
+                            />
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              value={duressPasswordConfirm}
+                              disabled={activeCount > 0}
+                              onChange={(event) =>
+                                setDuressPasswordConfirm(event.target.value)
+                              }
+                              placeholder="Confirm duress password"
+                              aria-label="Confirm duress password"
+                              className="drive-field bg-white"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                  <section
+                    className="border-t border-slate-200 pt-4"
+                    data-ui="upload-schedule"
+                  >
+                    <h3 className="text-sm font-medium text-strong">
+                      Sharing and release
+                    </h3>
+                    <label className="mt-2 flex cursor-pointer items-center gap-3 text-strong">
+                      <input
+                        type="checkbox"
+                        checked={expireAfterDownloadChoice}
+                        onChange={(e) =>
+                          setExpireAfterDownloadChoice(e.target.checked)
+                        }
+                        className="h-4 w-4"
+                      />
+                      Expire after first download
+                    </label>
+                    <label className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-muted">
+                      Release at
+                      <input
+                        type="datetime-local"
+                        value={releaseAtInput}
+                        onChange={(e) => setReleaseAtInput(e.target.value)}
+                        className="drive-field min-w-0 max-w-full !w-auto"
+                      />
+                      {releaseAtInput && (
+                        <button
+                          type="button"
+                          onClick={() => setReleaseAtInput("")}
+                          className="btn-text !min-h-8"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </label>
+                  </section>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2 px-6 pb-6 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      folderInputRef.current?.click();
+                    }}
+                    className="btn-text mr-auto"
+                    data-ui="upload-folder"
+                  >
+                    <FolderUp size={18} /> Upload a folder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOptionsOpen(false)}
+                    className="btn-text"
+                  >
+                    Done
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOptionsOpen(false);
+                      ref.current?.click();
+                    }}
+                    className="btn-filled"
+                  >
+                    <FileUp size={18} /> Choose files
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {batchError && !optionsOpen && (
           <div
             role="alert"
-            className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+            className="snackbar fixed bottom-6 left-1/2 z-[70] flex w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 rounded-lg px-4 py-3 text-sm"
           >
-            <AlertCircle className="mt-0.5 shrink-0" size={14} />
-            <span>{batchError}</span>
+            <AlertCircle className="mt-0.5 shrink-0" size={18} />
+            <span className="min-w-0 flex-1">{batchError}</span>
+            <button
+              type="button"
+              onClick={() => setOptionsOpen(true)}
+              className="snackbar-action shrink-0 font-medium"
+            >
+              Review options
+            </button>
+            <button
+              type="button"
+              onClick={() => setBatchError(null)}
+              aria-label="Dismiss upload error"
+              className="shrink-0 opacity-80 hover:opacity-100"
+            >
+              <X size={18} />
+            </button>
           </div>
         )}
 
@@ -1156,37 +1247,38 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
           <section
             aria-label="Upload queue"
             data-ui="upload-tray"
-            style={{
-              bottom: selectionActive
-                ? "10rem"
-                : "max(1rem, env(safe-area-inset-bottom))",
-            }}
-            className="fixed bottom-4 right-4 z-40 w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-slate-200 bg-white shadow-xl"
+            className="fixed bottom-0 right-0 z-40 w-full overflow-hidden rounded-t-2xl bg-sheet drive-shadow-lg sm:bottom-4 sm:right-6 sm:w-[22.5rem] sm:rounded-2xl"
           >
-            <div className="flex items-center gap-2 p-4">
+            <div className="flex items-center gap-1 bg-slate-100 py-1 pl-4 pr-1">
               <button
                 type="button"
-                className="min-w-0 flex-1 text-left"
+                className="min-w-0 flex-1 py-2 text-left"
                 aria-expanded={trayOpen}
                 onClick={() => setTrayOpen(!trayOpen)}
               >
-                <span className="block text-sm font-semibold text-slate-800">
-                  {doneCount} of {jobList.length} uploaded
+                <span className="block truncate text-sm font-medium text-strong">
+                  {trayTitle}
                 </span>
-                <span role="status" className="text-xs text-slate-600">
-                  {activeCount
-                    ? `${activeCount} in progress`
-                    : "Batch finished"}
-                  {errorCount ? ` · ${errorCount} failed` : ""}
+                <span role="status" className="block text-xs text-muted">
+                  {doneCount} of {jobList.length} uploaded
+                  {activeCount ? ` · ${batchPct}%` : ""}
                   {jobList.some(([, j]) => j.state === "cancelled")
                     ? " · Some cancelled"
                     : ""}
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => setTrayOpen(!trayOpen)}
+                aria-label={trayOpen ? "Collapse upload queue" : "Expand upload queue"}
+                className="icon-round"
+              >
+                {trayOpen ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+              </button>
               {activeCount > 0 ? (
                 <button
                   onClick={() => jobList.forEach(([key]) => cancelJob(key))}
-                  className="rounded-lg px-2 py-2 text-xs text-slate-600"
+                  className="btn-text !min-h-9 !px-3"
                 >
                   Cancel pending
                 </button>
@@ -1197,9 +1289,9 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
                     jobsRef.current = {};
                     setJobs({});
                   }}
-                  className="p-2"
+                  className="icon-round"
                 >
-                  <X size={18} />
+                  <X size={20} />
                 </button>
               )}
             </div>
@@ -1209,28 +1301,28 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={batchPct}
-              className="mx-4 h-1.5 overflow-hidden rounded-full bg-slate-100"
+              className="h-1 overflow-hidden bg-slate-200"
             >
               <div
-                className="h-full bg-drift-500"
+                className="h-full bg-primary transition-[width]"
                 style={{ width: `${batchPct}%` }}
               />
             </div>
             {trayOpen && (
-              <div className="max-h-[45vh] overflow-y-auto p-4">
+              <div className="max-h-[45vh] overflow-y-auto py-1">
                 {jobList.map(([key, job]) => (
                   <div
                     key={key}
-                    className="flex items-center gap-2 border-b border-slate-100 py-3 last:border-0"
+                    className="flex items-center gap-3 px-4 py-2.5"
                   >
                     <div className="min-w-0 flex-1">
                       <p
-                        className="truncate text-sm font-medium text-slate-800"
+                        className="truncate text-sm text-strong"
                         title={job.name}
                       >
                         {job.name}
                       </p>
-                      <p className="mt-1 text-xs text-slate-600">
+                      <p className="mt-0.5 text-xs text-muted">
                         {formatBytes(job.size)} ·{" "}
                         {job.state === "uploading"
                           ? `Uploading ${job.pct}%`
@@ -1247,28 +1339,32 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
                                     : "Queued"}
                       </p>
                       {job.error && (
-                        <p className="mt-1 break-words text-xs text-red-600">
+                        <p className="mt-1 break-words text-xs text-red-700">
                           {job.error}
                         </p>
                       )}
                     </div>
                     {job.state === "done" && (
-                      <CheckCircle2 size={18} className="text-emerald-600" />
+                      <CheckCircle2
+                        size={20}
+                        className="shrink-0 text-emerald-600"
+                        aria-hidden="true"
+                      />
                     )}
                     {isActive(job.state) && job.state !== "finishing" && (
                       <button
                         aria-label={`Cancel ${job.name}`}
                         onClick={() => cancelJob(key)}
-                        className="p-2 text-slate-500"
+                        className="icon-round"
                       >
-                        <X size={16} />
+                        <X size={18} />
                       </button>
                     )}
                     {job.state === "error" && (
                       <button
                         disabled={batchRunning}
                         onClick={() => retryJob(key)}
-                        className="rounded-lg px-2 py-2 text-xs text-drift-700 disabled:opacity-50"
+                        className="btn-text !min-h-9 !px-3"
                       >
                         Retry
                       </button>
@@ -1276,23 +1372,24 @@ const UploadZone = forwardRef<UploadZoneHandle, UploadZoneProps>(
                   </div>
                 ))}
                 {errorCount > 0 && (
-                  <button
-                    disabled={batchRunning}
-                    onClick={retryAllFailed}
-                    className="mt-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium disabled:opacity-50"
-                  >
-                    Retry failed uploads
-                  </button>
+                  <div className="px-4 pb-2 pt-1">
+                    <button
+                      disabled={batchRunning}
+                      onClick={retryAllFailed}
+                      className="btn-outlined !min-h-9"
+                    >
+                      Retry failed uploads
+                    </button>
+                  </div>
                 )}
                 {activeCount > 0 && (
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className="px-4 pb-3 pt-1 text-xs text-muted">
                     Keep this tab open until uploads finish. Files already
                     finishing cannot be cancelled.
                   </p>
                 )}
               </div>
             )}
-            {!trayOpen && <div className="h-4" />}
           </section>
         )}
       </div>

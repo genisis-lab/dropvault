@@ -1,5 +1,7 @@
 # Neubrutalism design QA
 
+> Historical record: these themes were retired by the Google Drive-style redesign. The app now has one look in light, dark and device-default appearances; saved Neubrutalism, Pressroom and Quiet choices open in light, and Sunset opens in dark.
+
 ## Compared state
 
 - Reference: `docs/design-qa/neubrutalism-reference.png`

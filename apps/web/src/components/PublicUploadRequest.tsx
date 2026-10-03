@@ -108,7 +108,7 @@ export default function PublicUploadRequest() {
 
   return (
     <div
-      className="grid min-h-screen place-items-center bg-slate-50 px-4 py-10"
+      className="grid min-h-screen place-items-center bg-app px-4 py-10"
       style={
         q.data?.brand?.accentColor
           ? {
@@ -117,7 +117,7 @@ export default function PublicUploadRequest() {
           : undefined
       }
     >
-      <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 drive-shadow-lg">
+      <div className="w-full max-w-xl rounded-[28px] bg-sheet p-6 drive-shadow sm:p-8">
         <div className="flex items-center gap-3">
           {q.data?.brand?.logoUrl ? (
             <img
@@ -127,7 +127,7 @@ export default function PublicUploadRequest() {
             />
           ) : (
             <span
-              className="grid h-11 w-11 place-items-center rounded-2xl bg-drift-500/10 text-drift-600"
+              className="grid h-11 w-11 place-items-center rounded-full bg-drift-50 text-drift-700"
               style={
                 q.data?.brand?.accentColor
                   ? { color: q.data.brand.accentColor }
@@ -138,7 +138,7 @@ export default function PublicUploadRequest() {
             </span>
           )}
           <div>
-            <h1 className="text-xl font-bold text-slate-800">
+            <h1 className="text-2xl font-normal text-strong">
               {q.data?.title ?? "Upload files"}
             </h1>
             <p className="text-sm text-slate-500">
@@ -181,7 +181,7 @@ export default function PublicUploadRequest() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-drift-400"
+                className="drive-field"
               />
             )}
             {q.data.requireEmail && (
@@ -191,14 +191,14 @@ export default function PublicUploadRequest() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Your email"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-drift-400"
+                className="drive-field"
               />
             )}
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name optional"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-drift-400"
+              className="drive-field"
             />
             <label className="block rounded-xl border border-dashed border-slate-300 px-3 py-6 text-center text-sm text-slate-500 transition hover:border-drift-300 hover:bg-drift-50/30">
               <input
@@ -296,7 +296,7 @@ export default function PublicUploadRequest() {
               disabled={
                 !canSubmit || mixedLargeUpload || q.data.status === "closed"
               }
-              className="w-full rounded-xl bg-drift-500 px-4 py-3 text-sm font-semibold text-white hover:bg-drift-600 disabled:opacity-50"
+              className="btn-filled w-full disabled:opacity-50"
             >
               {mut.isPending
                 ? uploadProgress == null

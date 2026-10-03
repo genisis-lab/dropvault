@@ -52,6 +52,7 @@ import {
   savePortalBrand,
   type NotificationPreferences,
 } from "../lib/account";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.96, y: 10 };
@@ -110,6 +111,7 @@ export default function AccountSecurityDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  useEscapeToClose(open, onClose);
   const qc = useQueryClient();
   const { success, error } = useToast();
   const sessionQ = useSession();
@@ -380,22 +382,22 @@ export default function AccountSecurityDialog({
           animate="show"
           exit="hidden"
           onClick={onClose}
-          className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[70] grid place-items-center bg-black/40 p-4"
         >
           <motion.div
             initial={panelInitial}
             animate={panelAnimate}
             exit={panelExit}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white drive-shadow-lg"
+            className="w-full max-w-lg overflow-hidden rounded-[28px] bg-menu drive-shadow-lg"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+            <div className="flex items-center justify-between gap-3 px-6 pb-2 pt-5">
               <div className="flex items-center gap-2.5">
-                <div className="grid h-9 w-9 place-items-center rounded-lg bg-drift-50 text-drift-600">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
                   <ShieldCheck size={18} />
                 </div>
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800">
+                  <h2 className="text-xl font-normal text-strong">
                     Account security
                   </h2>
                   <p className="text-xs text-slate-400">
@@ -405,12 +407,12 @@ export default function AccountSecurityDialog({
               </div>
               <button
                 onClick={onClose}
-                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="icon-round"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
               <div className="rounded-xl border border-slate-200 p-3">
                 <div className="flex items-start gap-3">
                   <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
@@ -444,7 +446,7 @@ export default function AccountSecurityDialog({
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Current password (leave blank for Google-only accounts)"
-                      className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                      className="mt-3 drive-field"
                     />
                     <p className="mt-1 text-[11px] text-slate-400">
                       Password is required for email/password accounts.
@@ -454,7 +456,7 @@ export default function AccountSecurityDialog({
                       <button
                         onClick={start2FA}
                         disabled={twoFactorBusy}
-                        className="mt-2 rounded-lg bg-drift-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-drift-600 disabled:opacity-50"
+                        className="mt-2 rounded-full bg-drift-600 px-3 py-1.5 text-xs font-medium text-white btn-primary disabled:opacity-50"
                       >
                         Set up 2FA
                       </button>
@@ -483,7 +485,7 @@ export default function AccountSecurityDialog({
                           onChange={(e) => setTotpCode(e.target.value)}
                           placeholder="6-digit code"
                           inputMode="numeric"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="drive-field"
                         />
                         <button
                           onClick={verify2FA}
@@ -549,7 +551,7 @@ export default function AccountSecurityDialog({
                     {keepQ.data?.canKeepFilesForever ? (
                       <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
                         Enabled for your account. You’ll see a “Keep these
-                        uploads forever” option in the upload box.
+                        uploads forever” option in Upload options.
                       </p>
                     ) : keepQ.data?.pendingRequest ? (
                       <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
@@ -562,14 +564,14 @@ export default function AccountSecurityDialog({
                           onChange={(e) => setForeverReason(e.target.value)}
                           placeholder="Why do you need files to stay forever?"
                           rows={2}
-                          className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="w-full resize-none rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                         />
                         <button
                           onClick={() =>
                             keepRequestMut.mutate(foreverReason || undefined)
                           }
                           disabled={keepRequestMut.isPending}
-                          className="rounded-lg bg-drift-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-drift-600 disabled:opacity-50"
+                          className="rounded-full bg-drift-600 px-3 py-1.5 text-xs font-medium text-white btn-primary disabled:opacity-50"
                         >
                           Request permission
                         </button>
@@ -580,7 +582,7 @@ export default function AccountSecurityDialog({
                 {isAdmin && (
                   <div className="mt-3 rounded-xl bg-slate-50 p-3">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <p className="text-sm font-medium text-strong">
                         Pending keep-forever approvals
                       </p>
                       <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500">
@@ -660,7 +662,7 @@ export default function AccountSecurityDialog({
                             value={portalName}
                             onChange={(e) => setPortalName(e.target.value)}
                             placeholder="Portal name"
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                            className="rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                           />
                           <input
                             value={portalSlug}
@@ -668,14 +670,14 @@ export default function AccountSecurityDialog({
                               setPortalSlug(e.target.value.toLowerCase())
                             }
                             placeholder="portal-slug"
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                            className="rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                           />
                         </div>
                         <input
                           value={portalLogo}
                           onChange={(e) => setPortalLogo(e.target.value)}
                           placeholder="HTTPS logo URL (optional)"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="drive-field"
                         />
                         <div className="flex items-center gap-2">
                           <input
@@ -688,7 +690,7 @@ export default function AccountSecurityDialog({
                             value={portalWelcome}
                             onChange={(e) => setPortalWelcome(e.target.value)}
                             placeholder="Welcome message"
-                            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                            className="min-w-0 flex-1 rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                           />
                         </div>
                         <button
@@ -717,14 +719,14 @@ export default function AccountSecurityDialog({
                           value={brand}
                           onChange={(e) => setBrand(e.target.value)}
                           placeholder="Brand / business name optional"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="drive-field"
                         />
                         <textarea
                           value={reason}
                           onChange={(e) => setReason(e.target.value)}
                           placeholder="Why do you need a branded portal?"
                           rows={2}
-                          className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="w-full resize-none rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                         />
                         <button
                           onClick={() =>
@@ -734,7 +736,7 @@ export default function AccountSecurityDialog({
                             })
                           }
                           disabled={portalMut.isPending}
-                          className="rounded-lg bg-drift-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-drift-600 disabled:opacity-50"
+                          className="rounded-full bg-drift-600 px-3 py-1.5 text-xs font-medium text-white btn-primary disabled:opacity-50"
                         >
                           Request access
                         </button>
@@ -745,7 +747,7 @@ export default function AccountSecurityDialog({
                 {isAdmin && (
                   <div className="mt-3 rounded-xl bg-slate-50 p-3">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <p className="text-sm font-medium text-strong">
                         Pending portal approvals
                       </p>
                       <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500">
@@ -893,7 +895,7 @@ export default function AccountSecurityDialog({
                           setPrefs({ ...prefs, webhookUrl: e.target.value })
                         }
                         placeholder="https://example.com/dropvault-events"
-                        className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                        className="mt-2 drive-field"
                       />
                     )}
                     <button

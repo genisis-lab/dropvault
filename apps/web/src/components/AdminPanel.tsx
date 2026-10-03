@@ -24,6 +24,7 @@ import {
   Trash2,
   Users,
   X,
+  ArrowLeft,
 } from "lucide-react";
 import {
   adminAccess,
@@ -92,11 +93,17 @@ import {
 } from "../lib/adminRoute";
 import { activityLabel, browserSummary } from "../lib/activityFormat";
 import { announceWorkspaceDefaultTheme } from "../lib/theme";
-import { isTheme, THEME_OPTIONS, type Theme } from "../lib/theme-config";
+import {
+  isTheme,
+  resolveTheme,
+  THEME_OPTIONS,
+  type Theme,
+} from "../lib/theme-config";
 import {
   changedPolicySettings,
   policySettingChanges,
 } from "../lib/policy-settings";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 type Tab =
   | "operations"
@@ -228,6 +235,7 @@ export default function AdminPanel({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  useEscapeToClose(open, onClose);
   const { success: toastOk, error: toastErr } = useToast();
   const [confirmUi, confirm] = useConfirm();
   const [typedConfirmUi, ownerConfirmation] = useTypedConfirmation();
@@ -281,6 +289,7 @@ export default function AdminPanel({
     settings: AdminSettings;
     version?: PolicyVersion;
   } | null>(null);
+  useEscapeToClose(!!policyReview, () => setPolicyReview(null));
   const [impactReady, setImpactReady] = useState(false);
   const [requestDraft, setRequestDraft] = useState({
     title: "Upload files",
@@ -862,51 +871,46 @@ export default function AdminPanel({
   const s = statsQ.data;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 backdrop-blur-sm sm:p-8">
-      <button
-        className="fixed inset-0 -z-10 cursor-default"
-        aria-label="Close"
-        onClick={onClose}
-      />
-      <div
-        className="mt-6 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white drive-shadow-lg"
-        data-ui="admin-console"
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-drift-500/10 text-drift-600">
-              <Shield size={18} />
-            </span>
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">
-                Admin console
-              </h2>
-              <p className="text-xs text-slate-500">
-                Current role: <b>{role ? cap(role) : "Loading"}</b>
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={refresh}
-              disabled={busy}
-              aria-label="Refresh"
-              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={busy ? "animate-spin" : ""} />
-            </button>
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            >
-              <X size={18} />
-            </button>
-          </div>
+    <div
+      className="fixed inset-0 z-[70] flex flex-col bg-app"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Admin console"
+    >
+      <header className="flex h-16 shrink-0 items-center gap-2 px-2 sm:px-4">
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          title="Back to Drive"
+          className="icon-round"
+        >
+          <ArrowLeft size={22} />
+        </button>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#0b57d0] text-white">
+          <Shield size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-[22px] font-normal leading-7 text-strong">
+            Admin console
+          </h2>
+          <p className="text-xs text-muted">
+            Current role: <b>{role ? cap(role) : "Loading"}</b>
+          </p>
         </div>
+        <button
+          onClick={refresh}
+          disabled={busy}
+          aria-label="Refresh"
+          title="Refresh"
+          className="icon-round disabled:opacity-60"
+        >
+          <RefreshCw size={20} className={busy ? "animate-spin" : ""} />
+        </button>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <nav
           aria-label="Admin sections"
-          className="flex flex-wrap gap-x-5 gap-y-1 border-b border-slate-200 px-4 pt-1"
+          className="flex shrink-0 gap-1 overflow-x-auto px-3 pb-2 md:w-64 md:flex-col md:gap-0 md:overflow-y-auto md:pb-4 md:pl-3 md:pr-4"
           data-ui="admin-tabs"
         >
           {TAB_GROUPS.map((group) => {
@@ -919,9 +923,9 @@ export default function AdminPanel({
                 key={group.label}
                 role="group"
                 aria-label={group.label}
-                className="flex items-center gap-0.5"
+                className="flex shrink-0 items-center gap-1 md:mb-2 md:flex-col md:items-stretch md:gap-0.5"
               >
-                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                <span className="hidden px-4 pb-1 pt-3 text-xs font-medium text-muted md:block">
                   {group.label}
                 </span>
                 {groupTabs.map((id) => (
@@ -929,23 +933,18 @@ export default function AdminPanel({
                     key={id}
                     onClick={() => setTab(id)}
                     aria-current={tab === id ? "page" : undefined}
-                    className={
-                      "shrink-0 border-b-2 px-2.5 py-2.5 text-sm font-medium transition " +
-                      (tab === id
-                        ? "border-drift-500 text-drift-700"
-                        : "border-transparent text-slate-500 hover:text-slate-700")
-                    }
+                    className="nav-pill shrink-0 !w-auto whitespace-nowrap md:!w-full"
                   >
-                    {TAB_LABELS[id]}
+                    <span className="truncate">{TAB_LABELS[id]}</span>
                     {id === "flags" && s && s.flagCount > 0 && (
-                      <span className="ml-1.5 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                         {s.flagCount}
                       </span>
                     )}
                     {id === "users" &&
                       s &&
                       (s.pendingApprovalCount ?? 0) > 0 && (
-                        <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                           {s.pendingApprovalCount}
                         </span>
                       )}
@@ -955,6 +954,10 @@ export default function AdminPanel({
             );
           })}
         </nav>
+        <main
+          className="content-sheet min-h-0 flex-1 overflow-y-auto md:mb-4 md:mr-4 max-md:rounded-none"
+          data-ui="admin-console"
+        >
         <div className="p-6">
           {tab === "operations" && <AdminOperations isOwner={isOwner} />}
           {tab === "overview" &&
@@ -1001,7 +1004,7 @@ export default function AdminPanel({
                 <Alerts alerts={s.alerts ?? []} onSelect={openAlert} />
                 <div>
                   <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    <h3 className="text-sm font-medium text-strong">
                       Trend (last 30 days)
                     </h3>
                     <div className="flex gap-1">
@@ -1183,7 +1186,7 @@ export default function AdminPanel({
                           value={ipDraft}
                           onChange={(e) => setIpDraft(e.target.value)}
                           placeholder="IP to ban"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="drive-field"
                         />
                       </div>
                       <div className="min-w-[12rem] flex-[1.4]">
@@ -1191,7 +1194,7 @@ export default function AdminPanel({
                           value={ipNote}
                           onChange={(e) => setIpNote(e.target.value)}
                           placeholder="Optional note"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="drive-field"
                         />
                       </div>
                       <button
@@ -1206,7 +1209,7 @@ export default function AdminPanel({
                       </button>
                     </div>
                     <div className="mt-3">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <h4 className="text-sm font-medium text-strong">
                         Current bans
                       </h4>
                       {(ipBansQ.data ?? []).length === 0 ? (
@@ -1251,7 +1254,7 @@ export default function AdminPanel({
                 )}
                 <div className="mt-3 overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="text-xs uppercase tracking-wide text-slate-400">
+                    <thead className="text-xs font-medium text-muted">
                       <tr>
                         <th className="px-3 py-2">
                           <input
@@ -1518,7 +1521,7 @@ export default function AdminPanel({
                 )}
                 <div className="mt-3 overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="text-xs uppercase tracking-wide text-slate-400">
+                    <thead className="text-xs font-medium text-muted">
                       <tr>
                         <th className="px-3 py-2">
                           <input
@@ -1900,7 +1903,7 @@ export default function AdminPanel({
                     value={newAdmin}
                     onChange={(e) => setNewAdmin(e.target.value)}
                     placeholder="new.admin@example.com"
-                    className="min-w-[14rem] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                    className="min-w-[14rem] flex-1 rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                   />
                   <select
                     value={newRole}
@@ -1918,7 +1921,7 @@ export default function AdminPanel({
                     disabled={
                       !isOwner || addAdminMut.isPending || !newAdmin.trim()
                     }
-                    className="flex items-center gap-1.5 rounded-lg bg-drift-500 px-3 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-full bg-drift-600 px-3 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50"
                   >
                     <Plus size={15} /> Add role
                   </button>
@@ -1988,11 +1991,7 @@ export default function AdminPanel({
                   className="space-y-6 disabled:opacity-75"
                 >
                   <DefaultThemeEditor
-                    value={
-                      isTheme(settings.defaultTheme)
-                        ? settings.defaultTheme
-                        : "neubrutalism"
-                    }
+                    value={resolveTheme(settings.defaultTheme)}
                     onChange={(defaultTheme) =>
                       setPolicyDraft({ ...settings, defaultTheme })
                     }
@@ -2096,7 +2095,7 @@ export default function AdminPanel({
                       })
                     }
                     disabled={!isOwner || saveSettingsMut.isPending}
-                    className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
+                    className="rounded-full bg-drift-600 px-4 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50"
                   >
                     Save workspace settings
                   </button>
@@ -2316,7 +2315,7 @@ export default function AdminPanel({
                 <button
                   onClick={() => createReqMut.mutate()}
                   disabled={createReqMut.isPending}
-                  className="mt-3 rounded-lg bg-drift-500 px-4 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
+                  className="mt-3 rounded-full bg-drift-600 px-4 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50"
                 >
                   Create request
                 </button>
@@ -2509,10 +2508,11 @@ export default function AdminPanel({
               />
             ))}
         </div>
+        </main>
       </div>
       {policyReview && (
-        <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-[28px] bg-menu p-6 drive-shadow-lg">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-800">
@@ -2609,7 +2609,7 @@ export default function AdminPanel({
                     confirmation: confirmation ?? undefined,
                   });
                 }}
-                className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-semibold text-white hover:bg-drift-600 disabled:opacity-50"
+                className="rounded-full bg-drift-600 px-4 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50"
               >
                 {policyReview.mode === "rollback"
                   ? "Confirm restore"
@@ -2795,7 +2795,7 @@ function UserDetail({
             </div>
           </div>
           <div className="rounded-xl border border-slate-200 p-4">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <h4 className="text-sm font-medium text-strong">
               Storage quota
             </h4>
             <p className="mt-1 text-sm text-slate-600">
@@ -2812,7 +2812,7 @@ function UserDetail({
                 value={gb}
                 onChange={(e) => setGb(e.target.value)}
                 placeholder="Limit in GB"
-                className="w-32 rounded-lg border border-slate-200 px-3 py-1.5 text-sm outline-none focus:border-drift-400"
+                className="w-32 rounded border border-outline bg-transparent px-3 py-1.5 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
               />
               <button
                 onClick={() => {
@@ -2820,7 +2820,7 @@ function UserDetail({
                   if (!isNaN(n) && n >= 0) quotaMut.mutate(Math.round(n * GIB));
                 }}
                 disabled={quotaMut.isPending || !gb}
-                className="rounded-lg bg-drift-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
+                className="rounded-full bg-drift-600 px-3 py-1.5 text-sm font-medium text-white btn-primary disabled:opacity-50"
               >
                 Set quota
               </button>
@@ -2836,7 +2836,7 @@ function UserDetail({
           <div className="rounded-xl border border-slate-200 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <h4 className="flex items-center gap-1.5 text-sm font-medium text-strong">
                   <Infinity size={13} /> Keep files forever
                 </h4>
                 <p className="mt-1 text-sm text-slate-600">
@@ -2877,7 +2877,7 @@ function UserDetail({
                   <button
                     onClick={() => keepForeverMut.mutate(true)}
                     disabled={keepForeverMut.isPending}
-                    className="rounded-lg bg-drift-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
+                    className="rounded-full bg-drift-600 px-3 py-1.5 text-sm font-medium text-white btn-primary disabled:opacity-50"
                   >
                     Grant permission
                   </button>
@@ -2887,7 +2887,7 @@ function UserDetail({
           </div>
           {isOwner && (
             <div className="rounded-xl border border-slate-200 p-4">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <h4 className="text-sm font-medium text-strong">
                 Recent IPs
               </h4>
               {(q.data.user.recentIps ?? []).length === 0 ? (
@@ -3095,7 +3095,7 @@ function Alerts({
   const active = alerts.filter((a) => a.count > 0);
   return (
     <div>
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <h3 className="mb-3 text-sm font-medium text-strong">
         Alerts
       </h3>
       {active.length === 0 ? (
@@ -3153,7 +3153,7 @@ function ActivityTable({
   const visible = rows.slice(0, shown);
   return (
     <div>
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <h3 className="mb-2 text-sm font-medium text-strong">
         {title}{" "}
         <span className="font-normal normal-case tracking-normal text-slate-400">
           ({rows.length})
@@ -3221,19 +3221,20 @@ function DefaultThemeEditor({
       data-ui="default-theme-editor"
     >
       <div className="flex items-start gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-drift-500/10 text-drift-600">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
           <Palette size={18} />
         </span>
         <div>
-          <h3 className="font-semibold text-slate-800">Default theme</h3>
+          <h3 className="font-semibold text-slate-800">Default appearance</h3>
           <p className="mt-0.5 text-xs leading-5 text-slate-500">
             New visitors and anyone following the workspace default will use
-            this appearance. Personal theme choices stay unchanged.
+            this appearance, including public share pages. Personal choices
+            stay unchanged.
           </p>
         </div>
       </div>
       <div
-        className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"
+        className="mt-4 grid gap-2 sm:grid-cols-3"
         role="radiogroup"
         aria-label="Workspace default theme"
       >
@@ -3289,7 +3290,7 @@ function PolicyInput({
       <input
         value={settings[k] ?? ""}
         onChange={(e) => setSettings({ ...settings, [k]: e.target.value })}
-        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-drift-400"
+        className="mt-1 w-full rounded border border-outline bg-transparent px-3 py-2 outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
       />
       {hint && (
         <span className="mt-1 block text-xs text-slate-400">{hint}</span>
@@ -3331,7 +3332,7 @@ function GbPolicyInput({
             [k]: v === "" ? "" : String(Math.round(Number(v) * GIB)),
           });
         }}
-        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-drift-400"
+        className="mt-1 w-full rounded border border-outline bg-transparent px-3 py-2 outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
       />
       {hint && (
         <span className="mt-1 block text-xs text-slate-400">{hint}</span>
@@ -3435,7 +3436,7 @@ function NotificationsForm({
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-2xl border border-drift-200 bg-drift-50 p-5">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-drift-500/10 text-drift-600">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
           <Bell size={18} />
         </span>
         <div>
@@ -3494,7 +3495,7 @@ function NotificationsForm({
         <button
           onClick={onSave}
           disabled={!isOwner || saving}
-          className="rounded-lg bg-drift-500 px-4 py-2 text-sm font-medium text-white hover:bg-drift-600 disabled:opacity-50"
+          className="rounded-full bg-drift-600 px-4 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50"
         >
           Save notifications
         </button>
@@ -3532,7 +3533,7 @@ function MiniBars({
   const max = Math.max(1, ...rows.map((r) => r.value));
   return (
     <div>
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <h3 className="mb-3 text-sm font-medium text-strong">
         {title}
       </h3>
       {rows.length === 0 ? (
@@ -3581,7 +3582,7 @@ function SortTh({
             dir: active && sort.dir === "asc" ? "desc" : "asc",
           })
         }
-        className="flex items-center gap-1 uppercase tracking-wide hover:text-slate-600"
+        className="flex items-center gap-1 hover:text-slate-600"
       >
         {label}
         {active && (

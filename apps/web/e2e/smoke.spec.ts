@@ -59,7 +59,7 @@ test("responsive controls and upload scheduling fit their layouts", async ({
         keepFilesForever: true,
         canKeepFilesForever: true,
       }
-    else if (path === "/api/theme") body = { theme: "neubrutalism" }
+    else if (path === "/api/theme") body = { theme: "light" }
     else if (path === "/api/files/capabilities")
       body = { e2eEncryption: true }
     else if (path === "/api/files") body = { files: [], nextCursor: null }
@@ -107,63 +107,76 @@ test("responsive controls and upload scheduling fit their layouts", async ({
 
   await page.goto("/")
   await expect(page.getByRole("heading", { name: "Welcome back, Mobile" })).toBeVisible()
-  await expect(page.getByText("1 item", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Upload options" }).click()
   await expect(
-    page.getByRole("checkbox", { name: /Keep these uploads forever/ }),
-  ).toBeChecked()
+    page.locator('[data-ui="folder-row"]').filter({ hasText: "Projects" }),
+  ).toContainText("1 item")
 
-  await page.getByRole("button", { name: "More actions" }).click()
-  const mobileMenu = page.locator('[data-ui="mobile-actions"]')
-  await expect(mobileMenu).toBeVisible()
+  // Upload options live behind the New menu, in a dialog.
+  await page.getByRole("button", { name: "New", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Upload settings…" }).click()
+  const uploadOptions = page.getByRole("dialog", { name: "Upload options" })
+  await expect(uploadOptions).toBeVisible()
+  await expect(
+    uploadOptions.getByRole("checkbox", { name: /Keep these uploads forever/ }),
+  ).toBeChecked()
+  const uploadSchedule = uploadOptions.locator('[data-ui="upload-schedule"]')
+  await expect(uploadSchedule.getByText("Release at")).toBeVisible()
+  await expect(
+    uploadSchedule.locator('input[type="datetime-local"]'),
+  ).toBeVisible()
   await expect
     .poll(() =>
-      mobileMenu.evaluate(
-        (element) =>
-          element.scrollWidth <= element.clientWidth &&
-          element.getBoundingClientRect().right <= window.innerWidth,
+      uploadOptions.evaluate(
+        (element) => element.getBoundingClientRect().right <= window.innerWidth,
       ),
     )
     .toBe(true)
+  await uploadOptions.getByRole("button", { name: "Done" }).click()
+  await expect(uploadOptions).toBeHidden()
 
-  await page.getByRole("button", { name: /Classic/ }).click()
+  // On phones the account menu also carries the display settings.
+  await page.getByRole("button", { name: "Account menu", exact: true }).click()
+  const accountMenu = page.locator('[data-ui="account-menu"]')
+  await expect(accountMenu).toBeVisible()
+  await expect
+    .poll(() =>
+      accountMenu.evaluate((element) => {
+        const panel = element.closest('[role="menu"]') as HTMLElement
+        return (
+          panel.scrollWidth <= panel.clientWidth &&
+          panel.getBoundingClientRect().right <= window.innerWidth
+        )
+      }),
+    )
+    .toBe(true)
+
+  await accountMenu.getByRole("menuitemradio", { name: /Classic/ }).click()
   await expect(page.locator('[data-ui="dashboard-shell"]')).toHaveAttribute(
     "data-layout",
     "classic",
   )
   await expect(page.getByRole("heading", { name: "My Drive" })).toBeVisible()
 
-  await page.getByRole("button", { name: "More actions" }).click()
-  await page.getByLabel("Mobile theme").selectOption("dark")
+  await page.getByRole("button", { name: "Account menu", exact: true }).click()
+  await accountMenu.getByRole("menuitemradio", { name: /^Dark/ }).click()
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark")
+  await expect(page.locator("html")).toHaveClass(/dark/)
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true)
 
-  await page.getByRole("button", { name: "More actions" }).click()
-  await page.getByLabel("Mobile theme").selectOption("neubrutalism")
+  await page.getByRole("button", { name: "Account menu", exact: true }).click()
+  await accountMenu
+    .getByRole("menuitemradio", { name: /Use workspace default/ })
+    .click()
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light")
+  await expect(page.locator("html")).not.toHaveClass(/dark/)
+
   await page.setViewportSize({ width: 1440, height: 900 })
-  const uploadTarget = page.locator('[data-ui="upload-target"]')
-  const uploadSchedule = page.locator('[data-ui="upload-schedule"]')
-  await expect(uploadSchedule.getByText("Release at")).toBeVisible()
-  await expect(uploadSchedule.locator('input[type="datetime-local"]')).toBeVisible()
-  await expect
-    .poll(() =>
-      Promise.all([
-        uploadTarget.boundingBox(),
-        uploadSchedule.boundingBox(),
-      ]).then(([target, schedule]) =>
-        Boolean(
-          target &&
-            schedule &&
-            schedule.x >= target.x &&
-            schedule.x + schedule.width <= target.x + target.width,
-        ),
-      ),
-    )
-    .toBe(true)
+  await expect(page.locator('[data-ui="new-upload"]')).toBeVisible()
+  await expect(page.getByRole("button", { name: "Settings" })).toBeVisible()
 
   const favicon = page.locator('link[rel="icon"]')
   await expect(favicon).toHaveAttribute("href", "/favicon.svg")

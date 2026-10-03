@@ -64,7 +64,7 @@ async function setup(page: Page, role: string | null = null) {
         adminRole: role,
         canKeepFilesForever: !!role,
       };
-    else if (path === "/api/theme") body = { theme: "neubrutalism" };
+    else if (path === "/api/theme") body = { theme: "light" };
     else if (path === "/api/files") body = { files, nextCursor: null };
     else if (path === "/api/folders") body = { folders: [] };
     else if (path === "/api/files/capabilities")
@@ -86,7 +86,7 @@ async function setup(page: Page, role: string | null = null) {
           defaultQuotaBytes: "1073741824",
           adminMaxQuotaBytes: "10737418240",
           trashRetentionDays: "30",
-          defaultTheme: "neubrutalism",
+          defaultTheme: "light",
           signupMode: "open",
         },
         revision: null,
@@ -169,9 +169,12 @@ async function setup(page: Page, role: string | null = null) {
     });
   });
   await page.goto("/");
-  await expect(
-    page.getByRole("button", { name: "Choose files", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "New", exact: true })).toBeVisible();
+  await expect(page.getByText("Permanent.jpg").first()).toBeVisible();
+}
+async function openUploadOptions(page: Page) {
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Upload settings…" }).click();
 }
 test("gallery navigates to video and unsupported originals have a clear fallback", async ({
   page,
@@ -225,9 +228,7 @@ test("queue remains while browsing Trash and cancellation stops the transfer", a
     .getByRole("button", { name: "Trash", exact: true })
     .first()
     .click();
-  await expect(
-    page.getByRole("button", { name: "Choose files", exact: true }),
-  ).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Trash" })).toBeVisible();
   await expect(tray).toBeVisible();
   await tray.getByRole("button", { name: "Cancel notes.txt" }).click();
   await expect(tray).toContainText("Cancelled");
@@ -238,13 +239,15 @@ test("mobile options are collapsed and the expiring view excludes permanent file
   await page.setViewportSize({ width: 390, height: 844 });
   await setup(page);
   await expect(page.locator("#upload-options")).toBeHidden();
-  await page.getByRole("button", { name: "Upload options" }).click();
+  await openUploadOptions(page);
   await expect(page.locator("#upload-options")).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  await page.getByRole("button", { name: "Done" }).click();
+  await expect(page.locator("#upload-options")).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page
     .getByRole("button", { name: "Expiring soon", exact: true })
@@ -257,7 +260,7 @@ test("owner can inspect operations and cleanup requires review", async ({
 }) => {
   await setup(page, "owner");
   await page
-    .getByRole("button", { name: "Admin", exact: true })
+    .getByRole("button", { name: "Admin console", exact: true })
     .first()
     .click();
   await page.getByRole("button", { name: "Operations", exact: true }).click();
@@ -282,7 +285,7 @@ test("owner can inspect operations and cleanup requires review", async ({
 test("policy review displays affected files before save", async ({ page }) => {
   await setup(page, "owner");
   await page
-    .getByRole("button", { name: "Admin", exact: true })
+    .getByRole("button", { name: "Admin console", exact: true })
     .first()
     .click();
   await page.getByRole("button", { name: "Policies", exact: true }).click();
@@ -295,29 +298,44 @@ test("policy review displays affected files before save", async ({ page }) => {
   ).toBeVisible();
 });
 
-for (const theme of [
-  "neubrutalism",
-  "quiet",
-  "pressroom",
-  "light",
-  "dark",
-  "sunset",
-]) {
-  test(`upload controls fit ${theme} on mobile`, async ({ page }) => {
+for (const theme of ["light", "dark", "system"]) {
+  test(`upload controls fit the ${theme} appearance on mobile`, async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ colorScheme: "dark" });
     await page.addInitScript(
       (theme) => localStorage.setItem("dropvault-theme", theme),
       theme,
     );
     await setup(page);
-    await page.getByRole("button", { name: "Upload options" }).click();
+    await expect(page.locator("html")).toHaveClass(
+      theme === "light" ? /^(?!.*\bdark\b)/ : /\bdark\b/,
+    );
+    await openUploadOptions(page);
     await expect(page.locator("#upload-options")).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await page.getByRole("button", { name: "Upload options" }).click();
     await page.screenshot({ path: `test-results/upload-${theme}-mobile.png` });
+    await page.getByRole("button", { name: "Done" }).click();
+    await expect(page.locator("#upload-options")).toBeHidden();
   });
 }
+
+test("retired themes fall back to the new appearances", async ({ page }) => {
+  // Seed only the first load so the reload below keeps the second value.
+  await page.addInitScript(() => {
+    if (localStorage.getItem("dropvault-theme") == null)
+      localStorage.setItem("dropvault-theme", "sunset");
+  });
+  await setup(page);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).toHaveClass(/\bdark\b/);
+  await page.evaluate(() => localStorage.setItem("dropvault-theme", "neubrutalism"));
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
+});
