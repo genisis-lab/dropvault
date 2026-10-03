@@ -271,6 +271,7 @@ export default function Topbar({
           </button>
           <input
             ref={inputRef}
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
@@ -283,7 +284,7 @@ export default function Topbar({
             title="Search (press /)"
             aria-label="Search in Dropvault"
             aria-keyshortcuts="/"
-            className="h-full min-w-0 flex-1 bg-transparent px-2 text-base text-strong outline-none placeholder:text-muted focus-visible:!outline-none"
+            className="h-full min-w-0 flex-1 bg-transparent px-2 text-base text-strong outline-none placeholder:text-muted focus-visible:!outline-none [&::-webkit-search-cancel-button]:hidden"
             data-ui="search"
           />
           {search && (
