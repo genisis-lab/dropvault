@@ -24,7 +24,8 @@ export const DRAG_MIME = "application/x-dropvault";
 
 const cardInitial = { opacity: 0, y: 12, scale: 0.97 };
 const cardAnimate = { opacity: 1, y: 0, scale: 1 };
-const cardExit = { opacity: 0, scale: 0.92 };
+// Rows leave quickly so filtering and search results settle at once.
+const cardExit = { opacity: 0, scale: 0.92, transition: { duration: 0.1 } };
 const menuInitial = { opacity: 0, scale: 0.95, y: -4 };
 const menuAnimate = { opacity: 1, scale: 1, y: 0 };
 
@@ -261,7 +262,7 @@ export default function FolderCard({
         }
         data-ui="folder-row"
       >
-        <span className="hidden sm:block" />
+        <span data-ui="row-lead" />
         <button
           onClick={() => onOpen(folder.id)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -273,12 +274,18 @@ export default function FolderCard({
             <span className="block truncate text-sm font-medium text-strong">
               {folder.name}
             </span>
-            <span className="block text-xs text-muted sm:hidden">
+            <span
+              className="block text-xs text-muted"
+              data-ui="folder-inline-meta"
+            >
               {dropActive ? "Drop to move here" : meta}
             </span>
           </span>
         </button>
-        <span className="hidden min-w-0 items-center gap-1.5 text-sm text-muted sm:flex">
+        <span
+          className="min-w-0 items-center gap-1.5 text-sm text-muted"
+          data-ui="folder-col"
+        >
           {folder.shareToken ? (
             <>
               <Users size={15} className="shrink-0" /> Shared
@@ -290,8 +297,10 @@ export default function FolderCard({
             <span className="text-faint">Only you</span>
           )}
         </span>
-        <span className="hidden text-sm text-faint sm:block">—</span>
-        <span className="hidden text-sm text-muted sm:block">
+        <span className="text-sm text-faint" data-ui="folder-col">
+          —
+        </span>
+        <span className="text-sm text-muted" data-ui="folder-col">
           {dropActive ? "Drop here" : meta}
         </span>
         <div className="flex justify-end">{actionsButton}</div>

@@ -54,7 +54,11 @@ function needsTwoFactor(res: any) {
 
 export default function AuthScreen() {
   const [mode, setMode] = useState<"in" | "up" | "forgot" | "reset">(() =>
-    window.location.pathname.startsWith("/reset-password") ? "reset" : "in",
+    window.location.pathname.startsWith("/reset-password")
+      ? "reset"
+      : window.location.pathname.startsWith("/signup")
+        ? "up"
+        : "in",
   );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -545,9 +549,12 @@ export default function AuthScreen() {
           {mode === "in" ? "New here?" : "Already have an account?"}{" "}
           <button
             onClick={() => {
-              setMode(mode === "in" ? "up" : "in");
+              const next = mode === "in" ? "up" : "in";
+              setMode(next);
               setErrorMsg(null);
               setStatusMsg(null);
+              // /signup is a link people can send to friends they invite.
+              window.history.replaceState({}, "", next === "up" ? "/signup" : "/");
             }}
             className="font-medium text-primary hover:underline"
           >

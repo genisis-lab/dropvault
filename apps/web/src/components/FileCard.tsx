@@ -70,7 +70,8 @@ type Props = {
 };
 const cardInitial = { opacity: 0, y: 12, scale: 0.97 };
 const cardAnimate = { opacity: 1, y: 0, scale: 1 };
-const cardExit = { opacity: 0, scale: 0.92 };
+// Rows leave quickly so filtering and search results settle at once.
+const cardExit = { opacity: 0, scale: 0.92, transition: { duration: 0.1 } };
 const menuInitial = { opacity: 0, y: 8 };
 const menuAnimate = { opacity: 1, y: 0 };
 const menuTransition = { duration: 0.18, ease: "easeOut" };
@@ -732,6 +733,26 @@ export default function FileCard({
       {chipIcon} {chipLabel}
     </span>
   );
+  // The filename is where people click first, so it opens the file just like
+  // the icon does. Trashed files have nothing to open.
+  const openable = clickable && !file.deletedAt;
+  function fileName(className: string) {
+    return openable ? (
+      <button
+        type="button"
+        onClick={(e) => preview(e)}
+        title={file.filename}
+        data-file-open
+        className={"min-w-0 text-left hover:underline " + className}
+      >
+        {file.filename}
+      </button>
+    ) : (
+      <span className={className} title={file.filename}>
+        {file.filename}
+      </span>
+    );
+  }
   if (view === "list")
     return (
       <motion.div
@@ -755,20 +776,22 @@ export default function FileCard({
         {onToggleSelect ? (
           <div
             className={
-              "w-6 justify-center " +
-              (showCheckbox ? "flex" : "hidden sm:flex")
+              "w-6 justify-center " + (showCheckbox ? "flex" : "hidden")
             }
+            data-ui="row-select"
           >
             {checkbox}
           </div>
         ) : (
-          <span className="hidden sm:block" />
+          <span data-ui="row-lead" />
         )}
         <div className="flex min-w-0 flex-1 items-center gap-3" data-ui="file-name">
           <button
             type="button"
             onClick={(e) => preview(e)}
             aria-label={`Open details for ${file.filename}`}
+            // The filename button does the same thing; one tab stop is enough.
+            tabIndex={openable ? -1 : undefined}
             className={
               "grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded " +
               tone +
@@ -795,15 +818,7 @@ export default function FileCard({
           </button>
           <div className="min-w-0 flex-1">
             <p className="flex min-w-0 items-center gap-1.5 text-sm text-strong">
-              <span
-                onClick={(e) => preview(e)}
-                className={
-                  "truncate font-medium" + (clickable ? " cursor-pointer" : "")
-                }
-                title={file.filename}
-              >
-                {file.filename}
-              </span>
+              {fileName("truncate font-medium")}
               {file.favorite && (
                 <Star
                   size={13}
@@ -815,19 +830,27 @@ export default function FileCard({
                 <Lock
                   size={13}
                   aria-label="Encrypted"
-                  className="shrink-0 text-muted sm:hidden"
+                  className="shrink-0 text-muted"
+                  data-ui="file-inline-badge"
                 />
               )}
               {file.shareToken && (
                 <Users
                   size={13}
                   aria-label="Shared"
-                  className="shrink-0 text-muted sm:hidden"
+                  className="shrink-0 text-muted"
+                  data-ui="file-inline-badge"
                 />
               )}
             </p>
             {tagLine}
-            <p className="flex items-center gap-1 text-xs text-muted sm:hidden">
+            {/* Narrow lists (phones, and tablets beside the sidebar) show
+                size and expiry here instead of in columns; index.css
+                switches between the two by the list's own width. */}
+            <p
+              className="flex items-center gap-1 text-xs text-muted"
+              data-ui="file-inline-meta"
+            >
               {formatBytes(file.sizeBytes)}
               <span aria-hidden="true">·</span>
               <span
@@ -839,18 +862,15 @@ export default function FileCard({
             </p>
           </div>
         </div>
-        <div className="hidden items-center gap-1.5 sm:flex" data-ui="file-security">
+        <div className="items-center gap-1.5" data-ui="file-security">
           {encryptedPill}
           {sharedPill}
           {!encryptedPill && !sharedPill && (
             <span className="text-sm text-faint">Only you</span>
           )}
         </div>
-        <span className="hidden sm:inline-flex">{expiryText}</span>
-        <span
-          className="hidden text-sm text-muted sm:block"
-          data-ui="file-size"
-        >
+        <span data-ui="file-expiry-col">{expiryText}</span>
+        <span className="text-sm text-muted" data-ui="file-size">
           {formatBytes(file.sizeBytes)}
         </span>
         <div
@@ -885,12 +905,7 @@ export default function FileCard({
     >
       <div className="flex h-12 items-center gap-2 pl-3 pr-0.5">
         <Icon size={18} className={"shrink-0 " + tone} />
-        <p
-          className="min-w-0 flex-1 truncate text-sm font-medium text-strong"
-          title={file.filename}
-        >
-          {file.filename}
-        </p>
+        {fileName("min-w-0 flex-1 truncate text-sm font-medium text-strong")}
         <div className="relative" data-file-actions>
           {moreButton(7)}
           {menu}
