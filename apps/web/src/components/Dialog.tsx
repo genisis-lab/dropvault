@@ -39,28 +39,30 @@ function Shell({
       animate="show"
       exit="hidden"
       onClick={onClose}
-      className="fixed inset-0 z-[97] grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[97] grid place-items-center bg-black/40 p-4"
     >
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         initial={panelInitial}
         animate={panelAnimate}
         exit={panelExit}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white drive-shadow-lg"
+        className="w-full max-w-md overflow-hidden rounded-[28px] bg-menu drive-shadow-lg"
+        data-ui="dialog"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <div className="flex min-w-0 items-center gap-2.5">
-            {icon}
-            <h2 className="truncate text-sm font-semibold text-slate-800">
-              {title}
-            </h2>
-          </div>
+        <div className="flex items-start gap-3 px-6 pb-2 pt-6">
+          {icon && <div className="shrink-0">{icon}</div>}
+          <h2 className="min-w-0 flex-1 text-2xl font-normal leading-8 text-strong">
+            {title}
+          </h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="icon-round -mr-2 -mt-1"
           >
-            <X size={16} />
+            <X size={20} />
           </button>
         </div>
         {children}
@@ -88,9 +90,7 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const btn = danger
-    ? "bg-red-600 hover:bg-red-500"
-    : "bg-gradient-to-r from-drift-600 via-glow-500 to-blush-500 hover:brightness-105";
+  const btn = danger ? "btn-filled btn-danger" : "btn-filled";
   return (
     <AnimatePresence>
       {open && (
@@ -98,27 +98,24 @@ export function ConfirmDialog({
           title={title}
           icon={
             danger ? (
-              <div className="grid h-9 w-9 place-items-center rounded-lg bg-red-50 text-red-600">
-                <AlertTriangle size={18} />
+              <div className="grid h-8 w-8 place-items-center text-red-700">
+                <AlertTriangle size={24} />
               </div>
             ) : undefined
           }
           onClose={onCancel}
         >
-          <div className="px-5 py-4 text-sm text-slate-600">{message}</div>
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3.5">
+          <div className="px-6 py-2 text-sm leading-6 text-muted">{message}</div>
+          <div className="flex items-center justify-end gap-2 px-6 pb-6 pt-4">
             <button
               onClick={onCancel}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              className="btn-text"
             >
               {cancelLabel}
             </button>
             <button
               onClick={onConfirm}
-              className={
-                "rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-md transition " +
-                btn
-              }
+              className={btn}
             >
               {confirmLabel}
             </button>
@@ -163,7 +160,7 @@ export function PromptDialog({
     <AnimatePresence>
       {open && (
         <Shell title={title} onClose={onCancel}>
-          <div className="px-5 py-4">
+          <div className="px-6 py-3">
             {label && (
               <span className="mb-1 block text-xs font-medium text-slate-600">
                 {label}
@@ -178,19 +175,19 @@ export function PromptDialog({
                 if (e.key === "Escape") onCancel();
               }}
               placeholder={placeholder}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+              className="drive-field"
             />
           </div>
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3.5">
+          <div className="flex items-center justify-end gap-2 px-6 pb-6 pt-4">
             <button
               onClick={onCancel}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              className="btn-text"
             >
               Cancel
             </button>
             <button
               onClick={submit}
-              className="rounded-lg bg-gradient-to-r from-drift-600 via-glow-500 to-blush-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:brightness-105"
+              className="btn-filled"
             >
               {confirmLabel}
             </button>
@@ -240,13 +237,13 @@ export function TagsDialog({
         <Shell
           title={title}
           icon={
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-drift-50 text-drift-600">
-              <TagsIcon size={18} />
+            <div className="grid h-8 w-8 place-items-center text-primary">
+              <TagsIcon size={24} />
             </div>
           }
           onClose={onCancel}
         >
-          <div className="px-5 py-4">
+          <div className="px-6 py-3">
             <span className="mb-1 block text-xs font-medium text-slate-600">
               Tags <span className="text-slate-400">(comma-separated)</span>
             </span>
@@ -259,14 +256,14 @@ export function TagsDialog({
                 if (e.key === "Escape") onCancel();
               }}
               placeholder="work, invoices, 2026"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+              className="drive-field"
             />
             {preview.length > 0 && (
               <div className="mt-2.5 flex flex-wrap gap-1.5">
                 {preview.map((t) => (
                   <span
                     key={t}
-                    className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+                    className="rounded-lg border border-slate-300 px-2 py-0.5 text-xs font-medium text-muted"
                   >
                     #{t}
                   </span>
@@ -274,16 +271,16 @@ export function TagsDialog({
               </div>
             )}
           </div>
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3.5">
+          <div className="flex items-center justify-end gap-2 px-6 pb-6 pt-4">
             <button
               onClick={onCancel}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              className="btn-text"
             >
               Cancel
             </button>
             <button
               onClick={submit}
-              className="rounded-lg bg-gradient-to-r from-drift-600 via-glow-500 to-blush-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:brightness-105"
+              className="btn-filled"
             >
               Save tags
             </button>
@@ -331,13 +328,13 @@ export function LimitRequestDialog({
         <Shell
           title="Request a larger upload limit"
           icon={
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-drift-50 text-drift-600">
-              <HardDrive size={18} />
+            <div className="grid h-8 w-8 place-items-center text-primary">
+              <HardDrive size={24} />
             </div>
           }
           onClose={onCancel}
         >
-          <div className="space-y-4 px-5 py-4">
+          <div className="space-y-4 px-6 py-3">
             {currentGb && (
               <p className="text-xs text-slate-500">
                 Your current limit is{" "}
@@ -356,7 +353,7 @@ export function LimitRequestDialog({
                 min={1}
                 value={gb}
                 onChange={(e) => setGb(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                className="drive-field"
               />
             </label>
             <label className="block">
@@ -368,21 +365,21 @@ export function LimitRequestDialog({
                 onChange={(e) => setReason(e.target.value)}
                 rows={3}
                 placeholder="Uploading larger files for work"
-                className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                className="drive-field resize-none"
               />
             </label>
           </div>
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3.5">
+          <div className="flex items-center justify-end gap-2 px-6 pb-6 pt-4">
             <button
               onClick={onCancel}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              className="btn-text"
             >
               Cancel
             </button>
             <button
               onClick={submit}
               disabled={!valid}
-              className="rounded-lg bg-gradient-to-r from-drift-600 via-glow-500 to-blush-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:brightness-105 disabled:opacity-50"
+              className="btn-filled"
             >
               Send request
             </button>
@@ -460,8 +457,8 @@ function TypedConfirmDialog({
         <Shell
           title="Owner confirmation required"
           icon={
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-red-50 text-red-600">
-              <ShieldAlert size={18} />
+            <div className="grid h-8 w-8 place-items-center text-red-700">
+              <ShieldAlert size={24} />
             </div>
           }
           onClose={onCancel}
@@ -472,7 +469,7 @@ function TypedConfirmDialog({
               if (matches) onConfirm(value);
             }}
           >
-            <label className="block px-5 py-4 text-sm text-slate-600">
+            <label className="block px-6 py-3 text-sm text-muted">
               Type{" "}
               <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-800">
                 {phrase}
@@ -485,21 +482,21 @@ function TypedConfirmDialog({
                 autoComplete="off"
                 spellCheck={false}
                 aria-label={`Type ${phrase} to continue`}
-                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm outline-none transition focus:border-red-400"
+                className="drive-field mt-2 font-mono"
               />
             </label>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3.5">
+            <div className="flex items-center justify-end gap-2 px-6 pb-6 pt-4">
               <button
                 type="button"
                 onClick={onCancel}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                className="btn-text"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!matches}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-red-500 disabled:opacity-50"
+                className="btn-filled btn-danger"
               >
                 Confirm
               </button>

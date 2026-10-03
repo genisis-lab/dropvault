@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const backdropInit = { opacity: 0 };
 const backdropShow = { opacity: 1 };
@@ -22,6 +23,7 @@ export default function NameDialog({
   onConfirm: (name: string) => void;
 }) {
   const [value, setValue] = useState(initial ?? "");
+  useEscapeToClose(open, onCancel);
   useEffect(() => {
     if (open) setValue(initial ?? "");
   }, [open, initial]);
@@ -40,7 +42,7 @@ export default function NameDialog({
           animate={backdropShow}
           exit={backdropInit}
           onClick={onCancel}
-          className="fixed inset-0 z-50 grid place-items-center bg-slate-900/30 px-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4"
         >
           <motion.form
             initial={panelInit}
@@ -48,27 +50,28 @@ export default function NameDialog({
             exit={panelInit}
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
-            className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 drive-shadow-lg"
+            className="w-full max-w-sm rounded-[28px] bg-menu p-6 drive-shadow-lg"
           >
-            <h2 className="text-base font-semibold text-slate-800">{title}</h2>
+            <h2 className="text-2xl font-normal text-strong">{title}</h2>
             <input
               autoFocus
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder="Folder name"
-              className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-drift-400 focus:bg-white"
+              placeholder={/file/i.test(title) ? "File name" : "Folder name"}
+              aria-label={/file/i.test(title) ? "File name" : "Folder name"}
+              className="drive-field mt-4"
             />
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-6 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={onCancel}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+                className="btn-text"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-gradient-to-r from-drift-500 to-blush-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:shadow"
+                className="btn-filled"
               >
                 {confirmLabel}
               </button>

@@ -24,23 +24,23 @@ export default function SuspendedScreen({
   }
 
   return (
-    <div className="grid min-h-screen place-items-center px-4">
+    <div className="grid min-h-screen place-items-center bg-app px-4 py-8">
       <motion.div
         initial={cardInitial}
         animate={cardAnimate}
-        className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center drive-shadow-lg"
+        className="w-full max-w-md rounded-[28px] bg-sheet p-8 text-center sm:p-10"
       >
         <Logo size={28} />
         <div
-          className={`mx-auto mt-6 grid h-16 w-16 place-items-center rounded-2xl ${
+          className={`mx-auto mt-6 grid h-16 w-16 place-items-center rounded-full ${
             awaitingApproval
-              ? "bg-indigo-50 text-indigo-500"
-              : "bg-red-50 text-red-500"
+              ? "bg-drift-50 text-drift-700"
+              : "bg-red-50 text-red-700"
           }`}
         >
           {awaitingApproval ? <Clock3 size={30} /> : <ShieldAlert size={30} />}
         </div>
-        <h1 className="mt-5 text-2xl font-bold text-slate-800">
+        <h1 className="mt-5 text-2xl font-normal text-strong">
           {awaitingApproval
             ? "Your account is awaiting approval"
             : "Your account is suspended"}
@@ -65,7 +65,7 @@ export default function SuspendedScreen({
           </p>
         )}
         {reason && !awaitingApproval && (
-          <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-left text-sm text-red-700">
+          <div className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-left text-sm text-red-700">
             <span className="font-semibold">Reason:</span> {reason}
           </div>
         )}
@@ -76,7 +76,7 @@ export default function SuspendedScreen({
         )}
         <button
           onClick={leave}
-          className="mt-6 w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95"
+          className="btn-filled mt-6 w-full"
         >
           Sign out
         </button>

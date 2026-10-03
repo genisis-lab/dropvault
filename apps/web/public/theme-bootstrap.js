@@ -1,24 +1,31 @@
 // Apply a personal choice or the last-known workspace default before the app
 // loads. Keeping this in a same-origin file allows a strict no-inline-script
-// Content Security Policy.
+// Content Security Policy. Mirrors resolveTheme in src/lib/theme-config.ts.
 (function () {
   try {
-    var allowed = [
-      "neubrutalism",
-      "pressroom",
-      "quiet",
-      "light",
-      "dark",
-      "sunset",
-    ];
+    var legacy = {
+      sunset: "dark",
+      neubrutalism: "light",
+      pressroom: "light",
+      quiet: "light",
+    };
+    var normalize = function (value) {
+      if (value === "light" || value === "dark" || value === "system")
+        return value;
+      return legacy[value] || null;
+    };
     var theme =
-      localStorage.getItem("dropvault-theme") ||
-      localStorage.getItem("dropvault-workspace-theme") ||
-      "neubrutalism";
-    if (allowed.indexOf(theme) === -1) theme = "neubrutalism";
-    if (theme !== "light") document.documentElement.classList.add(theme);
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme =
-      theme === "dark" || theme === "sunset" ? "dark" : "light";
+      normalize(localStorage.getItem("dropvault-theme")) ||
+      normalize(localStorage.getItem("dropvault-workspace-theme")) ||
+      "system";
+    var dark =
+      theme === "dark" ||
+      (theme === "system" &&
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches);
+    var root = document.documentElement;
+    if (dark) root.classList.add("dark");
+    root.dataset.theme = theme;
+    root.style.colorScheme = dark ? "dark" : "light";
   } catch (_error) {}
 })();

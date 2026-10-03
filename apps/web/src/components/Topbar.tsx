@@ -1,55 +1,126 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  LayoutGrid,
-  List,
+  Check,
   LogOut,
   Menu,
-  MoreHorizontal,
-  Plus,
+  Monitor,
+  Moon,
+  RotateCcw,
   Search,
+  Settings,
   ShieldCheck,
-  Sparkles,
+  Sun,
   Users,
+  X,
+  type LucideIcon,
 } from "lucide-react";
 import {
   THEME_OPTIONS,
-  ThemeToggle,
+  themeLabel,
   useTheme,
   type Theme,
 } from "../lib/theme";
-import { LayoutToggle, useLayout, type Layout } from "../lib/layout";
+import { LAYOUT_OPTIONS, useLayout } from "../lib/layout";
+import { focusFirstMenuItem, useEscapeToClose } from "../lib/useEscapeToClose";
 import NotificationsBell from "./NotificationsBell";
+import Logo from "./Logo";
 import type { NotificationDestination } from "../lib/notificationTarget";
 
 export type ViewMode = "grid" | "list";
 
-export default function Topbar({
-  search,
-  setSearch,
-  view,
-  setView,
-  userEmail,
-  onNew,
-  onSignOut,
-  onOpenMenu,
-  onOpenSecurity,
-  onOpenTeams,
-  onNotificationNavigate,
+const THEME_ICONS: Record<Theme, LucideIcon> = {
+  light: Sun,
+  dark: Moon,
+  system: Monitor,
+};
+const menuInitial = { opacity: 0, scale: 0.97, y: -4 };
+const menuAnimate = { opacity: 1, scale: 1, y: 0 };
+
+// A small popover anchored under its trigger, closed by Escape or an outside
+// click. Used for the settings and account menus.
+function Popover({
+  label,
+  trigger,
+  triggerClassName,
+  triggerTitle,
+  width = "w-80",
+  children,
 }: {
-  search: string;
-  setSearch: (s: string) => void;
-  view: ViewMode;
-  setView: (v: ViewMode) => void;
-  userEmail?: string;
-  onNew: () => void;
-  onSignOut: () => void;
-  onOpenMenu?: () => void;
-  onOpenSecurity?: () => void;
-  onOpenTeams?: () => void;
-  onNotificationNavigate?: (destination: NotificationDestination) => void;
+  label: string;
+  trigger: ReactNode;
+  triggerClassName: string;
+  triggerTitle?: string;
+  width?: string;
+  children: (close: () => void) => ReactNode;
 }) {
-  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
-  const { layout, setLayout } = useLayout();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const focusOnOpenRef = useRef(false);
+  const close = () => setOpen(false);
+  useEscapeToClose(open, close, triggerRef);
+  useEffect(() => {
+    if (!open || !focusOnOpenRef.current) return;
+    focusOnOpenRef.current = false;
+    focusFirstMenuItem(panelRef.current);
+  }, [open]);
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={(e) => {
+          focusOnOpenRef.current = !open && e.detail === 0;
+          setOpen((v) => !v);
+        }}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={triggerTitle ?? label}
+        className={triggerClassName}
+      >
+        {trigger}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <button
+              className="fixed inset-0 z-40 cursor-default"
+              aria-label={`Close ${label.toLowerCase()}`}
+              tabIndex={-1}
+              onClick={close}
+            />
+            <motion.div
+              ref={panelRef}
+              role="menu"
+              aria-label={label}
+              initial={menuInitial}
+              animate={menuAnimate}
+              exit={menuInitial}
+              className={
+                "menu-surface absolute right-0 top-12 z-50 max-h-[calc(100vh-5rem)] max-w-[calc(100vw-1rem)] overflow-y-auto " +
+                width
+              }
+            >
+              {children(close)}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function MenuHeading({ children }: { children: ReactNode }) {
+  return (
+    <p className="px-4 pb-1 pt-2 text-xs font-medium text-muted">{children}</p>
+  );
+}
+
+// Appearance and start-page choices. Shared by the settings menu and the
+// account menu on phones, where the settings button is hidden.
+function DisplaySettings({ close }: { close: () => void }) {
   const {
     theme,
     workspaceDefault,
@@ -57,245 +128,256 @@ export default function Topbar({
     setTheme,
     useWorkspaceDefault,
   } = useTheme();
-  const initial = (userEmail?.[0] ?? "U").toUpperCase();
-  const currentTheme = THEME_OPTIONS.find((option) => option.id === theme);
-  const workspaceTheme = THEME_OPTIONS.find(
-    (option) => option.id === workspaceDefault,
+  const { layout, setLayout } = useLayout();
+  return (
+    <div data-ui="display-settings">
+      <MenuHeading>Appearance</MenuHeading>
+      {THEME_OPTIONS.map((option) => {
+        const Icon = THEME_ICONS[option.id];
+        const active = !followsWorkspaceDefault && theme === option.id;
+        return (
+          <button
+            key={option.id}
+            role="menuitemradio"
+            aria-checked={active}
+            className="menu-item"
+            onClick={() => {
+              setTheme(option.id);
+              close();
+            }}
+          >
+            <Icon size={18} />
+            <span className="min-w-0 flex-1">
+              <span className="block">{option.label}</span>
+              <span className="block text-xs text-faint">
+                {option.description}
+              </span>
+            </span>
+            {active && <Check size={18} className="!text-primary" />}
+          </button>
+        );
+      })}
+      <button
+        role="menuitemradio"
+        aria-checked={followsWorkspaceDefault}
+        className="menu-item"
+        onClick={() => {
+          useWorkspaceDefault();
+          close();
+        }}
+      >
+        <RotateCcw size={18} />
+        <span className="min-w-0 flex-1">
+          <span className="block">Use workspace default</span>
+          <span className="block text-xs text-faint">
+            Currently {themeLabel(workspaceDefault)}
+          </span>
+        </span>
+        {followsWorkspaceDefault && (
+          <Check size={18} className="!text-primary" />
+        )}
+      </button>
+      <div className="menu-divider" />
+      <MenuHeading>Start page</MenuHeading>
+      {LAYOUT_OPTIONS.map((option) => {
+        const Icon = option.icon;
+        const active = layout === option.id;
+        return (
+          <button
+            key={option.id}
+            role="menuitemradio"
+            aria-checked={active}
+            className="menu-item"
+            onClick={() => {
+              setLayout(option.id);
+              close();
+            }}
+          >
+            <Icon size={18} />
+            <span className="min-w-0 flex-1">
+              <span className="block">{option.label}</span>
+              <span className="block text-xs text-faint">{option.desc}</span>
+            </span>
+            {active && <Check size={18} className="!text-primary" />}
+          </button>
+        );
+      })}
+    </div>
   );
-  function chooseMobileLayout(next: Layout) {
-    setLayout(next);
-    setMobileActionsOpen(false);
-  }
-  function chooseMobileTheme(value: string) {
-    if (value === "workspace") useWorkspaceDefault();
-    else setTheme(value as Theme);
-    setMobileActionsOpen(false);
-  }
-  const viewButton = (mode: ViewMode, label: string) => (
-    <button
-      onClick={() => setView(mode)}
-      aria-label={label}
-      className={
-        "grid h-8 w-8 place-items-center rounded-full transition " +
-        (view === mode
-          ? "bg-drift-500/10 text-drift-700"
-          : "text-slate-400 hover:text-slate-600")
-      }
-    >
-      {mode === "grid" ? <LayoutGrid size={16} /> : <List size={16} />}
-    </button>
-  );
+}
+
+export default function Topbar({
+  search,
+  setSearch,
+  userName,
+  userEmail,
+  onSignOut,
+  onOpenMenu,
+  onOpenSecurity,
+  onOpenTeams,
+  onGoHome,
+  onNotificationNavigate,
+}: {
+  search: string;
+  setSearch: (s: string) => void;
+  userName?: string;
+  userEmail?: string;
+  onSignOut: () => void;
+  onOpenMenu?: () => void;
+  onOpenSecurity?: () => void;
+  onOpenTeams?: () => void;
+  onGoHome?: () => void;
+  onNotificationNavigate?: (destination: NotificationDestination) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const initial = (userName?.[0] ?? userEmail?.[0] ?? "U").toUpperCase();
   return (
     <header
-      className="sticky top-0 z-20 border-b border-slate-200 bg-white/70 backdrop-blur-xl"
+      className="sticky top-0 z-30 bg-app"
       data-ui="topbar"
     >
-      <div className="relative flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
-        <button
-          onClick={onOpenMenu}
-          aria-label="Open menu"
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 md:hidden"
+      <div className="flex h-16 items-center gap-1 px-2 sm:gap-2 sm:pr-4 md:pl-0">
+        <div className="hidden w-64 shrink-0 items-center pl-5 md:flex">
+          <button
+            type="button"
+            onClick={onGoHome}
+            aria-label="Go to My Drive"
+            title="Go to My Drive"
+            className="rounded-full pr-2"
+            data-ui="home-link"
+          >
+            <Logo />
+          </button>
+        </div>
+        <div
+          className="group/search relative flex h-12 min-w-0 max-w-[45rem] flex-1 items-center rounded-full bg-field transition focus-within:bg-sheet focus-within:[box-shadow:var(--shadow-sm)]"
+          role="search"
         >
-          <Menu size={22} />
-        </button>
-        <button
-          onClick={onNew}
-          aria-label="New upload"
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-r from-drift-500 to-blush-500 text-white shadow-md shadow-glow-500/25 md:hidden"
-        >
-          <Plus size={20} />
-        </button>
-        <div className="relative min-w-0 flex-1">
-          <Search
-            size={18}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-          />
+          <button
+            onClick={onOpenMenu}
+            aria-label="Open menu"
+            className="icon-round ml-1 md:hidden"
+          >
+            <Menu size={20} />
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.focus()}
+            aria-label="Search"
+            tabIndex={-1}
+            className="icon-round ml-1 hidden md:grid"
+          >
+            <Search size={20} />
+          </button>
           <input
+            ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && search) {
+                e.stopPropagation();
+                setSearch("");
+              }
+            }}
             placeholder="Search in Dropvault"
             title="Search (press /)"
+            aria-label="Search in Dropvault"
             aria-keyshortcuts="/"
-            className="w-full rounded-full bg-slate-100 py-2.5 pl-11 pr-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-drift-300"
+            className="h-full min-w-0 flex-1 bg-transparent px-2 text-base text-strong outline-none placeholder:text-muted focus-visible:!outline-none"
             data-ui="search"
           />
-        </div>
-        <div className="hidden items-center rounded-full border border-slate-200 bg-white p-0.5 sm:flex">
-          {viewButton("grid", "Grid view")}
-          {viewButton("list", "List view")}
-        </div>
-        <div className="hidden items-center gap-2 sm:flex">
-          <LayoutToggle />
-          <ThemeToggle />
-        </div>
-        <NotificationsBell onNavigate={onNotificationNavigate} />
-        <div className="relative sm:hidden">
-          <button
-            onClick={() => setMobileActionsOpen((v) => !v)}
-            aria-label="More actions"
-            className="grid h-9 w-9 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-          >
-            <MoreHorizontal size={20} />
-          </button>
-          {mobileActionsOpen && (
-            <>
-              <button
-                className="fixed inset-0 z-40 cursor-default"
-                aria-label="Close actions"
-                onClick={() => setMobileActionsOpen(false)}
-              />
-              <div
-                className="absolute right-0 top-11 z-50 max-h-[calc(100vh-5rem)] w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-200/60"
-                data-ui="mobile-actions"
-              >
-                <div className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Quick actions
-                </div>
-                <div className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    View
-                  </span>
-                  <div className="flex items-center rounded-full border border-slate-200 bg-white p-0.5">
-                    {viewButton("grid", "Grid view")}
-                    {viewButton("list", "List view")}
-                  </div>
-                </div>
-                <div
-                  className="mb-2 rounded-xl bg-slate-50 px-3 py-2.5"
-                  data-ui="mobile-display-controls"
-                >
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Workspace
-                  </p>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => chooseMobileLayout("calm")}
-                      aria-pressed={layout === "calm"}
-                      className={
-                        "min-w-0 rounded-lg border px-2.5 py-2 text-left transition " +
-                        (layout === "calm"
-                          ? "border-drift-300 bg-white text-drift-700"
-                          : "border-slate-200 bg-white text-slate-600")
-                      }
-                    >
-                      <span className="flex items-center gap-1.5 text-sm font-semibold">
-                        <Sparkles size={14} /> Calm
-                      </span>
-                      <span className="mt-0.5 block whitespace-normal text-[11px] leading-4 text-slate-400">
-                        Spacious home
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => chooseMobileLayout("classic")}
-                      aria-pressed={layout === "classic"}
-                      className={
-                        "min-w-0 rounded-lg border px-2.5 py-2 text-left transition " +
-                        (layout === "classic"
-                          ? "border-drift-300 bg-white text-drift-700"
-                          : "border-slate-200 bg-white text-slate-600")
-                      }
-                    >
-                      <span className="flex items-center gap-1.5 text-sm font-semibold">
-                        <LayoutGrid size={14} /> Classic
-                      </span>
-                      <span className="mt-0.5 block whitespace-normal text-[11px] leading-4 text-slate-400">
-                        Original layout
-                      </span>
-                    </button>
-                  </div>
-                  <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Theme
-                    <select
-                      value={
-                        followsWorkspaceDefault ? "workspace" : theme
-                      }
-                      onChange={(event) =>
-                        chooseMobileTheme(event.target.value)
-                      }
-                      aria-label="Mobile theme"
-                      className="mt-1.5 block w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-drift-400"
-                    >
-                      <option value="workspace">Workspace default</option>
-                      {THEME_OPTIONS.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <p className="mt-1.5 whitespace-normal break-words text-[11px] leading-4 text-slate-400">
-                    {followsWorkspaceDefault
-                      ? `Workspace default: ${workspaceTheme?.label ?? "Default"}`
-                      : `${currentTheme?.label ?? "Theme"}: ${currentTheme?.description ?? ""}`}
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setMobileActionsOpen(false);
-                    onOpenTeams?.();
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
-                >
-                  <Users size={17} className="text-slate-400" />
-                  Teams & shared spaces
-                </button>
-                <button
-                  onClick={() => {
-                    setMobileActionsOpen(false);
-                    onOpenSecurity?.();
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
-                >
-                  <ShieldCheck size={17} className="text-slate-400" />
-                  Account security
-                </button>
-                <button
-                  onClick={() => {
-                    setMobileActionsOpen(false);
-                    onSignOut();
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-red-500 transition hover:bg-red-50"
-                >
-                  <LogOut size={17} />
-                  Sign out
-                </button>
-              </div>
-            </>
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                inputRef.current?.focus();
+              }}
+              aria-label="Clear search"
+              className="icon-round mr-1"
+            >
+              <X size={20} />
+            </button>
           )}
         </div>
-        <button
-          onClick={onOpenTeams}
-          title="Teams"
-          aria-label="Teams"
-          className="hidden rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 sm:block"
-        >
-          <Users size={18} />
-        </button>
-        <button
-          onClick={onOpenSecurity}
-          title="Account security"
-          aria-label="Account security"
-          className="hidden rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 sm:block"
-        >
-          <ShieldCheck size={18} />
-        </button>
-        <div className="flex items-center gap-2">
-          <div
-            title={userEmail}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-drift-500 to-blush-500 text-sm font-semibold text-white"
-          >
-            {initial}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
+          <NotificationsBell onNavigate={onNotificationNavigate} />
+          <div className="hidden sm:block">
+            <Popover
+              label="Settings"
+              trigger={<Settings size={20} />}
+              triggerClassName="icon-round"
+            >
+              {(close) => <DisplaySettings close={close} />}
+            </Popover>
           </div>
-          <button
-            onClick={onSignOut}
-            title="Sign out"
-            aria-label="Sign out"
-            className="hidden rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 sm:block"
+          <Popover
+            label="Account menu"
+            triggerTitle={userEmail ? `Account: ${userEmail}` : "Account"}
+            trigger={
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-[#0b57d0] text-sm font-medium text-white">
+                {initial}
+              </span>
+            }
+            triggerClassName="grid h-10 w-10 place-items-center rounded-full hover:bg-[rgb(var(--c-strong)/0.08)]"
+            width="w-80"
           >
-            <LogOut size={18} />
-          </button>
+            {(close) => (
+              <div data-ui="account-menu">
+                <div className="flex flex-col items-center px-4 pb-3 pt-2 text-center">
+                  <span className="grid h-14 w-14 place-items-center rounded-full bg-[#0b57d0] text-2xl font-medium text-white">
+                    {initial}
+                  </span>
+                  {userName && (
+                    <p className="mt-2 text-base font-medium text-strong">
+                      Hi, {userName.split(" ")[0]}!
+                    </p>
+                  )}
+                  {userEmail && (
+                    <p className="max-w-full truncate text-sm text-muted">
+                      {userEmail}
+                    </p>
+                  )}
+                </div>
+                <div className="menu-divider" />
+                <button
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    onOpenTeams?.();
+                  }}
+                >
+                  <Users size={18} /> Teams & shared spaces
+                </button>
+                <button
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    onOpenSecurity?.();
+                  }}
+                >
+                  <ShieldCheck size={18} /> Account security
+                </button>
+                <div className="sm:hidden">
+                  <div className="menu-divider" />
+                  <DisplaySettings close={close} />
+                </div>
+                <div className="menu-divider" />
+                <button
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    onSignOut();
+                  }}
+                >
+                  <LogOut size={18} /> Sign out
+                </button>
+              </div>
+            )}
+          </Popover>
         </div>
       </div>
     </header>

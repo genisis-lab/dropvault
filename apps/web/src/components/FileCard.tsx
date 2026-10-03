@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Archive,
+  Users,
   CalendarClock,
   Check,
   ChevronLeft,
@@ -10,17 +10,13 @@ import {
   Clock,
   Download,
   Eye,
-  FileText,
-  Film,
   FolderInput,
   FolderMinus,
   History,
-  Image as ImageIcon,
   Infinity as InfinityIcon,
   Link2,
   Lock,
   MoreVertical,
-  Music,
   Pencil,
   RotateCcw,
   SlidersHorizontal,
@@ -39,31 +35,9 @@ import { copyTextFrom } from "../lib/clipboard";
 import { formatBytes, timeLeft } from "../lib/format";
 import { focusFirstMenuItem, useEscapeToClose } from "../lib/useEscapeToClose";
 import { useToast } from "./Toast";
+import { fileKind } from "../lib/fileKind";
 
 export const DRAG_MIME = "application/x-dropvault";
-type Tint = "indigo" | "emerald" | "rose" | "violet" | "red" | "amber";
-const TINT: Record<Tint, { bg: string; fg: string }> = {
-  indigo: { bg: "bg-indigo-50", fg: "text-indigo-500" },
-  emerald: { bg: "bg-emerald-50", fg: "text-emerald-500" },
-  rose: { bg: "bg-rose-50", fg: "text-rose-500" },
-  violet: { bg: "bg-violet-50", fg: "text-violet-500" },
-  red: { bg: "bg-red-50", fg: "text-red-500" },
-  amber: { bg: "bg-amber-50", fg: "text-amber-500" },
-};
-function kindOf(type: string | null): { Icon: typeof FileText; tint: Tint } {
-  if (!type) return { Icon: FileText, tint: "indigo" };
-  if (type.startsWith("image/")) return { Icon: ImageIcon, tint: "emerald" };
-  if (type.startsWith("video/")) return { Icon: Film, tint: "rose" };
-  if (type.startsWith("audio/")) return { Icon: Music, tint: "violet" };
-  if (type.includes("pdf")) return { Icon: FileText, tint: "red" };
-  if (
-    type.includes("zip") ||
-    type.includes("compressed") ||
-    type.includes("tar")
-  )
-    return { Icon: Archive, tint: "amber" };
-  return { Icon: FileText, tint: "indigo" };
-}
 type FolderOption = { id: string; name: string };
 type MenuPos = { top?: number; bottom?: number; left: number };
 export type FileSelectOptions = { shiftKey?: boolean };
@@ -103,6 +77,7 @@ const menuTransition = { duration: 0.18, ease: "easeOut" };
 const overlayInitial = { opacity: 0 };
 const overlayAnimate = { opacity: 1 };
 const MENU_W = 240;
+const MENU_ITEM_DANGER = "menu-item !text-red-700 [&>svg]:!text-red-700";
 
 export default function FileCard({
   file,
@@ -132,8 +107,7 @@ export default function FileCard({
   getDragIds,
 }: Props) {
   const { error } = useToast();
-  const { Icon, tint } = kindOf(file.contentType);
-  const tone = TINT[tint];
+  const { Icon, tint: tone } = fileKind(file.contentType);
   const encrypted = isEndToEndEncrypted(file);
   const isImage =
     !encrypted && (file.contentType || "").startsWith("image/");
@@ -277,22 +251,24 @@ export default function FileCard({
   const canDrag = !file.deletedAt && !coarsePointer;
   const clickable = canPreview || !!onOpenDetails;
   const chipShape =
-    "items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ";
+    "items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium drive-shadow ";
   const chipTone = file.deletedAt
-    ? "bg-red-50 text-red-600"
+    ? left.urgent
+      ? "bg-white text-red-700"
+      : "bg-white text-muted"
     : file.keepForever
-      ? "bg-drift-50 text-drift-600"
+      ? "bg-white text-drift-700"
       : left.urgent
-        ? "bg-red-50 text-red-600"
-        : "bg-slate-100 text-slate-500";
+        ? "bg-white text-red-700"
+        : "bg-white text-muted";
   const chipClass = "inline-flex " + chipShape + chipTone;
   // Phone list rows show expiry inline under the name instead of as a badge,
   // which leaves room for the filename itself.
   const inlineExpiryTone =
-    file.deletedAt || (!file.keepForever && left.urgent)
-      ? "text-red-600"
+    !file.keepForever && left.urgent
+      ? "text-red-700"
       : file.keepForever
-        ? "text-drift-600"
+        ? "text-drift-700"
         : "";
   // Trash's "Time left" column header and policy note supply the context.
   const chipLabel = file.deletedAt
@@ -318,26 +294,27 @@ export default function FileCard({
       : null;
   const sharedPill = file.shareToken ? (
     <span
-      className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex"
+      className="hidden min-w-0 items-center gap-1.5 text-sm text-muted sm:inline-flex"
       data-ui="shared-label"
     >
-      <Link2 size={11} /> Shared
+      <Users size={15} className="shrink-0" /> Shared
       {file.shareHasPassword && (
-        <Lock size={10} className="text-drift-500/80" />
+        <Lock size={13} aria-label="Password protected" className="shrink-0" />
       )}
       {file.shareExpiresAt && (
-        <CalendarClock size={10} className="text-drift-500/80" />
+        <CalendarClock size={13} aria-label="Link expires" className="shrink-0" />
       )}
-      {dlText && <span className="text-drift-500/70">{dlText}</span>}
+      {dlText && <span className="text-xs text-faint">{dlText}</span>}
     </span>
   ) : null;
   const encryptedPill =
     file.encryptionMode === "aes-gcm" ? (
       <span
-        className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 sm:inline-flex"
+        className="hidden shrink-0 items-center gap-1 text-sm text-muted sm:inline-flex"
         data-ui="encrypted-label"
+        title="Encrypted in the browser"
       >
-        <Lock size={10} /> Encrypted
+        <Lock size={14} /> Encrypted
       </span>
     ) : null;
   const checkbox = onToggleSelect ? (
@@ -350,19 +327,19 @@ export default function FileCard({
       }}
       aria-label={selected ? "Deselect" : "Select"}
       className={
-        "file-select-toggle grid h-5 w-5 place-items-center rounded-md border transition " +
+        "file-select-toggle grid h-[18px] w-[18px] place-items-center rounded-sm border-2 transition " +
         (selected
-          ? "file-select-toggle-active border-drift-500 bg-drift-500 text-white"
-          : "border-slate-300 bg-white/90 text-transparent hover:border-drift-400 " +
+          ? "file-select-toggle-active border-primary bg-primary text-on-primary"
+          : "border-outline bg-sheet text-transparent " +
             (showCheckbox ? "file-select-toggle-active" : ""))
       }
     >
-      <Check size={13} />
+      <Check size={13} strokeWidth={3} />
     </button>
   ) : null;
   const panelClass = pos
-    ? "z-10 w-60 max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
-    : "relative z-10 m-3 max-h-[75vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-200 bg-white py-1.5 text-[15px] drive-shadow-lg sm:py-1 sm:text-sm";
+    ? "menu-surface z-10 w-60 max-h-[70vh] overflow-y-auto"
+    : "menu-surface relative z-10 max-h-[75vh] w-full overflow-y-auto !rounded-b-none !rounded-t-[28px] pb-6 pt-3";
   const panelStyle = pos
     ? {
         position: "fixed" as const,
@@ -384,7 +361,7 @@ export default function FileCard({
           className={
             pos
               ? "fixed inset-0 z-[60]"
-              : "fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40"
+              : "fixed inset-0 z-[60] flex items-end justify-center bg-black/40"
           }
         >
           <motion.div
@@ -397,6 +374,14 @@ export default function FileCard({
             style={panelStyle}
             className={panelClass}
           >
+            {!pos && (
+              <div className="mb-1 flex items-center gap-3 border-b border-slate-200 px-4 pb-3">
+                <Icon size={20} className={"shrink-0 " + tone} />
+                <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
+                  {file.filename}
+                </p>
+              </div>
+            )}
             {!moveOpen ? (
               <>
                 {file.deletedAt ? (
@@ -406,18 +391,18 @@ export default function FileCard({
                         onRestore?.(file.id);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      className="menu-item"
                     >
-                      <RotateCcw size={15} /> Restore
+                      <RotateCcw size={18} /> Restore
                     </button>
                     <button
                       onClick={() => {
                         onPermanentDelete?.(file.id);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-red-600 hover:bg-red-50"
+                      className="menu-item"
                     >
-                      <Trash2 size={15} /> Delete forever
+                      <Trash2 size={18} /> Delete forever
                     </button>
                   </>
                 ) : (
@@ -428,9 +413,9 @@ export default function FileCard({
                           onPreview(file);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <Eye size={15} /> Preview
+                        <Eye size={18} /> Preview
                       </button>
                     )}
                     {file.encryptionMode === "aes-gcm" ? (
@@ -447,17 +432,17 @@ export default function FileCard({
                             ),
                           );
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <Download size={15} /> Decrypt &amp; download
+                        <Download size={18} /> Decrypt &amp; download
                       </button>
                     ) : (
                       <a
                         href={downloadUrl(file.id)}
                         onClick={closeMenu}
-                        className="flex items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <Download size={15} /> Download
+                        <Download size={18} /> Download
                       </a>
                     )}
                     {onRename && (
@@ -466,9 +451,9 @@ export default function FileCard({
                           onRename(file.id);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <Pencil size={15} /> Rename
+                        <Pencil size={18} /> Rename
                       </button>
                     )}
                     {onOpenVersions && (
@@ -477,9 +462,9 @@ export default function FileCard({
                           onOpenVersions(file);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <History size={15} /> Version history
+                        <History size={18} /> Version history
                       </button>
                     )}
                     <button
@@ -487,7 +472,7 @@ export default function FileCard({
                         onToggleFavorite?.(file.id);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      className="menu-item"
                     >
                       <Star
                         size={15}
@@ -502,19 +487,19 @@ export default function FileCard({
                         onEditTags?.(file.id);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      className="menu-item"
                     >
-                      <Tags size={15} /> Edit tags
+                      <Tags size={18} /> Edit tags
                     </button>
                     <button
                       disabled={busy}
                       onClick={copyLink}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      className="menu-item"
                     >
                       {copied ? (
-                        <Check size={15} className="text-emerald-500" />
+                        <Check size={18} className="text-emerald-500" />
                       ) : (
-                        <Link2 size={15} />
+                        <Link2 size={18} />
                       )}
                       {file.shareToken ? "Copy link" : "Get link"}
                     </button>
@@ -524,9 +509,9 @@ export default function FileCard({
                           onOpenShare(file.id);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <SlidersHorizontal size={15} /> Share settings…
+                        <SlidersHorizontal size={18} /> Share settings…
                       </button>
                     )}
                     {file.shareToken && (
@@ -535,17 +520,17 @@ export default function FileCard({
                           onRevoke(file.id);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <X size={15} /> Revoke link
+                        <X size={18} /> Revoke link
                       </button>
                     )}
                     {canMove && (
                       <button
                         onClick={() => setMoveOpen(true)}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <FolderInput size={15} /> Move to
+                        <FolderInput size={18} /> Move to
                         <ChevronRight
                           size={14}
                           className="ml-auto text-slate-400"
@@ -558,9 +543,9 @@ export default function FileCard({
                           onExtend(file.id, 7);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <Clock size={15} /> Extend 7 days
+                        <Clock size={18} /> Extend 7 days
                       </button>
                     )}
                     {canKeepForever && !file.keepForever && onKeepForever && (
@@ -569,9 +554,9 @@ export default function FileCard({
                           onKeepForever(file.id);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 font-medium text-drift-600 hover:bg-drift-50"
+                        className="menu-item"
                       >
-                        <InfinityIcon size={15} /> Keep forever
+                        <InfinityIcon size={18} /> Keep forever
                       </button>
                     )}
                     {file.keepForever && onUnkeepForever && (
@@ -580,9 +565,9 @@ export default function FileCard({
                           onUnkeepForever(file.id);
                           closeMenu();
                         }}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                        className="menu-item"
                       >
-                        <Clock size={15} /> Stop keeping forever
+                        <Clock size={18} /> Stop keeping forever
                       </button>
                     )}
                     <button
@@ -590,9 +575,9 @@ export default function FileCard({
                         onDelete(file.id);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-red-600 hover:bg-red-50"
+                      className="menu-item"
                     >
-                      <Trash2 size={15} /> Move to Trash
+                      <Trash2 size={18} /> Move to Trash
                     </button>
                   </>
                 )}
@@ -601,11 +586,11 @@ export default function FileCard({
               <>
                 <button
                   onClick={() => setMoveOpen(false)}
-                  className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 font-medium text-slate-600 hover:bg-slate-50"
+                  className="menu-item font-medium"
                 >
-                  <ChevronLeft size={15} /> Move to…
+                  <ChevronLeft size={18} /> Move to…
                 </button>
-                <div className="my-1 h-px bg-slate-100" />
+                <div className="menu-divider" />
                 <div className="max-h-52 overflow-y-auto">
                   {file.folderId && onMove && (
                     <button
@@ -613,9 +598,9 @@ export default function FileCard({
                         onMove(file.id, null);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-slate-700 hover:bg-slate-50"
+                      className="menu-item"
                     >
-                      <FolderMinus size={15} /> Remove from folder
+                      <FolderMinus size={18} /> Remove from folder
                     </button>
                   )}
                   {moveTargets.map((f) => (
@@ -625,17 +610,14 @@ export default function FileCard({
                         onMove?.(file.id, f.id);
                         closeMenu();
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-3 sm:py-2 text-left text-slate-700 hover:bg-slate-50"
+                      className="menu-item"
                     >
-                      <FolderInput
-                        size={15}
-                        className="shrink-0 text-amber-500"
-                      />
+                      <FolderInput size={18} className="shrink-0" />
                       <span className="truncate">{f.name}</span>
                     </button>
                   ))}
                   {moveTargets.length === 0 && !file.folderId && (
-                    <p className="px-4 py-3 sm:px-3 sm:py-2 text-xs text-slate-400">
+                    <p className="px-4 py-2 text-xs text-muted">
                       No other folders yet.
                     </p>
                   )}
@@ -650,10 +632,106 @@ export default function FileCard({
   );
   const tagLine =
     (file.tags ?? []).length > 0 ? (
-      <p className="mt-0.5 truncate text-[11px] text-slate-400">
+      <p className="truncate text-xs text-faint">
         #{(file.tags ?? []).join(" #")}
       </p>
     ) : null;
+  const quickButton =
+    "grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted hover:bg-[rgb(var(--c-strong)/0.08)] hover:text-strong";
+  const quickActions =
+    !file.deletedAt ? (
+      <div className="row-quick-actions items-center" data-file-actions>
+        {onOpenShare && (
+          <button
+            type="button"
+            onClick={() => onOpenShare(file.id)}
+            title="Share"
+            aria-label={`Share ${file.filename}`}
+            className={quickButton}
+          >
+            <Link2 size={17} />
+          </button>
+        )}
+        {file.encryptionMode === "aes-gcm" ? (
+          <button
+            type="button"
+            onClick={() =>
+              downloadDecryptedFile(file, downloadUrl(file.id)).catch((err) =>
+                error((err as Error).message || "Couldn't decrypt this file"),
+              )
+            }
+            title="Decrypt and download"
+            aria-label={`Download ${file.filename}`}
+            className={quickButton}
+          >
+            <Download size={17} />
+          </button>
+        ) : (
+          <a
+            href={downloadUrl(file.id)}
+            title="Download"
+            aria-label={`Download ${file.filename}`}
+            className={quickButton}
+          >
+            <Download size={17} />
+          </a>
+        )}
+        {onRename && (
+          <button
+            type="button"
+            onClick={() => onRename(file.id)}
+            title="Rename"
+            aria-label={`Rename ${file.filename}`}
+            className={quickButton}
+          >
+            <Pencil size={17} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onToggleFavorite?.(file.id)}
+          title={file.favorite ? "Remove from favorites" : "Add to favorites"}
+          aria-label={
+            file.favorite
+              ? `Remove ${file.filename} from favorites`
+              : `Add ${file.filename} to favorites`
+          }
+          className={quickButton}
+        >
+          <Star
+            size={17}
+            className={file.favorite ? "fill-current text-[#f9ab00]" : ""}
+          />
+        </button>
+      </div>
+    ) : null;
+  const moreButton = (size: number) => (
+    <button
+      type="button"
+      onClick={openMenu}
+      onTouchEnd={openMenuTouch}
+      aria-label="File actions"
+      aria-expanded={menuOpen}
+      className={
+        "grid shrink-0 touch-manipulation place-items-center rounded-full text-muted hover:bg-[rgb(var(--c-strong)/0.08)] hover:text-strong " +
+        (size === 8 ? "h-8 w-8" : "h-7 w-7")
+      }
+    >
+      <MoreVertical size={18} />
+    </button>
+  );
+  const expiryText = (
+    <span
+      className={
+        "inline-flex items-center gap-1.5 text-sm " +
+        (!file.keepForever && left.urgent ? "text-red-700" : "text-muted")
+      }
+      title={chipTitle}
+      data-ui="file-expiry"
+    >
+      {chipIcon} {chipLabel}
+    </span>
+  );
   if (view === "list")
     return (
       <motion.div
@@ -664,106 +742,124 @@ export default function FileCard({
         initial={cardInitial}
         animate={cardAnimate}
         exit={cardExit}
+        aria-selected={selected}
         className={
-          "group relative flex items-center gap-3 px-4 py-2.5 transition " +
-          (selected ? "bg-drift-500/10" : "hover:bg-slate-50")
+          "group relative flex min-h-[3rem] items-center gap-3 border-b border-slate-200 px-2 py-1.5 transition-colors sm:px-3 " +
+          (selected
+            ? "bg-selected text-on-selected"
+            : "hover:bg-[rgb(var(--c-strong)/0.04)]")
         }
         data-file-id={file.id}
         data-ui="file-row"
       >
-        {onToggleSelect && (
+        {onToggleSelect ? (
           <div
             className={
-              "w-5 justify-center " +
+              "w-6 justify-center " +
               (showCheckbox ? "flex" : "hidden sm:flex")
             }
           >
             {checkbox}
           </div>
+        ) : (
+          <span className="hidden sm:block" />
         )}
-        <button
-          type="button"
-          onClick={(e) => preview(e)}
-          aria-label={`Open details for ${file.filename}`}
-          className={
-            "grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg " +
-            tone.bg +
-            " " +
-            tone.fg +
-            (canPreview
-              ? " cursor-zoom-in"
-              : clickable
-                ? " cursor-pointer"
-                : "")
-          }
-          data-ui="file-icon"
-        >
-          {showThumb ? (
-            <img
-              src={thumbUrl(file.id)}
-              alt={file.filename}
-              className="h-full w-full object-cover"
-              loading="lazy"
-              decoding="async"
-              onError={() => setThumbFailed(true)}
-            />
-          ) : (
-            <Icon size={18} />
-          )}
-        </button>
-        <div className="min-w-0 flex-1" data-ui="file-name">
-          <p
-            className="truncate text-sm font-medium text-slate-800"
-            title={file.filename}
+        <div className="flex min-w-0 flex-1 items-center gap-3" data-ui="file-name">
+          <button
+            type="button"
+            onClick={(e) => preview(e)}
+            aria-label={`Open details for ${file.filename}`}
+            className={
+              "grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded " +
+              tone +
+              (canPreview
+                ? " cursor-zoom-in"
+                : clickable
+                  ? " cursor-pointer"
+                  : "")
+            }
+            data-ui="file-icon"
           >
-            {file.favorite && (
-              <Star
-                size={12}
-                className="mr-1 inline fill-amber-400 text-amber-400"
+            {showThumb ? (
+              <img
+                src={thumbUrl(file.id)}
+                alt=""
+                className="h-8 w-8 rounded object-cover"
+                loading="lazy"
+                decoding="async"
+                onError={() => setThumbFailed(true)}
               />
+            ) : (
+              <Icon size={20} />
             )}
-            {file.filename}
-          </p>
-          {tagLine}
-          <p className="flex items-center gap-1 text-xs text-slate-400 sm:hidden">
-            {formatBytes(file.sizeBytes)}
-            <span aria-hidden="true">·</span>
-            <span
-              className={"inline-flex items-center gap-0.5 " + inlineExpiryTone}
-              title={chipTitle}
-            >
-              {chipIcon} {chipLabel}
-            </span>
-          </p>
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="flex min-w-0 items-center gap-1.5 text-sm text-strong">
+              <span
+                onClick={(e) => preview(e)}
+                className={
+                  "truncate font-medium" + (clickable ? " cursor-pointer" : "")
+                }
+                title={file.filename}
+              >
+                {file.filename}
+              </span>
+              {file.favorite && (
+                <Star
+                  size={13}
+                  aria-label="Favorite"
+                  className="shrink-0 fill-current text-[#f9ab00]"
+                />
+              )}
+              {file.encryptionMode === "aes-gcm" && (
+                <Lock
+                  size={13}
+                  aria-label="Encrypted"
+                  className="shrink-0 text-muted sm:hidden"
+                />
+              )}
+              {file.shareToken && (
+                <Users
+                  size={13}
+                  aria-label="Shared"
+                  className="shrink-0 text-muted sm:hidden"
+                />
+              )}
+            </p>
+            {tagLine}
+            <p className="flex items-center gap-1 text-xs text-muted sm:hidden">
+              {formatBytes(file.sizeBytes)}
+              <span aria-hidden="true">·</span>
+              <span
+                className={"inline-flex items-center gap-0.5 " + inlineExpiryTone}
+                title={chipTitle}
+              >
+                {chipIcon} {chipLabel}
+              </span>
+            </p>
+          </div>
         </div>
         <div className="hidden items-center gap-1.5 sm:flex" data-ui="file-security">
           {encryptedPill}
           {sharedPill}
+          {!encryptedPill && !sharedPill && (
+            <span className="text-sm text-faint">Only you</span>
+          )}
         </div>
+        <span className="hidden sm:inline-flex">{expiryText}</span>
         <span
-          className={"hidden sm:inline-flex " + chipShape + chipTone}
-          title={chipTitle}
-          data-ui="file-expiry"
-        >
-          {chipIcon} {chipLabel}
-        </span>
-        <span
-          className="hidden w-20 text-right text-xs text-slate-400 sm:block"
+          className="hidden text-sm text-muted sm:block"
           data-ui="file-size"
         >
           {formatBytes(file.sizeBytes)}
         </span>
-        <div className="relative" data-file-actions data-ui="file-actions">
-          <button
-            type="button"
-            onClick={openMenu}
-            onTouchEnd={openMenuTouch}
-            aria-label="File actions"
-            aria-expanded={menuOpen}
-            className="grid h-8 w-8 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <MoreVertical size={16} />
-          </button>
+        <div
+          className="relative flex items-center justify-end"
+          data-file-actions
+          data-ui="file-actions"
+        >
+          {quickActions}
+          {moreButton(8)}
           {menu}
         </div>
       </motion.div>
@@ -777,20 +873,33 @@ export default function FileCard({
       initial={cardInitial}
       animate={cardAnimate}
       exit={cardExit}
+      aria-selected={selected}
       className={
-        "group relative flex flex-col rounded-2xl border bg-white drive-shadow transition hover:shadow-md " +
+        "group relative flex flex-col rounded-xl px-1 pb-1 transition-colors " +
         (selected
-          ? "border-drift-400 ring-2 ring-drift-400/60"
-          : "border-slate-200 hover:border-slate-300")
+          ? "bg-selected text-on-selected"
+          : "bg-slate-100 hover:bg-[rgb(var(--c-strong)/0.1)]")
       }
       data-file-id={file.id}
       data-ui="file-card"
     >
+      <div className="flex h-12 items-center gap-2 pl-3 pr-0.5">
+        <Icon size={18} className={"shrink-0 " + tone} />
+        <p
+          className="min-w-0 flex-1 truncate text-sm font-medium text-strong"
+          title={file.filename}
+        >
+          {file.filename}
+        </p>
+        <div className="relative" data-file-actions>
+          {moreButton(7)}
+          {menu}
+        </div>
+      </div>
       <div
         onClick={(e) => preview(e)}
         className={
-          "relative flex h-24 items-center justify-center overflow-hidden rounded-t-2xl " +
-          tone.bg +
+          "relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg bg-white " +
           (canPreview ? " cursor-zoom-in" : clickable ? " cursor-pointer" : "")
         }
         data-file-preview
@@ -805,76 +914,48 @@ export default function FileCard({
             onError={() => setThumbFailed(true)}
           />
         ) : (
-          <Icon size={34} className={tone.fg} />
+          <Icon size={56} strokeWidth={1.4} className={tone} />
         )}
         {onToggleSelect && (
           <div className="absolute left-2 top-2">{checkbox}</div>
         )}
         <span
-          className={"absolute right-2 top-2 " + chipClass}
+          className={"absolute bottom-2 right-2 " + chipClass}
           title={chipTitle}
         >
           {chipIcon} {chipLabel}
         </span>
       </div>
-      <div className="flex items-center gap-2 px-3 py-2.5">
-        <div
-          className={
-            "grid h-7 w-7 shrink-0 place-items-center rounded-md " +
-            tone.bg +
-            " " +
-            tone.fg
-          }
-        >
-          <Icon size={15} />
-        </div>
-        <p
-          className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800"
-          title={file.filename}
-        >
-          {file.favorite && (
-            <Star
-              size={12}
-              className="mr-1 inline fill-amber-400 text-amber-400"
-            />
-          )}
-          {file.filename}
-        </p>
+      <div className="flex min-h-[2rem] items-center gap-1.5 px-2 pt-1 text-xs text-muted">
+        {file.favorite && (
+          <Star
+            size={12}
+            aria-label="Favorite"
+            className="shrink-0 fill-current text-[#f9ab00]"
+          />
+        )}
         {file.shareToken && (
-          <Link2 size={13} className="shrink-0 text-drift-500" />
+          <Users size={12} aria-label="Shared" className="shrink-0" />
         )}
         {file.shareToken && file.shareHasPassword && (
-          <Lock size={12} className="shrink-0 text-slate-400" />
+          <Lock size={11} aria-label="Password protected" className="shrink-0" />
         )}
         {file.encryptionMode === "aes-gcm" && (
           <span
             title="Client-side encrypted"
             aria-label="Client-side encrypted"
-            className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700"
+            className="inline-flex shrink-0 items-center gap-0.5"
           >
             <Lock size={11} />
           </span>
         )}
-        <div className="relative" data-file-actions>
-          <button
-            type="button"
-            onClick={openMenu}
-            onTouchEnd={openMenuTouch}
-            aria-label="File actions"
-            aria-expanded={menuOpen}
-            className="grid h-7 w-7 shrink-0 touch-manipulation place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-          >
-            <MoreVertical size={16} />
-          </button>
-          {menu}
-        </div>
-      </div>
-      <div className="-mt-1 px-3 pb-2.5 text-xs text-slate-400">
-        {formatBytes(file.sizeBytes)}
-        {dlText ? ` · ${dlText} downloads` : ""}
-        {(file.tags ?? []).length > 0
-          ? " · #" + (file.tags ?? []).join(" #")
-          : ""}
+        <span className="min-w-0 truncate">
+          {formatBytes(file.sizeBytes)}
+          {dlText ? ` · ${dlText} downloads` : ""}
+          {(file.tags ?? []).length > 0
+            ? " · #" + (file.tags ?? []).join(" #")
+            : ""}
+        </span>
       </div>
     </motion.div>
   );

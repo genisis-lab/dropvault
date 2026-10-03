@@ -2,19 +2,30 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
+  ArrowUp,
+  CalendarPlus,
+  Check,
   ChevronRight,
   Clock,
-  Lightbulb,
+  Cloud,
   Download,
+  Folder as FolderIcon,
   FolderInput,
   FolderPlus,
   HardDrive,
   Infinity as InfinityIcon,
+  LayoutGrid,
+  Lightbulb,
+  List,
   RotateCcw,
+  Search,
+  Settings2,
   Star,
   Tags,
   Trash2,
   UploadCloud,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -58,10 +69,9 @@ import {
 import { useLayout } from "../lib/layout";
 import { folderPath } from "../lib/folderPath";
 import { isTypingTarget, shortcutFor } from "../lib/shortcuts";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 import type { NotificationDestination } from "../lib/notificationTarget";
-import { useTheme } from "../lib/theme";
 import {
-  hasStoredView,
   readSort,
   writeSort,
   readView,
@@ -69,7 +79,7 @@ import {
 } from "../lib/prefs";
 import { downloadFilesAsZip } from "../lib/zip";
 import { downloadDecryptedFile } from "../lib/encryption";
-import Sidebar, { type Filter } from "./Sidebar";
+import Sidebar, { NewMenu, type Filter, type NewActions } from "./Sidebar";
 import Topbar, { type ViewMode } from "./Topbar";
 import UploadZone, { type UploadZoneHandle } from "./UploadZone";
 import FileCard, { type FileSelectOptions } from "./FileCard";
@@ -156,9 +166,6 @@ type SelectionGesture = {
   baseSelection: Set<string>;
   active: boolean;
 };
-const barInitial = { opacity: 0, y: 24, x: "-50%" };
-const barAnimate = { opacity: 1, y: 0, x: "-50%" };
-const barExit = { opacity: 0, y: 24, x: "-50%" };
 const popInitial = { opacity: 0, scale: 0.95, y: 8 };
 const popAnimate = { opacity: 1, scale: 1, y: 0 };
 const overlayHidden = { opacity: 0 };
@@ -193,13 +200,13 @@ export default function Dashboard({
 }) {
   const qc = useQueryClient();
   const { layout } = useLayout();
-  const { theme } = useTheme();
   const { success: toastOk, error: toastErr } = useToast();
   const errHandler = (fallback: string) => (e: unknown) =>
     toastErr((e as Error)?.message || fallback);
   const [expiryDays, setExpiryDays] = useState(7);
   const [search, setSearch] = useState("");
-  const [view, setViewState] = useState<ViewMode>(() => readView());
+  // Drive opens in list view; a saved choice wins.
+  const [view, setViewState] = useState<ViewMode>(() => readView("list"));
   const [filter, setFilterState] = useState<Filter>("all");
   const [sort, setSortState] = useState<SortKey>(() => readSort() as SortKey);
   const [typeScope, setTypeScope] = useState<TypeScope>("all");
@@ -214,6 +221,8 @@ export default function Dashboard({
   const [limitOpen, setLimitOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moveBarOpen, setMoveBarOpen] = useState(false);
+  const [moveAnchor, setMoveAnchor] = useState<React.CSSProperties>({});
+  useEscapeToClose(moveBarOpen, () => setMoveBarOpen(false));
   const [shareFile, setShareFile] = useState<DriftFile | null>(null);
   const [shareFolderTarget, setShareFolderTarget] = useState<Folder | null>(
     null,
@@ -254,6 +263,15 @@ export default function Dashboard({
         teamsOpen ||
         menuOpen,
     );
+    if (
+      event.key === "Escape" &&
+      !dialogOpen &&
+      selected.size > 0 &&
+      !isTypingTarget(event.target)
+    ) {
+      clearSelection();
+      return;
+    }
     const shortcut = shortcutFor(event, {
       typing: isTypingTarget(event.target),
       dialogOpen,
@@ -324,14 +342,6 @@ export default function Dashboard({
   );
   const [selectionSelecting, setSelectionSelecting] = useState(false);
   selectedRef.current = selected;
-  useEffect(() => {
-    if (hasStoredView()) return;
-    setViewState(
-      theme === "neubrutalism" || theme === "pressroom" || theme === "quiet"
-        ? "list"
-        : "grid",
-    );
-  }, [theme]);
   function setView(v: ViewMode) {
     setViewState(v);
     writeView(v);
@@ -372,6 +382,7 @@ export default function Dashboard({
   const trashRetentionDays = accountQuery.data?.trashRetentionDays;
   // Eligible accounts keep uploads forever unless they pick an expiry.
   const [keepUploadsForever, setKeepUploadsForever] = useState(true);
+  const [uploadSummary, setUploadSummary] = useState("");
   const [firstRunTipDismissed, setFirstRunTipDismissed] = useState(() => {
     try {
       return localStorage.getItem(FIRST_RUN_TIP_KEY) === "1";
@@ -708,8 +719,6 @@ export default function Dashboard({
   const detailFolder = folders.find((f) => f.id === detailFolderId) ?? null;
   const atRoot = currentFolderId === null;
   const calmHome = layout === "calm" && atRoot && filter === "all";
-  const isProductivityTheme =
-    theme === "neubrutalism" || theme === "pressroom" || theme === "quiet";
   function clearSelection() {
     const next = new Set<string>();
     selectedRef.current = next;
@@ -1100,7 +1109,6 @@ export default function Dashboard({
       ? currentFolder.name
       : titleFor(filter);
   const itemCount = visible.length + visibleFolders.length;
-  const subtitle = `${itemCount} item${itemCount === 1 ? "" : "s"}${userName ? ` · ${userName.split(" ")[0]}'s vault` : ""}`;
   const calmDetails =
     layout === "calm" ? (file: DriftFile) => setDetailFile(file) : undefined;
   function onDialogConfirm(name: string) {
@@ -1233,10 +1241,151 @@ export default function Dashboard({
   const dialogInitial =
     dialog && dialog.mode !== "create" ? dialog.current : "";
   const dialogConfirm = dialog?.mode === "create" ? "Create" : "Rename";
+  const newActions: NewActions = {
+    onNewFolder: () => setDialog({ mode: "create" }),
+    onUploadFiles: () => uploadZoneRef.current?.openFilePicker(),
+    onUploadFolder: () => uploadZoneRef.current?.openFolderPicker(),
+    onTakePhoto: () => uploadZoneRef.current?.openCamera(),
+    onUploadSettings: () => uploadZoneRef.current?.openOptions(),
+  };
+  const loadingFiles =
+    filesQuery.isLoading || (filter === "trash" && trashQuery.isLoading);
+  const loadingFolders = showFolderSection && foldersQuery.isLoading;
+  const nothingToShow =
+    !loadingFiles &&
+    !loadingFolders &&
+    (!showFilesSection || visible.length === 0) &&
+    visibleFolders.length === 0;
+  const showHomeExtras = calmHome && !q && typeScope === "all";
+  const uploadLifetimeLabel = uploadsKeptForever
+    ? "Kept forever"
+    : `Expire in ${expiryDays} day${expiryDays === 1 ? "" : "s"}`;
+  function sortHeader(key: SortKey, label: string, align = "") {
+    const active = sort === key;
+    return (
+      <button
+        type="button"
+        onClick={() => setSort(active ? "newest" : key)}
+        aria-label={
+          active ? `Sorted by ${label}. Sort by newest` : `Sort by ${label}`
+        }
+        className={
+          "inline-flex items-center gap-1 rounded-full px-2 py-1 -mx-2 hover:bg-[rgb(var(--c-strong)/0.06)] " +
+          (active ? "text-strong " : "") +
+          align
+        }
+      >
+        {label}
+        {active && <ArrowUp size={14} aria-hidden="true" />}
+      </button>
+    );
+  }
+  function renderFile(f: DriftFile, mode: ViewMode) {
+    return (
+      <FileCard
+        key={f.id}
+        file={f}
+        view={mode}
+        folders={folderOptions}
+        onExtend={(id, days) => extendMut.mutate({ id, days })}
+        onRename={(id) =>
+          setDialog({
+            mode: "renameFile",
+            fileId: id,
+            current: f.filename,
+          })
+        }
+        onDelete={(id) => deleteMut.mutate(id)}
+        onShare={handleShare}
+        onRevoke={(id) => revokeMut.mutate(id)}
+        onMove={(id, folderId) => moveMut.mutate({ id, folderId })}
+        onOpenShare={(id) =>
+          setShareFile(files.find((x) => x.id === id) ?? null)
+        }
+        onPreview={(file) => setPreviewFile(file)}
+        onOpenDetails={calmDetails}
+        onOpenVersions={(file) => setVersionsFile(file)}
+        onToggleFavorite={(id) => metaMut.mutate({ id, favorite: !f.favorite })}
+        onEditTags={() => editTags(f)}
+        onRestore={(id) => restoreMut.mutate(id)}
+        onPermanentDelete={(id) =>
+          ask({
+            title: "Delete forever",
+            message: "Permanently delete this file? This can't be undone.",
+            danger: true,
+            confirmLabel: "Delete forever",
+            onConfirm: () => permanentMut.mutate(id),
+          })
+        }
+        canKeepForever={canKeepForever}
+        trashRetentionDays={trashRetentionDays}
+        onKeepForever={(id) => keepForeverMut.mutate(id)}
+        onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
+        selected={selected.has(f.id)}
+        onToggleSelect={selectFile}
+        anySelected={selCount > 0}
+        getDragIds={getDragIds}
+      />
+    );
+  }
+  function renderFolder(fd: Folder, mode: ViewMode) {
+    return (
+      <FolderCard
+        key={fd.id}
+        folder={fd}
+        view={mode}
+        onOpen={openFolder}
+        onShare={handleShareFolder}
+        onRevoke={(id) => revokeFolderMut.mutate(id)}
+        onRename={(id) =>
+          setDialog({
+            mode: "rename",
+            folderId: id,
+            current: fd.name,
+          })
+        }
+        onDelete={deleteFolderConfirm}
+        onOpenShare={(id) =>
+          setShareFolderTarget(folders.find((x) => x.id === id) ?? null)
+        }
+        onOpenDetails={(id) => setDetailFolderId(id)}
+        onDropFiles={(folderId, ids) => moveIds(ids, folderId)}
+      />
+    );
+  }
+  const selectionHandlers = {
+    ref: selectionSurfaceRef,
+    onPointerDown: handleSelectionPointerDown,
+    onPointerMove: handleSelectionPointerMove,
+    onPointerUp: finishSelectionGesture,
+    onPointerCancel: (e: React.PointerEvent<HTMLElement>) =>
+      finishSelectionGesture(e, true),
+    onContextMenuCapture: handleSelectionContextMenu,
+    onClickCapture: handleSelectionClickCapture,
+    "data-selecting": selectionSelecting ? "true" : undefined,
+  };
+  const selectionButton =
+    "icon-round !h-10 !w-10 disabled:opacity-40";
   return (
-    <div data-ui="dashboard-shell" data-layout={layout}>
+    <div
+      data-ui="dashboard-shell"
+      data-layout={layout}
+      className="min-h-screen bg-app"
+    >
+      <Topbar
+        search={search}
+        setSearch={setSearch}
+        userName={userName}
+        userEmail={userEmail}
+        onSignOut={() => signOut()}
+        onOpenMenu={() => setMenuOpen(true)}
+        onOpenSecurity={() => setSecurityOpen(true)}
+        onOpenTeams={() => setTeamsOpen(true)}
+        onGoHome={() => setFilter("all")}
+        onNotificationNavigate={goToNotification}
+      />
       <Sidebar
-        onNew={() => uploadInputRef.current?.click()}
+        {...newActions}
         totalBytes={totalBytes}
         fileCount={liveFiles.length}
         sharedCount={sharedCount}
@@ -1250,55 +1399,46 @@ export default function Dashboard({
         onRequestMore={requestMoreLimit}
         quotaBytes={quotaBytes}
       />
-      <div className="md:pl-60" data-ui="dashboard-content">
-        <Topbar
-          search={search}
-          setSearch={setSearch}
-          view={view}
-          setView={setView}
-          userEmail={userEmail}
-          onNew={() => uploadInputRef.current?.click()}
-          onSignOut={() => signOut()}
-          onOpenMenu={() => setMenuOpen(true)}
-          onOpenSecurity={() => setSecurityOpen(true)}
-          onOpenTeams={() => setTeamsOpen(true)}
-          onNotificationNavigate={goToNotification}
-        />
+      <div className="md:pb-4 md:pl-64 md:pr-4" data-ui="dashboard-content">
         <main
-          className="mx-auto max-w-6xl px-4 py-6 sm:px-6"
+          className="content-sheet min-h-[calc(100vh-4rem)] px-3 pb-28 sm:px-5 md:min-h-[calc(100vh-5rem)] md:pb-10 max-md:rounded-none"
           data-ui="workspace"
         >
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="min-w-0">
-              {currentFolder && (
+          <div className="flex min-h-[4rem] items-center gap-3 pt-2">
+            <div className="min-w-0 flex-1">
+              {currentFolder ? (
                 <nav
                   aria-label="Folder path"
                   data-ui="folder-path"
-                  className="mb-1 flex min-w-0 flex-wrap items-center gap-1 text-sm text-slate-500"
+                  className="flex min-w-0 items-center gap-0.5 text-[22px] leading-tight"
                 >
                   <button
                     onClick={goToRoot}
-                    className="hover:text-drift-600"
+                    className="shrink-0 rounded-full px-2 py-1 font-display text-muted hover:bg-[rgb(var(--c-strong)/0.06)] sm:px-3"
                   >
                     My Drive
                   </button>
                   {currentFolderPath.map((folder, index) => (
                     <span
                       key={folder.id}
-                      className="flex min-w-0 items-center gap-1"
+                      className="flex min-w-0 items-center gap-0.5"
                     >
-                      <ChevronRight size={14} className="shrink-0" />
+                      <ChevronRight
+                        size={20}
+                        className="shrink-0 text-muted"
+                        aria-hidden="true"
+                      />
                       {index === currentFolderPath.length - 1 ? (
-                        <span
+                        <h1
                           aria-current="page"
-                          className="truncate font-medium text-slate-700"
+                          className="truncate rounded-full px-2 py-1 text-[22px] font-normal text-strong sm:px-3"
                         >
                           {folder.name}
-                        </span>
+                        </h1>
                       ) : (
                         <button
                           onClick={() => openFolder(folder.id)}
-                          className="truncate hover:text-drift-600"
+                          className="truncate rounded-full px-2 py-1 font-display text-muted hover:bg-[rgb(var(--c-strong)/0.06)] sm:px-3"
                         >
                           {folder.name}
                         </button>
@@ -1306,600 +1446,570 @@ export default function Dashboard({
                     </span>
                   ))}
                 </nav>
-              )}
-              <h1 className="truncate text-xl font-bold text-slate-800 sm:text-2xl">
-                {heading}
-              </h1>
-              <p className="text-sm text-slate-500">{subtitle}</p>
-              {filter === "trash" && trashRetentionDays && (
-                <p className="mt-1 text-sm text-slate-500">
-                  Items in Trash are permanently deleted after{" "}
-                  {trashRetentionDays} day{trashRetentionDays === 1 ? "" : "s"}.
-                </p>
+              ) : (
+                <h1 className="truncate px-1 text-[22px] font-normal leading-tight text-strong sm:px-2">
+                  {heading}
+                </h1>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {filter === "trash" && trashFiles.length > 0 && (
-                <button
-                  onClick={emptyTrash}
-                  className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 font-medium text-red-700 transition hover:bg-red-100"
-                >
-                  <Trash2 size={16} /> Empty Trash
-                </button>
-              )}
-              {filter !== "trash" && expiredFiles.length > 0 && (
-                <button
-                  onClick={deleteExpired}
-                  className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 font-medium text-red-700 transition hover:bg-red-100"
-                >
-                  <Trash2 size={16} /> Delete {expiredFiles.length} expired
-                </button>
-              )}
-              {expiringSoon.length > 0 && filter !== "trash" && (
-                <button
-                  onClick={extendAllExpiring}
-                  className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-amber-700 transition hover:bg-amber-100"
-                >
-                  <Clock size={16} /> Extend {expiringSoon.length} expiring
-                </button>
-              )}
-              {filter !== "trash" && (
-                <button
-                  onClick={() => setDialog({ mode: "create" })}
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
-                >
-                  <FolderPlus size={16} /> New folder
-                </button>
-              )}
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortKey)}
-                aria-label="Sort files"
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
+            <span className="hidden shrink-0 text-sm text-muted lg:inline">
+              {itemCount} item{itemCount === 1 ? "" : "s"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setView(view === "list" ? "grid" : "list")}
+              aria-label={view === "list" ? "Switch to grid view" : "Switch to list view"}
+              title={view === "list" ? "Grid layout" : "List layout"}
+              className="icon-round sm:hidden"
+            >
+              {view === "list" ? <LayoutGrid size={20} /> : <List size={20} />}
+            </button>
+            <div
+              className="segmented hidden shrink-0 sm:inline-flex"
+              role="group"
+              aria-label="View"
+            >
+              <button
+                type="button"
+                onClick={() => setView("list")}
+                aria-pressed={view === "list"}
+                aria-label="List view"
+                title="List layout"
               >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              {/* Upload lifetime only matters where uploads happen. Options
-                  read on their own, and "Keep forever" appears only for
-                  accounts allowed to keep files. */}
-              {filter !== "trash" && (
-                <select
-                  value={uploadsKeptForever ? "forever" : String(expiryDays)}
-                  onChange={(e) => {
-                    if (e.target.value === "forever") {
-                      setKeepUploadsForever(true);
-                      return;
-                    }
-                    setKeepUploadsForever(false);
-                    setExpiryDays(Number(e.target.value));
-                  }}
-                  aria-label="Upload expiration"
-                  title="How long new uploads are kept"
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none transition focus:border-drift-400"
+                {view === "list" && <Check size={16} aria-hidden="true" />}
+                <List size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("grid")}
+                aria-pressed={view === "grid"}
+                aria-label="Grid view"
+                title="Grid layout"
+              >
+                {view === "grid" && <Check size={16} aria-hidden="true" />}
+                <LayoutGrid size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div
+            className="sticky top-16 z-10 -mx-3 bg-sheet px-3 pb-2 pt-1 sm:-mx-5 sm:px-5"
+            data-ui="content-toolbar"
+          >
+            {selCount > 0 ? (
+              <div
+                role="toolbar"
+                aria-label="Selection actions"
+                className="flex h-12 items-center gap-0.5 overflow-x-auto rounded-full bg-slate-100 px-1"
+                data-ui="selection-bar"
+              >
+                <button
+                  onClick={clearSelection}
+                  aria-label="Clear selection"
+                  title="Clear selection"
+                  className={selectionButton}
                 >
-                  {canKeepForever && <option value="forever">Keep forever</option>}
-                  {EXPIRY_OPTIONS.map((d) => (
-                    <option key={d} value={d}>
-                      Expire in {d} day{d === 1 ? "" : "s"}
+                  <X size={20} />
+                </button>
+                <span className="whitespace-nowrap px-1.5 text-sm font-medium text-strong">
+                  {selCount} selected
+                </span>
+                <span className="mx-1 h-6 w-px shrink-0 bg-slate-300" />
+                {filter !== "trash" && (
+                  <div className="relative">
+                    <button
+                      onClick={(e) => {
+                        // The toolbar scrolls sideways on phones, which would
+                        // clip an absolutely positioned menu.
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setMoveAnchor({
+                          top: rect.bottom + 6,
+                          left: Math.max(
+                            8,
+                            Math.min(rect.left, window.innerWidth - 264),
+                          ),
+                        });
+                        setMoveBarOpen((v) => !v);
+                      }}
+                      aria-label="Move"
+                      title="Move"
+                      aria-haspopup="menu"
+                      aria-expanded={moveBarOpen}
+                      className={selectionButton}
+                    >
+                      <FolderInput size={20} />
+                    </button>
+                    <AnimatePresence>
+                      {moveBarOpen && (
+                        <>
+                          <button
+                            className="fixed inset-0 z-40 cursor-default"
+                            aria-label="Close"
+                            tabIndex={-1}
+                            onClick={() => setMoveBarOpen(false)}
+                          />
+                          <motion.div
+                            role="menu"
+                            initial={popInitial}
+                            animate={popAnimate}
+                            exit={popInitial}
+                            style={moveAnchor}
+                            className="menu-surface fixed z-50 max-h-72 w-64 max-w-[calc(100vw-1rem)] overflow-y-auto"
+                          >
+                            <p className="px-4 pb-1 pt-1 text-xs font-medium text-muted">
+                              Move {selCount} file{selCount === 1 ? "" : "s"} to
+                            </p>
+                            <button
+                              role="menuitem"
+                              onClick={() => bulkMove(null)}
+                              className="menu-item"
+                            >
+                              <HardDrive size={18} /> My Drive (no folder)
+                            </button>
+                            {folders.length > 0 && (
+                              <div className="menu-divider" />
+                            )}
+                            {folders.map((fd) => (
+                              <button
+                                key={fd.id}
+                                role="menuitem"
+                                onClick={() => bulkMove(fd.id)}
+                                className="menu-item"
+                              >
+                                <FolderIcon size={18} />
+                                <span className="truncate">{fd.name}</span>
+                              </button>
+                            ))}
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+                <button
+                  onClick={bulkDownload}
+                  aria-label={selCount > 1 ? "Download ZIP" : "Download"}
+                  title={selCount > 1 ? "Download as ZIP" : "Download"}
+                  className={selectionButton}
+                >
+                  <Download size={20} />
+                </button>
+                {filter === "trash" ? (
+                  <button
+                    onClick={() =>
+                      runBulk(
+                        "restore",
+                        Array.from(selected),
+                        undefined,
+                        (n) => `${n} file${n === 1 ? "" : "s"} restored`,
+                      )
+                    }
+                    aria-label="Restore"
+                    title="Restore from Trash"
+                    className={selectionButton}
+                  >
+                    <RotateCcw size={20} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={bulkDelete}
+                    aria-label="Trash"
+                    title="Move to Trash"
+                    className={selectionButton}
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                )}
+                <button
+                  onClick={() =>
+                    runBulk(
+                      "favorite",
+                      Array.from(selected),
+                      undefined,
+                      (n) => `${n} file${n === 1 ? "" : "s"} favorited`,
+                    )
+                  }
+                  aria-label="Favorite"
+                  title="Add to favorites"
+                  className={selectionButton}
+                >
+                  <Star size={20} />
+                </button>
+                {filter !== "trash" && (
+                  <button
+                    disabled={extendingSelection}
+                    aria-label={extendingSelection ? "Extending…" : "Extend 7 days"}
+                    title="Extend by 7 days"
+                    className={selectionButton}
+                    onClick={() =>
+                      ask({
+                        title: "Extend selected files",
+                        message: `Extend ${selected.size} files by 7 days, up to each file's retention limit? Permanent files remain permanent.`,
+                        confirmLabel: "Extend 7 days",
+                        onConfirm: () => {
+                          void extendSelection(7);
+                        },
+                      })
+                    }
+                  >
+                    <CalendarPlus size={20} />
+                  </button>
+                )}
+                {canKeepForever && filter !== "trash" && (
+                  <button
+                    onClick={() =>
+                      bulkKeepForeverMut.mutate(Array.from(selected))
+                    }
+                    aria-label="Keep forever"
+                    title="Keep forever"
+                    className={selectionButton}
+                  >
+                    <InfinityIcon size={20} />
+                  </button>
+                )}
+                <button
+                  onClick={() =>
+                    setTagsTarget({
+                      ids: Array.from(selected),
+                      initial: [],
+                      bulk: true,
+                    })
+                  }
+                  aria-label="Tags"
+                  title="Edit tags"
+                  className={selectionButton}
+                >
+                  <Tags size={20} />
+                </button>
+              </div>
+            ) : (
+              <div
+                className="flex h-12 items-center gap-2 overflow-x-auto"
+                data-ui="filter-chips"
+              >
+                {filter !== "trash" &&
+                  scopeOptions.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => setTypeScope(o.value)}
+                      aria-pressed={typeScope === o.value}
+                      className="chip shrink-0"
+                    >
+                      {typeScope === o.value && (
+                        <Check size={16} aria-hidden="true" />
+                      )}
+                      {o.label}
+                    </button>
+                  ))}
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  aria-label="Sort files"
+                  className="chip shrink-0"
+                >
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      Sort: {o.label}
                     </option>
                   ))}
                 </select>
-              )}
-            </div>
+                {/* Upload lifetime only matters where uploads happen. "Keep
+                    forever" appears only for accounts allowed to keep files. */}
+                {filter !== "trash" && (
+                  <select
+                    value={uploadsKeptForever ? "forever" : String(expiryDays)}
+                    onChange={(e) => {
+                      if (e.target.value === "forever") {
+                        setKeepUploadsForever(true);
+                        return;
+                      }
+                      setKeepUploadsForever(false);
+                      setExpiryDays(Number(e.target.value));
+                    }}
+                    aria-label="Upload expiration"
+                    title="How long new uploads are kept"
+                    className="chip shrink-0"
+                  >
+                    {canKeepForever && (
+                      <option value="forever">Uploads: Keep forever</option>
+                    )}
+                    {EXPIRY_OPTIONS.map((d) => (
+                      <option key={d} value={d}>
+                        Uploads: Expire in {d} day{d === 1 ? "" : "s"}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {filter !== "trash" && uploadSummary && (
+                  <button
+                    type="button"
+                    onClick={() => uploadZoneRef.current?.openOptions()}
+                    className="chip is-selected shrink-0"
+                    title="Upload options"
+                    data-ui="upload-summary"
+                  >
+                    <Settings2 size={16} aria-hidden="true" />
+                    {uploadSummary}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-          {filter !== "trash" && (
-            <div className="mb-4 flex flex-wrap gap-1.5">
-              {scopeOptions.map((o) => (
-                <button
-                  key={o.value}
-                  onClick={() => setTypeScope(o.value)}
-                  className={
-                    "rounded-full border px-3.5 py-1.5 text-sm font-medium transition " +
-                    (typeScope === o.value
-                      ? "border-drift-300 bg-drift-500/10 text-drift-700"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-drift-300 hover:text-drift-600")
-                  }
-                >
-                  {o.label}
+
+          <div className="space-y-2 empty:hidden" data-ui="notices">
+            {filter === "trash" && (trashRetentionDays || trashFiles.length > 0) && (
+              <Notice icon={<Trash2 size={20} />}>
+                <span className="min-w-0 flex-1">
+                  {trashRetentionDays
+                    ? `Items in Trash are permanently deleted after ${trashRetentionDays} day${trashRetentionDays === 1 ? "" : "s"}.`
+                    : "Items in Trash can be restored until you empty it."}
+                </span>
+                {trashFiles.length > 0 && (
+                  <button onClick={emptyTrash} className="btn-text shrink-0">
+                    Empty Trash
+                  </button>
+                )}
+              </Notice>
+            )}
+            {filter !== "trash" && expiredFiles.length > 0 && (
+              <Notice icon={<AlertTriangle size={20} />} tone="danger">
+                <span className="min-w-0 flex-1">
+                  {expiredFiles.length} file
+                  {expiredFiles.length === 1 ? " has" : "s have"} expired and
+                  will be cleaned up soon.
+                </span>
+                <button onClick={deleteExpired} className="btn-text shrink-0">
+                  Delete {expiredFiles.length} expired
                 </button>
-              ))}
-            </div>
-          )}
-          {filter !== "trash" &&
-            quotaBytes != null &&
-            dismissedQuota !== quotaBytes && (
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-drift-200 bg-drift-50/70 px-3 py-2">
-                <p className="min-w-0 text-xs text-slate-600">
-                  Your upload limit is{" "}
-                  <span className="font-semibold text-slate-800">
-                    {formatBytes(quotaBytes)}
+              </Notice>
+            )}
+            {filter !== "trash" && expiringSoon.length > 0 && (
+              <Notice icon={<Clock size={20} />} tone="warn">
+                <span className="min-w-0 flex-1">
+                  {expiringSoon.length} file
+                  {expiringSoon.length === 1 ? " expires" : "s expire"} in the
+                  next 24 hours.
+                </span>
+                <button
+                  onClick={extendAllExpiring}
+                  className="btn-text shrink-0"
+                >
+                  Extend {expiringSoon.length} expiring
+                </button>
+              </Notice>
+            )}
+            {filter !== "trash" &&
+              quotaBytes != null &&
+              dismissedQuota !== quotaBytes && (
+                <Notice icon={<Cloud size={20} />}>
+                  <span className="min-w-0 flex-1">
+                    Your upload limit is{" "}
+                    <span className="font-medium text-strong">
+                      {formatBytes(quotaBytes)}
+                    </span>
+                    . Need more? Request an increase.
                   </span>
-                  . Need more? Request an increase from the menu.
-                </p>
-                <div className="flex shrink-0 items-center gap-1.5">
                   <button
                     onClick={requestMoreLimit}
-                    className="rounded-lg border border-drift-200 bg-white px-2.5 py-1 text-xs font-medium text-drift-600 transition hover:bg-drift-50"
+                    className="btn-text shrink-0"
                   >
                     Request more
                   </button>
                   <button
                     onClick={dismissStorageNotice}
                     aria-label="Dismiss storage notice"
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-600"
+                    className="icon-round !h-8 !w-8 shrink-0"
                   >
-                    <X size={15} />
+                    <X size={18} />
+                  </button>
+                </Notice>
+              )}
+            {!firstRunTipDismissed &&
+              filesQuery.isSuccess &&
+              liveFiles.length === 0 &&
+              filter === "all" &&
+              !currentFolder && (
+                <div
+                  className="flex items-start gap-3 rounded-xl bg-drift-50 px-4 py-3 text-sm text-strong"
+                  data-ui="first-run-tip"
+                >
+                  <Lightbulb
+                    size={20}
+                    className="mt-0.5 shrink-0 text-primary"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">Welcome to Dropvault</p>
+                    <p className="mt-0.5 text-muted">
+                      {uploadsKeptForever
+                        ? "Your uploads are kept forever by default. Pick an expiry from the Uploads chip above if you'd rather they disappear on their own."
+                        : `Files you upload delete themselves after ${expiryDays} day${expiryDays === 1 ? "" : "s"}. Change that from the Uploads chip above before uploading, or later from a file's details.`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={dismissFirstRunTip}
+                    aria-label="Dismiss tip"
+                    className="icon-round !h-8 !w-8 shrink-0"
+                  >
+                    <X size={18} />
                   </button>
                 </div>
-              </div>
-            )}
-          {!firstRunTipDismissed &&
-            filesQuery.isSuccess &&
-            liveFiles.length === 0 &&
-            filter === "all" &&
-            !currentFolder && (
-              <div
-                className="mb-4 flex items-start gap-3 rounded-xl border border-drift-200 bg-drift-50/70 px-4 py-3 text-sm text-slate-700"
-                data-ui="first-run-tip"
-              >
-                <Lightbulb
-                  size={18}
-                  className="mt-0.5 shrink-0 text-drift-600"
-                  aria-hidden="true"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-800">
-                    Welcome to Dropvault
-                  </p>
-                  <p className="mt-0.5">
-                    {uploadsKeptForever
-                      ? "Your uploads are kept forever by default. Pick an expiry from the menu next to Sort if you'd rather they disappear on their own."
-                      : `Files you upload delete themselves after ${expiryDays} day${expiryDays === 1 ? "" : "s"}. Change that from the menu next to Sort before uploading, or later from a file's details.`}
-                  </p>
-                </div>
-                <button
-                  onClick={dismissFirstRunTip}
-                  aria-label="Dismiss tip"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-600"
-                >
-                  <X size={15} />
-                </button>
-              </div>
-            )}
-          <UploadZone
-              hidden={filter === "trash"}
-              selectionActive={selCount > 0}
-              ref={uploadZoneRef}
-              expiryDays={expiryDays}
-              keepForever={keepUploadsForever}
-              onKeepForeverChange={setKeepUploadsForever}
-              onUploaded={invalidate}
-              inputRef={uploadInputRef}
-              folderId={currentFolderId}
-              folderName={currentFolder?.name}
-            />
-          {calmHome &&
-            !isProductivityTheme &&
-            !q &&
-            typeScope === "all" &&
-            showRecentStrip && (
-            <div className="mt-6">
+              )}
+          </div>
+
+          {showHomeExtras && showRecentStrip && (
+            <div className="mt-4">
               <RecentStrip
                 files={recentFiles}
                 onOpen={(file) => setDetailFile(file)}
               />
             </div>
           )}
-          {calmHome &&
-            !isProductivityTheme &&
-            !q &&
-            typeScope === "all" &&
-            liveFiles.length > 0 && (
-            <div className="mt-6">
+
+          <div className="mt-2">
+            {nothingToShow ? (
+              <EmptyState
+                filter={filter}
+                hasFiles={liveFiles.length > 0 || folders.length > 0}
+                search={search}
+                inFolder={!!currentFolder}
+                foldersOnly={typeScope === "folders"}
+                onClearSearch={() => setSearch("")}
+                onUpload={() => uploadZoneRef.current?.openFilePicker()}
+                onNewFolder={() => setDialog({ mode: "create" })}
+              />
+            ) : view === "list" ? (
+              <div
+                // A new location starts fresh instead of animating the old
+                // rows out.
+                key={`${filter}:${currentFolderId ?? "root"}`}
+                {...selectionHandlers}
+                className="file-selection-surface"
+                data-ui="file-list"
+              >
+                <div
+                  className="hidden h-12 border-b border-slate-200 px-3 text-sm font-medium text-muted sm:grid"
+                  data-ui="file-list-header"
+                >
+                  <span />
+                  <span>{sortHeader("name", "Name")}</span>
+                  <span>Sharing</span>
+                  <span>
+                    {filter === "trash"
+                      ? "Time left"
+                      : sortHeader("expiring", "Expires")}
+                  </span>
+                  <span>{sortHeader("size", "Size")}</span>
+                  <span>
+                    <span className="sr-only">Actions</span>
+                  </span>
+                </div>
+                {loadingFolders ? (
+                  <FileListSkeleton count={2} />
+                ) : (
+                  <AnimatePresence initial={false}>
+                    {visibleFolders.map((fd) => renderFolder(fd, "list"))}
+                  </AnimatePresence>
+                )}
+                {showFilesSection &&
+                  (loadingFiles ? (
+                    <FileListSkeleton />
+                  ) : (
+                    <AnimatePresence initial={false}>
+                      {pagedFiles.map((f) => renderFile(f, "list"))}
+                    </AnimatePresence>
+                  ))}
+              </div>
+            ) : (
+              <div key={`${filter}:${currentFolderId ?? "root"}`}>
+                {showFolderSection &&
+                  (loadingFolders ? (
+                    <section className="mb-6">
+                      <h2 className="mb-3 px-1 text-sm font-medium text-strong">
+                        Folders
+                      </h2>
+                      <FolderGridSkeleton />
+                    </section>
+                  ) : visibleFolders.length > 0 ? (
+                    <section className="mb-6">
+                      <h2 className="mb-3 px-1 text-sm font-medium text-strong">
+                        Folders
+                      </h2>
+                      <motion.div
+                        layout
+                        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                      >
+                        <AnimatePresence initial={false}>
+                          {visibleFolders.map((fd) => renderFolder(fd, "grid"))}
+                        </AnimatePresence>
+                      </motion.div>
+                    </section>
+                  ) : null)}
+                {showFilesSection &&
+                  (loadingFiles ? (
+                    <FileGridSkeleton />
+                  ) : visible.length > 0 ? (
+                    <section>
+                      <h2 className="mb-3 px-1 text-sm font-medium text-strong">
+                        Files
+                      </h2>
+                      <motion.div
+                        layout
+                        {...selectionHandlers}
+                        data-ui="file-selection-grid"
+                        className="file-selection-surface grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                      >
+                        <AnimatePresence initial={false}>
+                          {pagedFiles.map((f) => renderFile(f, "grid"))}
+                        </AnimatePresence>
+                      </motion.div>
+                    </section>
+                  ) : null)}
+              </div>
+            )}
+            {hasMore && (
+              <div ref={loadMoreRef} aria-hidden="true" className="h-12" />
+            )}
+            {hasMore && (
+              <p className="mt-3 text-center text-xs text-muted">
+                Showing {pagedFiles.length} of {sorted.length}
+              </p>
+            )}
+          </div>
+
+          {showHomeExtras && liveFiles.length > 0 && (
+            <div className="mt-8">
               <StorageBreakdown files={liveFiles} />
             </div>
           )}
-          {showFolderSection &&
-            (foldersQuery.isLoading ? (
-              <div className="mt-6">
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Folders
-                </h2>
-                <FolderGridSkeleton />
-              </div>
-            ) : visibleFolders.length > 0 ? (
-              <div className="mt-6">
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Folders
-                </h2>
-                <motion.div
-                  layout
-                  className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-                >
-                  <AnimatePresence>
-                    {visibleFolders.map((fd) => (
-                      <FolderCard
-                        key={fd.id}
-                        folder={fd}
-                        view="grid"
-                        onOpen={openFolder}
-                        onShare={handleShareFolder}
-                        onRevoke={(id) => revokeFolderMut.mutate(id)}
-                        onRename={(id) =>
-                          setDialog({
-                            mode: "rename",
-                            folderId: id,
-                            current: fd.name,
-                          })
-                        }
-                        onDelete={deleteFolderConfirm}
-                        onOpenShare={(id) =>
-                          setShareFolderTarget(
-                            folders.find((x) => x.id === id) ?? null,
-                          )
-                        }
-                        onOpenDetails={(id) => setDetailFolderId(id)}
-                        onDropFiles={(folderId, ids) => moveIds(ids, folderId)}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              </div>
-            ) : null)}
-          {showFilesSection && (
-            <div className="mt-6">
-              {showFolderSection && visibleFolders.length > 0 && (
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Files
-                </h2>
-              )}
-              {filesQuery.isLoading ||
-              (filter === "trash" && trashQuery.isLoading) ? (
-                view === "grid" ? (
-                  <FileGridSkeleton />
-                ) : (
-                  <FileListSkeleton />
-                )
-              ) : visible.length === 0 ? (
-                <EmptyState
-                  filter={filter}
-                  hasFiles={liveFiles.length > 0 || folders.length > 0}
-                  search={search}
-                  inFolder={!!currentFolder}
-                  onClearSearch={() => setSearch("")}
-                />
-              ) : view === "grid" ? (
-                <motion.div
-                  layout
-                  ref={selectionSurfaceRef}
-                  onPointerDown={handleSelectionPointerDown}
-                  onPointerMove={handleSelectionPointerMove}
-                  onPointerUp={finishSelectionGesture}
-                  onPointerCancel={(e) => finishSelectionGesture(e, true)}
-                  onContextMenuCapture={handleSelectionContextMenu}
-                  onClickCapture={handleSelectionClickCapture}
-                  data-selecting={selectionSelecting ? "true" : undefined}
-                  data-ui="file-selection-grid"
-                  className="file-selection-surface grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4"
-                >
-                  <AnimatePresence>
-                    {pagedFiles.map((f) => (
-                      <FileCard
-                        key={f.id}
-                        file={f}
-                        view="grid"
-                        folders={folderOptions}
-                        onExtend={(id, days) => extendMut.mutate({ id, days })}
-                        onRename={(id) =>
-                          setDialog({
-                            mode: "renameFile",
-                            fileId: id,
-                            current: f.filename,
-                          })
-                        }
-                        onDelete={(id) => deleteMut.mutate(id)}
-                        onShare={handleShare}
-                        onRevoke={(id) => revokeMut.mutate(id)}
-                        onMove={(id, folderId) =>
-                          moveMut.mutate({ id, folderId })
-                        }
-                        onOpenShare={(id) =>
-                          setShareFile(files.find((x) => x.id === id) ?? null)
-                        }
-                        onPreview={(file) => setPreviewFile(file)}
-                        onOpenDetails={calmDetails}
-                        onOpenVersions={(file) => setVersionsFile(file)}
-                        onToggleFavorite={(id) =>
-                          metaMut.mutate({ id, favorite: !f.favorite })
-                        }
-                        onEditTags={() => editTags(f)}
-                        onRestore={(id) => restoreMut.mutate(id)}
-                        onPermanentDelete={(id) =>
-                          ask({
-                            title: "Delete forever",
-                            message:
-                              "Permanently delete this file? This can't be undone.",
-                            danger: true,
-                            confirmLabel: "Delete forever",
-                            onConfirm: () => permanentMut.mutate(id),
-                          })
-                        }
-                        canKeepForever={canKeepForever}
-                        trashRetentionDays={trashRetentionDays}
-                        onKeepForever={(id) => keepForeverMut.mutate(id)}
-                        onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
-                        selected={selected.has(f.id)}
-                        onToggleSelect={selectFile}
-                        anySelected={selCount > 0}
-                        getDragIds={getDragIds}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              ) : (
-                <div
-                  ref={selectionSurfaceRef}
-                  onPointerDown={handleSelectionPointerDown}
-                  onPointerMove={handleSelectionPointerMove}
-                  onPointerUp={finishSelectionGesture}
-                  onPointerCancel={(e) => finishSelectionGesture(e, true)}
-                  onContextMenuCapture={handleSelectionContextMenu}
-                  onClickCapture={handleSelectionClickCapture}
-                  data-selecting={selectionSelecting ? "true" : undefined}
-                  className="file-selection-surface divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white drive-shadow"
-                  data-ui="file-list"
-                >
-                  <div
-                    className="hidden px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid"
-                    data-ui="file-list-header"
-                  >
-                    <span />
-                    <span />
-                    <span>Name</span>
-                    <span>Security</span>
-                    <span>{filter === "trash" ? "Time left" : "Expires"}</span>
-                    <span className="text-right">Size</span>
-                    <span>
-                      <span className="sr-only">Actions</span>
-                    </span>
-                  </div>
-                  <AnimatePresence>
-                    {pagedFiles.map((f) => (
-                      <FileCard
-                        key={f.id}
-                        file={f}
-                        view="list"
-                        folders={folderOptions}
-                        onExtend={(id, days) => extendMut.mutate({ id, days })}
-                        onRename={(id) =>
-                          setDialog({
-                            mode: "renameFile",
-                            fileId: id,
-                            current: f.filename,
-                          })
-                        }
-                        onDelete={(id) => deleteMut.mutate(id)}
-                        onShare={handleShare}
-                        onRevoke={(id) => revokeMut.mutate(id)}
-                        onMove={(id, folderId) =>
-                          moveMut.mutate({ id, folderId })
-                        }
-                        onOpenShare={(id) =>
-                          setShareFile(files.find((x) => x.id === id) ?? null)
-                        }
-                        onPreview={(file) => setPreviewFile(file)}
-                        onOpenDetails={calmDetails}
-                        onOpenVersions={(file) => setVersionsFile(file)}
-                        onToggleFavorite={(id) =>
-                          metaMut.mutate({ id, favorite: !f.favorite })
-                        }
-                        onEditTags={() => editTags(f)}
-                        onRestore={(id) => restoreMut.mutate(id)}
-                        onPermanentDelete={(id) =>
-                          ask({
-                            title: "Delete forever",
-                            message:
-                              "Permanently delete this file? This can't be undone.",
-                            danger: true,
-                            confirmLabel: "Delete forever",
-                            onConfirm: () => permanentMut.mutate(id),
-                          })
-                        }
-                        canKeepForever={canKeepForever}
-                        trashRetentionDays={trashRetentionDays}
-                        onKeepForever={(id) => keepForeverMut.mutate(id)}
-                        onUnkeepForever={(id) => unkeepForeverMut.mutate(id)}
-                        selected={selected.has(f.id)}
-                        onToggleSelect={selectFile}
-                        anySelected={selCount > 0}
-                        getDragIds={getDragIds}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </div>
-              )}
-              {hasMore && (
-                <div ref={loadMoreRef} aria-hidden="true" className="h-12" />
-              )}
-              {hasMore && (
-                <p className="mt-3 text-center text-xs text-slate-400">
-                  Showing {pagedFiles.length} of {sorted.length}
-                </p>
-              )}
-            </div>
-          )}
-          {theme === "neubrutalism" &&
-            calmHome &&
-            !q &&
-            typeScope === "all" &&
-            showRecentStrip && (
-              <div className="mt-6">
-                <RecentStrip
-                  files={recentFiles}
-                  onOpen={(file) => setDetailFile(file)}
-                />
-              </div>
-            )}
         </main>
       </div>
+      <NewMenu {...newActions} variant="fab" />
+      <UploadZone
+        ref={uploadZoneRef}
+        expiryDays={expiryDays}
+        expiryOptions={EXPIRY_OPTIONS}
+        onExpiryDaysChange={(days) => {
+          setKeepUploadsForever(false);
+          setExpiryDays(days);
+        }}
+        keepForever={keepUploadsForever}
+        onKeepForeverChange={setKeepUploadsForever}
+        onSummaryChange={setUploadSummary}
+        onUploaded={invalidate}
+        inputRef={uploadInputRef}
+        folderId={currentFolderId}
+        folderName={currentFolder?.name}
+      />
       {selectionRect && selectionSelecting && (
         <div
           aria-hidden="true"
           data-ui="selection-rectangle"
-          className="pointer-events-none fixed z-[55] border-2 border-drift-500 bg-drift-500/10"
+          className="pointer-events-none fixed z-[55] rounded border border-primary bg-primary/10"
           style={selectionRect}
         />
       )}
-      <AnimatePresence>
-        {selCount > 0 && (
-          <motion.div
-            initial={barInitial}
-            animate={barAnimate}
-            exit={barExit}
-            className="fixed bottom-5 left-1/2 z-50 flex max-w-[calc(100vw-1rem)] items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-2 drive-shadow-lg flex-wrap justify-center"
-          >
-            <span className="whitespace-nowrap px-1.5 text-sm font-semibold text-slate-700">
-              {selCount}
-              <span className="hidden sm:inline"> selected</span>
-            </span>
-            <div className="mx-0.5 h-6 w-px bg-slate-200" />
-            {filter !== "trash" && (
-              <div className="relative">
-                <button
-                  onClick={() => setMoveBarOpen((v) => !v)}
-                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 sm:px-3"
-                >
-                  <FolderInput size={16} />
-                  <span className="hidden sm:inline">Move</span>
-                </button>
-                <AnimatePresence>
-                  {moveBarOpen && (
-                    <>
-                      <button
-                        className="fixed inset-0 z-40 cursor-default"
-                        aria-label="Close"
-                        onClick={() => setMoveBarOpen(false)}
-                      />
-                      <motion.div
-                        initial={popInitial}
-                        animate={popAnimate}
-                        exit={popInitial}
-                        className="absolute bottom-12 left-0 z-50 max-h-64 w-52 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
-                      >
-                        <button
-                          onClick={() => bulkMove(null)}
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
-                        >
-                          Remove from folder
-                        </button>
-                        <div className="my-1 h-px bg-slate-100" />
-                        {folders.map((fd) => (
-                          <button
-                            key={fd.id}
-                            onClick={() => bulkMove(fd.id)}
-                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
-                          >
-                            <FolderInput
-                              size={15}
-                              className="shrink-0 text-amber-500"
-                            />
-                            <span className="truncate">{fd.name}</span>
-                          </button>
-                        ))}
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
-              </div>
-            )}
-            <button
-              onClick={bulkDownload}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 sm:px-3"
-            >
-              <Download size={16} />
-              <span className="hidden sm:inline">
-                {selCount > 1 ? "Download ZIP" : "Download"}
-              </span>
-            </button>
-            {filter === "trash" ? (
-              <button
-                onClick={() =>
-                  runBulk(
-                    "restore",
-                    Array.from(selected),
-                    undefined,
-                    (n) => `${n} file${n === 1 ? "" : "s"} restored`,
-                  )
-                }
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 sm:px-3"
-              >
-                <RotateCcw size={16} />
-                <span className="hidden sm:inline">Restore</span>
-              </button>
-            ) : (
-              <button
-                onClick={bulkDelete}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50 sm:px-3"
-              >
-                <Trash2 size={16} />
-                <span className="hidden sm:inline">Trash</span>
-              </button>
-            )}
-            <button
-              onClick={() =>
-                runBulk(
-                  "favorite",
-                  Array.from(selected),
-                  undefined,
-                  (n) => `${n} file${n === 1 ? "" : "s"} favorited`,
-                )
-              }
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 sm:px-3"
-            >
-              <Star size={16} />
-              <span className="hidden sm:inline">Favorite</span>
-            </button>
-            {filter !== "trash" && <button disabled={extendingSelection} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-              onClick={() => ask({ title: "Extend selected files", message: `Extend ${selected.size} files by 7 days, up to each file's retention limit? Permanent files remain permanent.`, confirmLabel: "Extend 7 days", onConfirm: () => { void extendSelection(7); } })}>
-              {extendingSelection ? "Extending…" : "Extend 7 days"}
-            </button>}
-            {canKeepForever && filter !== "trash" && (
-              <button
-                onClick={() => bulkKeepForeverMut.mutate(Array.from(selected))}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-drift-600 hover:bg-drift-50 sm:px-3"
-              >
-                <InfinityIcon size={16} />
-                <span className="hidden sm:inline">Keep forever</span>
-              </button>
-            )}
-            <button
-              onClick={() =>
-                setTagsTarget({
-                  ids: Array.from(selected),
-                  initial: [],
-                  bulk: true,
-                })
-              }
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 sm:px-3"
-            >
-              <Tags size={16} />
-              <span className="hidden sm:inline">Tags</span>
-            </button>
-            <div className="mx-0.5 h-6 w-px bg-slate-200" />
-            <button
-              onClick={clearSelection}
-              aria-label="Clear selection"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            >
-              <X size={16} />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
       <AnimatePresence>
         {osDrag && filter !== "trash" && (
           <motion.div
@@ -1914,18 +2024,20 @@ export default function Dashboard({
               dragDepth.current = 0;
               void uploadZoneRef.current?.uploadDrop(e.dataTransfer);
             }}
-            className="fixed inset-0 z-[80] grid place-items-center bg-drift-600/20 backdrop-blur-sm"
+            className="fixed inset-0 z-[80]"
+            data-ui="drop-overlay"
           >
-            <div className="flex flex-col items-center gap-3 rounded-3xl border-2 border-dashed border-drift-400 bg-white/90 px-10 py-8 text-center drive-shadow-lg">
-              <UploadCloud size={36} className="text-drift-600" />
-              <p className="text-base font-semibold text-slate-800">
-                {currentFolder
-                  ? `Drop to upload into “${currentFolder.name}”`
-                  : "Drop to upload to your vault"}
-              </p>
-              <p className="text-sm text-slate-500">
-                Files expire in {expiryDays} day{expiryDays === 1 ? "" : "s"}
-              </p>
+            <div className="pointer-events-none absolute inset-0 top-16 rounded-2xl border-2 border-primary bg-primary/10 md:bottom-4 md:left-64 md:right-4" />
+            <div className="pointer-events-none absolute bottom-8 left-1/2 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-1 rounded-2xl bg-primary px-6 py-3 text-center text-on-primary drive-shadow-lg">
+              <span className="flex items-center gap-2 text-sm">
+                <UploadCloud size={20} aria-hidden="true" />
+                Drop files to upload them to
+              </span>
+              <span className="flex items-center gap-2 text-base font-medium">
+                <FolderIcon size={18} aria-hidden="true" className="fill-current" />
+                {currentFolder ? currentFolder.name : "My Drive"}
+              </span>
+              <span className="text-xs opacity-90">{uploadLifetimeLabel}</span>
             </div>
           </motion.div>
         )}
@@ -2061,45 +2173,126 @@ export default function Dashboard({
     </div>
   );
 }
+function Notice({
+  icon,
+  tone,
+  children,
+}: {
+  icon: React.ReactNode;
+  tone?: "warn" | "danger";
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={
+        "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-4 py-2 text-sm sm:flex-nowrap " +
+        (tone === "danger"
+          ? "bg-red-50 text-red-700"
+          : tone === "warn"
+            ? "bg-amber-50 text-amber-900"
+            : "bg-slate-100 text-muted")
+      }
+    >
+      <span className="shrink-0" aria-hidden="true">
+        {icon}
+      </span>
+      {children}
+    </div>
+  );
+}
 function EmptyState({
   filter,
   hasFiles,
   search,
   inFolder,
+  foldersOnly,
   onClearSearch,
+  onUpload,
+  onNewFolder,
 }: {
   filter: Filter;
   hasFiles: boolean;
   search: string;
   inFolder: boolean;
+  foldersOnly: boolean;
   onClearSearch: () => void;
+  onUpload: () => void;
+  onNewFolder: () => void;
 }) {
-  const msg = search.trim()
-    ? "No files match your search."
-    : inFolder
-      ? "This folder is empty — drop files above, or create a subfolder."
-      : filter === "shared"
-        ? "No shared files yet — use a file or folder's menu to create a link."
-        : filter === "favorites"
-          ? "No favorites yet — star files to keep them handy."
-          : filter === "trash"
-            ? "Trash is empty."
-            : filter === "expiring"
-              ? "Nothing expires in the next 24 hours."
-              : hasFiles
-                ? "No files here."
-                : "Your vault is empty — drop files above to get started.";
+  const searching = !!search.trim();
+  const title = searching
+    ? "No files match your search"
+    : foldersOnly
+      ? "No folders here"
+      : inFolder
+        ? "This folder is empty"
+        : filter === "shared"
+          ? "Nothing shared yet"
+          : filter === "favorites"
+            ? "No favorites yet"
+            : filter === "trash"
+              ? "Trash is empty"
+              : filter === "expiring"
+                ? "Nothing expiring soon"
+                : hasFiles
+                  ? "No files here"
+                  : "Drop files here";
+  const msg = searching
+    ? "Try another name or tag."
+    : foldersOnly
+      ? "Create a folder to group related files."
+      : inFolder
+        ? "Drop files here, or use the New button to upload or add a subfolder."
+        : filter === "shared"
+          ? "Use a file or folder's menu to create a link."
+          : filter === "favorites"
+            ? "Star files to keep them handy."
+            : filter === "trash"
+              ? "Items moved to Trash show up here."
+              : filter === "expiring"
+                ? "Nothing expires in the next 24 hours."
+                : hasFiles
+                  ? "Files in folders appear when you open the folder."
+                  : "Or use the New button to upload files and folders.";
+  const canAdd =
+    !searching && (filter === "all" || inFolder);
+  const Icon = searching
+    ? Search
+    : filter === "trash"
+      ? Trash2
+      : filter === "favorites"
+        ? Star
+        : filter === "expiring"
+          ? Clock
+          : filter === "shared"
+            ? Users
+            : UploadCloud;
   return (
-    <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center text-sm text-slate-400">
-      <HardDrive size={28} className="mb-2 text-slate-300" />
-      {msg}
-      {search.trim() && (
-        <button
-          onClick={onClearSearch}
-          className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-drift-300 hover:text-drift-600"
-        >
+    <div
+      className="flex flex-col items-center px-4 py-16 text-center"
+      data-ui="empty-state"
+    >
+      <span className="grid h-24 w-24 place-items-center rounded-full bg-slate-100 text-primary">
+        <Icon size={40} strokeWidth={1.5} aria-hidden="true" />
+      </span>
+      <h2 className="mt-5 text-[22px] font-normal text-strong">{title}</h2>
+      <p className="mt-1 max-w-sm text-sm text-muted">{msg}</p>
+      {searching && (
+        <button onClick={onClearSearch} className="btn-outlined mt-5">
           Clear search
         </button>
+      )}
+      {canAdd && (
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          {!foldersOnly && (
+            <button onClick={onUpload} className="btn-filled">
+              <UploadCloud size={18} aria-hidden="true" /> Upload files
+            </button>
+          )}
+          <button onClick={onNewFolder} className="btn-outlined">
+            <FolderPlus size={18} aria-hidden="true" /> New folder
+          </button>
+        </div>
       )}
     </div>
   );

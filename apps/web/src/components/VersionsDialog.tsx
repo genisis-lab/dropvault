@@ -13,6 +13,7 @@ import {
 import { downloadOwnedFile } from "../lib/encryption";
 import { formatBytes } from "../lib/format";
 import { useToast } from "./Toast";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.96, y: 10 };
@@ -33,6 +34,7 @@ export default function VersionsDialog({
   file: DriftFile | null;
   onClose: () => void;
 }) {
+  useEscapeToClose(!!file, onClose);
   const { success, error: toastError } = useToast();
   const [versions, setVersions] = useState<FileVersion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,22 +117,22 @@ export default function VersionsDialog({
           animate="show"
           exit="hidden"
           onClick={onClose}
-          className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[70] grid place-items-center bg-black/40 p-4"
         >
           <motion.div
             initial={panelInitial}
             animate={panelAnimate}
             exit={panelExit}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white drive-shadow-lg"
+            className="w-full max-w-md overflow-hidden rounded-[28px] bg-menu drive-shadow-lg"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+            <div className="flex items-center justify-between gap-3 px-6 pb-2 pt-5">
               <div className="flex min-w-0 items-center gap-2.5">
-                <div className="grid h-9 w-9 place-items-center rounded-lg bg-drift-50 text-drift-600">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
                   <History size={18} />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-slate-800">
+                  <h2 className="text-xl font-normal text-strong">
                     Version history
                   </h2>
                   <p
@@ -144,7 +146,7 @@ export default function VersionsDialog({
               <button
                 onClick={onClose}
                 aria-label="Close"
-                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="icon-round"
               >
                 <X size={16} />
               </button>
@@ -175,7 +177,7 @@ export default function VersionsDialog({
                 </label>
               )}
             </div>
-            <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+            <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
               {error ? (
                 <p className="py-6 text-center text-sm text-red-500">{error}</p>
               ) : versions == null ? (

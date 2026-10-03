@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, Check, Info, X } from "lucide-react";
+import { AlertCircle, X } from "lucide-react";
 
 type ToastKind = "success" | "error" | "info";
 // An optional inline action, e.g. "Undo" after moving a file to Trash.
@@ -72,7 +72,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(92vw,22rem)] flex-col gap-2"
+        className="pointer-events-none fixed bottom-4 left-1/2 z-[100] flex w-[min(calc(100vw-2rem),36rem)] -translate-x-1/2 flex-col gap-2 sm:bottom-6 sm:left-6 sm:translate-x-0"
       >
         <AnimatePresence>
           {toasts.map((t) => (
@@ -82,41 +82,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               initial={enter}
               animate={shown}
               exit={enter}
-              className={
-                "pointer-events-auto flex items-start gap-2.5 rounded-xl border bg-white px-3.5 py-3 text-sm drive-shadow-lg " +
-                (t.kind === "error"
-                  ? "border-red-200"
-                  : t.kind === "success"
-                    ? "border-emerald-200"
-                    : "border-slate-200")
-              }
+              className="snackbar pointer-events-auto flex min-h-[3rem] items-center gap-3 rounded-lg py-2 pl-4 pr-2 text-sm"
+              data-kind={t.kind}
             >
-              <span
-                className={
-                  "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full " +
-                  (t.kind === "error"
-                    ? "bg-red-50 text-red-500"
-                    : t.kind === "success"
-                      ? "bg-emerald-50 text-emerald-500"
-                      : "bg-slate-100 text-slate-500")
-                }
-              >
-                {t.kind === "error" ? (
-                  <AlertCircle size={14} />
-                ) : t.kind === "success" ? (
-                  <Check size={14} />
-                ) : (
-                  <Info size={14} />
-                )}
-              </span>
-              <p className="flex-1 leading-snug text-slate-700">{t.message}</p>
+              {t.kind === "error" && (
+                <AlertCircle
+                  size={18}
+                  className="shrink-0 text-[#f2b8b5] dark:text-[#b3261e]"
+                  aria-hidden="true"
+                />
+              )}
+              <p className="min-w-0 flex-1 leading-snug">{t.message}</p>
               {t.action && (
                 <button
                   onClick={() => {
                     t.action?.onClick();
                     remove(t.id);
                   }}
-                  className="-my-0.5 shrink-0 rounded-md px-1.5 py-0.5 font-semibold text-drift-600 transition hover:bg-drift-50 hover:text-drift-700"
+                  className="snackbar-action shrink-0 rounded-full px-3 py-2 font-medium hover:bg-white/10"
                 >
                   {t.action.label}
                 </button>
@@ -124,9 +107,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <button
                 onClick={() => remove(t.id)}
                 aria-label="Dismiss"
-                className="shrink-0 text-slate-300 transition hover:text-slate-500"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full opacity-80 transition hover:bg-white/10 hover:opacity-100"
               >
-                <X size={14} />
+                <X size={18} />
               </button>
             </motion.div>
           ))}
