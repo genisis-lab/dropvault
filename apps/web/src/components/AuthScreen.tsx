@@ -252,19 +252,19 @@ export default function AuthScreen() {
 
   if (twoFactor) {
     return (
-      <div className="grid min-h-screen place-items-center px-4">
+      <div className="grid min-h-screen place-items-center bg-app px-4 py-8">
         <motion.div
           initial={cardInitial}
           animate={cardAnimate}
-          className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 drive-shadow-lg"
+          className="w-full max-w-md rounded-[28px] bg-sheet p-8 sm:p-10"
         >
           <Logo size={28} />
           <div className="mt-6 flex items-center gap-2.5">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-drift-50 text-drift-600">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
               <KeyRound size={18} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-800">
+              <h1 className="text-[28px] font-normal leading-9 text-strong">
                 Two-factor code
               </h1>
               <p className="text-sm text-slate-500">
@@ -281,7 +281,7 @@ export default function AuthScreen() {
                 inputMode={useBackup ? "text" : "numeric"}
                 autoComplete="one-time-code"
                 autoFocus
-                className="w-full bg-transparent outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent outline-none placeholder:text-muted focus-visible:!outline-none"
               />
             </Field>
             <label className="flex items-center gap-2 text-sm text-slate-500">
@@ -294,14 +294,14 @@ export default function AuthScreen() {
               Trust this device for 30 days
             </label>
             {errorMsg && (
-              <p role="alert" className="text-sm text-red-500">
+              <p role="alert" className="text-sm text-red-700">
                 {errorMsg}
               </p>
             )}
             <button
               type="submit"
               disabled={loading || !code.trim()}
-              className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95 disabled:opacity-60"
+              className="btn-filled w-full disabled:opacity-60"
             >
               {loading ? "Verifying…" : "Verify and sign in"}
             </button>
@@ -313,7 +313,7 @@ export default function AuthScreen() {
                 setCode("");
                 setErrorMsg(null);
               }}
-              className="font-semibold text-drift-600 hover:underline"
+              className="font-medium text-primary hover:underline"
             >
               {useBackup ? "Use authenticator code" : "Use backup code"}
             </button>
@@ -338,14 +338,14 @@ export default function AuthScreen() {
 
   if (mode === "forgot" || mode === "reset") {
     return (
-      <div className="grid min-h-screen place-items-center px-4">
+      <div className="grid min-h-screen place-items-center bg-app px-4 py-8">
         <motion.div
           initial={cardInitial}
           animate={cardAnimate}
-          className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 drive-shadow-lg"
+          className="w-full max-w-md rounded-[28px] bg-sheet p-8 sm:p-10"
         >
           <Logo size={28} />
-          <h1 className="mt-6 text-2xl font-bold text-slate-800">
+          <h1 className="mt-6 text-[28px] font-normal leading-9 text-strong">
             {mode === "forgot"
               ? "Reset your password"
               : "Choose a new password"}
@@ -366,7 +366,7 @@ export default function AuthScreen() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Email"
-                  className="w-full bg-transparent outline-none placeholder:text-slate-400"
+                  className="w-full bg-transparent outline-none placeholder:text-muted focus-visible:!outline-none"
                 />
               </Field>
             ) : (
@@ -380,23 +380,23 @@ export default function AuthScreen() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="New password"
-                  className="w-full bg-transparent outline-none placeholder:text-slate-400"
+                  className="w-full bg-transparent outline-none placeholder:text-muted focus-visible:!outline-none"
                 />
               </Field>
             )}
             {errorMsg && (
-              <p role="alert" className="text-sm text-red-500">
+              <p role="alert" className="text-sm text-red-700">
                 {errorMsg}
               </p>
             )}
             {statusMsg && (
-              <p role="status" className="text-sm text-emerald-600">
+              <p role="status" className="text-sm text-emerald-700">
                 {statusMsg}
               </p>
             )}
             <button
               disabled={loading}
-              className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white disabled:opacity-60"
+              className="btn-filled w-full disabled:opacity-60"
             >
               {loading
                 ? "Please wait…"
@@ -411,7 +411,7 @@ export default function AuthScreen() {
               setErrorMsg(null);
               setStatusMsg(null);
             }}
-            className="mt-4 w-full text-sm font-semibold text-drift-600 hover:underline"
+            className="mt-4 w-full text-sm font-medium text-primary hover:underline"
           >
             Back to sign in
           </button>
@@ -421,14 +421,14 @@ export default function AuthScreen() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center px-4">
+    <div className="grid min-h-screen place-items-center bg-app px-4 py-8">
       <motion.div
         initial={cardInitial}
         animate={cardAnimate}
-        className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 drive-shadow-lg"
+        className="w-full max-w-md rounded-[28px] bg-sheet p-8 sm:p-10"
       >
         <Logo size={28} />
-        <h1 className="mt-6 text-2xl font-bold text-slate-800">
+        <h1 className="mt-6 text-[28px] font-normal leading-9 text-strong">
           {mode === "in" ? "Welcome back" : "Create your account"}
         </h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -436,7 +436,7 @@ export default function AuthScreen() {
         </p>
         <button
           onClick={google}
-          className="mt-6 flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white py-2.5 font-medium text-slate-700 transition hover:bg-slate-50"
+          className="btn-outlined mt-6 w-full !text-strong"
         >
           <GoogleMark /> Continue with Google
         </button>
@@ -453,7 +453,7 @@ export default function AuthScreen() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Name"
-                className="w-full bg-transparent outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent outline-none placeholder:text-muted focus-visible:!outline-none"
               />
             </Field>
           )}
@@ -466,7 +466,7 @@ export default function AuthScreen() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
-              className="w-full bg-transparent outline-none placeholder:text-slate-400"
+              className="w-full bg-transparent outline-none placeholder:text-muted focus-visible:!outline-none"
             />
           </Field>
           <Field icon={<Lock size={16} />}>
@@ -480,7 +480,7 @@ export default function AuthScreen() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
-              className="w-full bg-transparent outline-none placeholder:text-slate-400"
+              className="w-full bg-transparent outline-none placeholder:text-muted focus-visible:!outline-none"
             />
             <button
               type="button"
@@ -508,19 +508,19 @@ export default function AuthScreen() {
             </div>
           )}
           {errorMsg && (
-            <p role="alert" className="text-sm text-red-500">
+            <p role="alert" className="text-sm text-red-700">
               {errorMsg}
             </p>
           )}
           {statusMsg && (
-            <p role="status" className="text-sm text-emerald-600">
+            <p role="status" className="text-sm text-emerald-700">
               {statusMsg}
             </p>
           )}
           <button
             type="submit"
             disabled={loading || (Boolean(siteKey) && !captchaToken)}
-            className="w-full rounded-xl bg-gradient-to-r from-drift-500 via-glow-500 to-blush-500 py-2.5 font-semibold text-white shadow-lg shadow-glow-500/25 transition hover:opacity-95 disabled:opacity-60"
+            className="btn-filled w-full disabled:opacity-60"
           >
             {loading
               ? "Please wait…"
@@ -536,7 +536,7 @@ export default function AuthScreen() {
               setErrorMsg(null);
               setStatusMsg(null);
             }}
-            className="mt-3 w-full text-center text-sm font-medium text-drift-600 hover:underline"
+            className="mt-3 w-full text-center text-sm font-medium text-primary hover:underline"
           >
             Forgot password?
           </button>
@@ -549,7 +549,7 @@ export default function AuthScreen() {
               setErrorMsg(null);
               setStatusMsg(null);
             }}
-            className="font-semibold text-drift-600 hover:underline"
+            className="font-medium text-primary hover:underline"
           >
             {mode === "in" ? "Create an account" : "Sign in"}
           </button>
@@ -561,8 +561,8 @@ export default function AuthScreen() {
 
 function Field({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-800 transition focus-within:border-drift-400 focus-within:ring-2 focus-within:ring-drift-200">
-      <span className="text-slate-400">{icon}</span>
+    <div className="flex h-14 items-center gap-3 rounded border border-outline bg-transparent px-4 text-strong transition focus-within:border-primary focus-within:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]">
+      <span className="text-muted">{icon}</span>
       {children}
     </div>
   );

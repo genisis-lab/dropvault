@@ -3,14 +3,15 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
   Folder,
+  FolderOpen,
   Info,
   Link2,
   Lock,
   MoreVertical,
   Pencil,
-  Share2,
   SlidersHorizontal,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import type { Folder as FolderT } from "../lib/api";
@@ -120,77 +121,97 @@ export default function FolderCard({
           <button
             className="fixed inset-0 z-30 cursor-default"
             aria-label="Close menu"
+            tabIndex={-1}
             onClick={() => setMenuOpen(false)}
           />
           <motion.div
             ref={menuPanelRef}
+            role="menu"
             initial={menuInitial}
             animate={menuAnimate}
             exit={menuInitial}
-            className="absolute right-0 top-9 z-40 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
+            className="menu-surface absolute right-0 top-9 z-40 w-56"
           >
+            <button
+              role="menuitem"
+              onClick={() => {
+                onOpen(folder.id);
+                setMenuOpen(false);
+              }}
+              className="menu-item"
+            >
+              <FolderOpen size={18} /> Open
+            </button>
             {onOpenDetails && (
               <button
+                role="menuitem"
                 onClick={() => {
                   onOpenDetails(folder.id);
                   setMenuOpen(false);
                 }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                className="menu-item"
               >
-                <Info size={15} /> Details
+                <Info size={18} /> Details
               </button>
             )}
+            <div className="menu-divider" />
             <button
+              role="menuitem"
               disabled={busy}
               onClick={copyLink}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="menu-item"
             >
               {copied ? (
-                <Check size={15} className="text-emerald-500" />
+                <Check size={18} className="!text-emerald-600" />
               ) : (
-                <Link2 size={15} />
+                <Link2 size={18} />
               )}
               {folder.shareToken ? "Copy link" : "Get link"}
             </button>
             {onOpenShare && (
               <button
+                role="menuitem"
                 onClick={() => {
                   onOpenShare(folder.id);
                   setMenuOpen(false);
                 }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                className="menu-item"
               >
-                <SlidersHorizontal size={15} /> Share settings…
+                <SlidersHorizontal size={18} /> Share settings…
               </button>
             )}
             {folder.shareToken && (
               <button
+                role="menuitem"
                 onClick={() => {
                   onRevoke(folder.id);
                   setMenuOpen(false);
                 }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                className="menu-item"
               >
-                <X size={15} /> Revoke link
+                <X size={18} /> Revoke link
               </button>
             )}
+            <div className="menu-divider" />
             <button
+              role="menuitem"
               onClick={() => {
                 onRename(folder.id);
                 setMenuOpen(false);
               }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-slate-50"
+              className="menu-item"
             >
-              <Pencil size={15} /> Rename
+              <Pencil size={18} /> Rename
             </button>
             <button
+              role="menuitem"
               onClick={() => {
                 onDelete(folder.id);
                 setMenuOpen(false);
               }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50"
+              className="menu-item"
             >
-              <Trash2 size={15} /> Delete
+              <Trash2 size={18} /> Delete
             </button>
           </motion.div>
         </>
@@ -198,18 +219,29 @@ export default function FolderCard({
     </AnimatePresence>
   );
 
-  const ringClass = dropActive
-    ? "border-drift-400 ring-2 ring-drift-400/60 bg-drift-500/5"
-    : "border-slate-200 hover:border-slate-300";
+  const actionsButton = (
+    <div className="relative">
+      <button
+        ref={menuTriggerRef}
+        onClick={toggleMenu}
+        aria-label="Folder actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition hover:bg-[rgb(var(--c-strong)/0.08)] hover:text-strong"
+      >
+        <MoreVertical size={18} />
+      </button>
+      {menu}
+    </div>
+  );
 
-  const shareBadge = folder.shareToken ? (
-    <span className="hidden items-center gap-1 rounded-full bg-drift-50 px-2 py-0.5 text-[11px] font-medium text-drift-600 sm:inline-flex">
-      <Share2 size={11} /> Shared
-      {folder.shareHasPassword && (
-        <Lock size={10} className="text-drift-500/80" />
-      )}
-    </span>
-  ) : null;
+  const folderIcon = (
+    <Folder
+      size={20}
+      className="shrink-0 fill-current text-[#5f6368] dark:text-[#c4c7c5]"
+      aria-hidden="true"
+    />
+  );
 
   if (view === "list") {
     return (
@@ -222,39 +254,47 @@ export default function FolderCard({
         onDragLeave={() => setDropActive(false)}
         onDrop={handleDrop}
         className={
-          "relative flex items-center gap-3 border-l-2 px-4 py-2.5 transition " +
+          "group relative flex min-h-[3rem] items-center gap-3 border-b border-slate-200 px-2 py-1.5 transition-colors sm:px-3 " +
           (dropActive
-            ? "border-drift-400 bg-drift-500/5"
-            : "border-transparent hover:bg-slate-50")
+            ? "bg-selected"
+            : "hover:bg-[rgb(var(--c-strong)/0.04)]")
         }
+        data-ui="folder-row"
       >
+        <span className="hidden sm:block" />
         <button
           onClick={() => onOpen(folder.id)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-500">
-            <Folder size={18} />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-800">
+          <span className="grid h-8 w-8 shrink-0 place-items-center">
+            {folderIcon}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium text-strong">
               {folder.name}
-            </p>
-            <p className="text-xs text-slate-400">{meta}</p>
-          </div>
+            </span>
+            <span className="block text-xs text-muted sm:hidden">
+              {dropActive ? "Drop to move here" : meta}
+            </span>
+          </span>
         </button>
-        {shareBadge}
-        <div className="relative">
-          <button
-            ref={menuTriggerRef}
-            onClick={toggleMenu}
-            aria-label="Folder actions"
-            aria-expanded={menuOpen}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <MoreVertical size={16} />
-          </button>
-          {menu}
-        </div>
+        <span className="hidden min-w-0 items-center gap-1.5 text-sm text-muted sm:flex">
+          {folder.shareToken ? (
+            <>
+              <Users size={15} className="shrink-0" /> Shared
+              {folder.shareHasPassword && (
+                <Lock size={13} aria-label="Password protected" />
+              )}
+            </>
+          ) : (
+            <span className="text-faint">Only you</span>
+          )}
+        </span>
+        <span className="hidden text-sm text-faint sm:block">—</span>
+        <span className="hidden text-sm text-muted sm:block">
+          {dropActive ? "Drop here" : meta}
+        </span>
+        <div className="flex justify-end">{actionsButton}</div>
       </motion.div>
     );
   }
@@ -269,43 +309,31 @@ export default function FolderCard({
       onDragLeave={() => setDropActive(false)}
       onDrop={handleDrop}
       className={
-        "group relative flex items-center gap-3 rounded-2xl border bg-white px-3 py-3 drive-shadow transition hover:shadow-md " +
-        ringClass
+        "group relative flex h-12 items-center gap-1 rounded-xl pl-1 pr-1 transition-colors " +
+        (dropActive
+          ? "bg-selected ring-2 ring-primary"
+          : "bg-slate-100 hover:bg-[rgb(var(--c-strong)/0.1)]")
       }
+      data-ui="folder-tile"
     >
       <button
         onClick={() => onOpen(folder.id)}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-xl pl-3 text-left"
+        title={dropActive ? "Drop to move here" : `${folder.name} · ${meta}`}
       >
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-500">
-          <Folder size={20} />
-        </div>
-        <div className="min-w-0">
-          <p
-            className="truncate text-sm font-semibold text-slate-800"
-            title={folder.name}
-          >
-            {folder.name}
-          </p>
-          <p className="text-xs text-slate-400">
-            {dropActive
-              ? "Drop to move here"
-              : meta + (folder.shareToken ? " · shared" : "")}
-          </p>
-        </div>
+        {folderIcon}
+        <span className="min-w-0 truncate text-sm font-medium text-strong">
+          {dropActive ? "Drop to move here" : folder.name}
+        </span>
+        {folder.shareToken && !dropActive && (
+          <Users
+            size={14}
+            aria-label="Shared"
+            className="shrink-0 text-muted"
+          />
+        )}
       </button>
-      <div className="relative">
-        <button
-          ref={menuTriggerRef}
-          onClick={toggleMenu}
-          aria-label="Folder actions"
-          aria-expanded={menuOpen}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-        >
-          <MoreVertical size={16} />
-        </button>
-        {menu}
-      </div>
+      {actionsButton}
     </motion.div>
   );
 }

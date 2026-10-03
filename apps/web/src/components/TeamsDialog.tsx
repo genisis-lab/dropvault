@@ -41,6 +41,7 @@ import {
 import { formatBytes } from "../lib/format";
 import { useToast } from "./Toast";
 import { useConfirm } from "./Dialog";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const backdrop = { hidden: { opacity: 0 }, show: { opacity: 1 } };
 const panelInitial = { opacity: 0, scale: 0.96, y: 10 };
@@ -82,6 +83,7 @@ export default function TeamsDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  useEscapeToClose(open, onClose);
   const qc = useQueryClient();
   const { success, error } = useToast();
   const [confirmUi, confirm] = useConfirm();
@@ -255,22 +257,22 @@ export default function TeamsDialog({
           animate="show"
           exit="hidden"
           onClick={onClose}
-          className="fixed inset-0 z-[70] grid place-items-end bg-slate-900/40 p-0 backdrop-blur-sm sm:place-items-center sm:p-4"
+          className="fixed inset-0 z-[70] grid place-items-end bg-black/40 p-0 sm:place-items-center sm:p-4"
         >
           <motion.div
             initial={panelInitial}
             animate={panelAnimate}
             exit={panelExit}
             onClick={(e) => e.stopPropagation()}
-            className="flex h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white drive-shadow-lg sm:h-auto sm:max-h-[88vh] sm:rounded-2xl"
+            className="flex h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-[28px] bg-menu drive-shadow-lg sm:h-auto sm:max-h-[88vh] sm:rounded-[28px]"
           >
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5 sm:py-4">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-6 sm:py-4">
               <div className="flex min-w-0 items-center gap-2.5">
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-drift-50 text-drift-600">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
                   <Users size={18} />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="truncate text-sm font-semibold text-slate-800">
+                  <h2 className="truncate text-xl font-normal text-strong">
                     Teams & shared spaces
                   </h2>
                   <p className="truncate text-xs text-slate-400">
@@ -299,11 +301,11 @@ export default function TeamsDialog({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="New team"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                    className="min-w-0 flex-1 rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                   />
                   <button
                     disabled={!name.trim() || createMut.isPending}
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-drift-500 text-white disabled:opacity-50"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-drift-600 text-white btn-primary disabled:opacity-50"
                   >
                     <Plus size={16} />
                   </button>
@@ -388,7 +390,7 @@ export default function TeamsDialog({
                       </button>
                     </div>
                     <div className="rounded-2xl border border-slate-200 p-3">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <h4 className="text-sm font-medium text-strong">
                         Add specific items
                       </h4>
                       <p className="mt-1 text-xs text-slate-500">
@@ -399,7 +401,7 @@ export default function TeamsDialog({
                         value={itemSearch}
                         onChange={(e) => setItemSearch(e.target.value)}
                         placeholder="Search your folders and files"
-                        className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                        className="mt-3 drive-field"
                       />
                       <div className="mt-3 grid max-h-64 gap-2 overflow-y-auto sm:grid-cols-2">
                         <ItemPicker
@@ -438,7 +440,7 @@ export default function TeamsDialog({
                         disabled={
                           selectedItems.size === 0 || addItemsMut.isPending
                         }
-                        className="mt-3 w-full rounded-lg bg-drift-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+                        className="mt-3 w-full rounded-full bg-drift-600 px-3 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50 sm:w-auto"
                       >
                         Add {selectedItems.size || "selected"} item
                         {selectedItems.size === 1 ? "" : "s"}
@@ -447,7 +449,7 @@ export default function TeamsDialog({
                     <div className="rounded-2xl border border-slate-200 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          <h4 className="text-sm font-medium text-strong">
                             Shared in this space
                           </h4>
                           <p className="mt-1 text-xs text-slate-500">
@@ -500,7 +502,7 @@ export default function TeamsDialog({
                       )}
                     </div>
                     <div className="rounded-2xl border border-slate-200 p-3">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <h4 className="text-sm font-medium text-strong">
                         Members
                       </h4>
                       <form
@@ -515,7 +517,7 @@ export default function TeamsDialog({
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           placeholder="member@example.com"
-                          className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-drift-400"
+                          className="min-w-0 rounded border border-outline bg-transparent px-3 py-2 text-sm outline-none focus:border-primary focus:[box-shadow:inset_0_0_0_1px_rgb(var(--c-primary))]"
                         />
                         <select
                           value={role}
@@ -528,7 +530,7 @@ export default function TeamsDialog({
                         </select>
                         <button
                           disabled={!email.trim() || addMut.isPending}
-                          className="rounded-lg bg-drift-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                          className="rounded-full bg-drift-600 px-3 py-2 text-sm font-medium text-white btn-primary disabled:opacity-50"
                         >
                           Add
                         </button>
@@ -588,7 +590,7 @@ export default function TeamsDialog({
                 e.stopPropagation();
                 setPreviewFile(null);
               }}
-              className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/80 p-3 backdrop-blur-sm"
+              className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/80 p-3"
             >
               <div
                 onClick={(e) => e.stopPropagation()}

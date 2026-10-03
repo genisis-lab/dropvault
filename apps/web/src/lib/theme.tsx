@@ -7,57 +7,48 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import {
-  Box,
-  Check,
-  Cloud,
-  Moon,
-  Newspaper,
-  RotateCcw,
-  Sun,
-  Sunset,
-  type LucideIcon,
-} from "lucide-react";
 import {
   DEFAULT_THEME,
-  isTheme,
-  THEME_OPTIONS,
-  THEMES,
+  effectiveTheme,
+  resolveTheme,
+  type ResolvedTheme,
   type Theme,
 } from "./theme-config";
 
-export type { Theme } from "./theme-config";
-export { DEFAULT_THEME, THEME_OPTIONS, THEMES } from "./theme-config";
+export type { ResolvedTheme, Theme } from "./theme-config";
+export {
+  DEFAULT_THEME,
+  THEME_OPTIONS,
+  THEMES,
+  themeLabel,
+} from "./theme-config";
 
 const API = import.meta.env.VITE_API_URL ?? "";
 const PREFERENCE_KEY = "dropvault-theme";
 const WORKSPACE_KEY = "dropvault-workspace-theme";
 const DEFAULT_THEME_EVENT = "dropvault-default-theme";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-const THEME_ICONS: Record<Theme, LucideIcon> = {
-  neubrutalism: Box,
-  pressroom: Newspaper,
-  quiet: Cloud,
-  light: Sun,
-  dark: Moon,
-  sunset: Sunset,
-};
+function prefersDark(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia(DARK_QUERY).matches;
+}
 
-export function applyTheme(theme: Theme) {
-  if (typeof document === "undefined") return;
+export function applyTheme(theme: Theme): ResolvedTheme {
+  const resolved = effectiveTheme(theme, prefersDark());
+  if (typeof document === "undefined") return resolved;
   const el = document.documentElement;
-  el.classList.remove(...THEMES);
-  if (theme !== "light") el.classList.add(theme);
+  el.classList.toggle("dark", resolved === "dark");
   el.dataset.theme = theme;
-  el.style.colorScheme = theme === "dark" || theme === "sunset" ? "dark" : "light";
+  el.style.colorScheme = resolved;
+  return resolved;
 }
 
 function readStorage(key: string): Theme | null {
   if (typeof localStorage === "undefined") return null;
   try {
     const value = localStorage.getItem(key);
-    return isTheme(value) ? value : null;
+    return value == null ? null : resolveTheme(value, DEFAULT_THEME);
   } catch {
     return null;
   }
@@ -93,7 +84,7 @@ export async function fetchWorkspaceDefaultTheme(): Promise<Theme> {
   const response = await fetch(`${API}/api/theme`, { credentials: "include" });
   if (!response.ok) throw new Error("Could not load the workspace theme");
   const body = (await response.json()) as { theme?: unknown };
-  return isTheme(body.theme) ? body.theme : DEFAULT_THEME;
+  return resolveTheme(body.theme);
 }
 
 export function announceWorkspaceDefaultTheme(theme: Theme) {
@@ -104,7 +95,10 @@ export function announceWorkspaceDefaultTheme(theme: Theme) {
 }
 
 type ThemeContextValue = {
+  // The chosen appearance, which may be "system".
   theme: Theme;
+  // What is actually on screen.
+  resolvedTheme: ResolvedTheme;
   workspaceDefault: Theme;
   followsWorkspaceDefault: boolean;
   setTheme: (theme: Theme) => void;
@@ -113,6 +107,7 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: DEFAULT_THEME,
+  resolvedTheme: "light",
   workspaceDefault: DEFAULT_THEME,
   followsWorkspaceDefault: true,
   setTheme: () => {},
@@ -126,6 +121,9 @@ export function useTheme() {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [initial] = useState(initialTheme);
   const [theme, setThemeState] = useState<Theme>(initial.theme);
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
+    effectiveTheme(initial.theme, prefersDark()),
+  );
   const [workspaceDefault, setWorkspaceDefault] = useState<Theme>(
     initial.workspaceDefault,
   );
@@ -134,7 +132,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    applyTheme(theme);
+    setResolvedTheme(applyTheme(theme));
+    if (theme !== "system" || !window.matchMedia) return;
+    const query = window.matchMedia(DARK_QUERY);
+    const onChange = () => setResolvedTheme(applyTheme("system"));
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
   }, [theme]);
 
   useEffect(() => {
@@ -154,8 +157,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onDefaultTheme = (event: Event) => {
-      const next = (event as CustomEvent<unknown>).detail;
-      if (!isTheme(next)) return;
+      const next = resolveTheme((event as CustomEvent<unknown>).detail);
       setWorkspaceDefault(next);
       if (followsWorkspaceDefault) setThemeState(next);
     };
@@ -178,6 +180,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ThemeContextValue>(
     () => ({
       theme,
+      resolvedTheme,
       workspaceDefault,
       followsWorkspaceDefault,
       setTheme,
@@ -185,6 +188,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }),
     [
       theme,
+      resolvedTheme,
       workspaceDefault,
       followsWorkspaceDefault,
       setTheme,
@@ -194,105 +198,5 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   return (
     <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
-  );
-}
-
-const menuInitial = { opacity: 0, scale: 0.95, y: -4 };
-const menuAnimate = { opacity: 1, scale: 1, y: 0 };
-
-export function ThemeToggle() {
-  const {
-    theme,
-    workspaceDefault,
-    followsWorkspaceDefault,
-    setTheme,
-    useWorkspaceDefault,
-  } = useTheme();
-  const [open, setOpen] = useState(false);
-  const current = THEME_OPTIONS.find((option) => option.id === theme) ?? THEME_OPTIONS[0];
-  const CurrentIcon = THEME_ICONS[current.id];
-  const defaultLabel =
-    THEME_OPTIONS.find((option) => option.id === workspaceDefault)?.label ??
-    "Workspace theme";
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((value) => !value)}
-        title={`Theme: ${current.label}`}
-        aria-label="Change theme"
-        className="grid h-9 w-9 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-      >
-        <CurrentIcon size={18} />
-      </button>
-      <AnimatePresence>
-        {open && (
-          <>
-            <button
-              className="fixed inset-0 z-30 cursor-default"
-              aria-label="Close theme menu"
-              onClick={() => setOpen(false)}
-            />
-            <motion.div
-              initial={menuInitial}
-              animate={menuAnimate}
-              exit={menuInitial}
-              className="absolute right-0 top-11 z-40 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm drive-shadow-lg"
-            >
-              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Appearance
-              </div>
-              {THEME_OPTIONS.map((option) => {
-                const OptionIcon = THEME_ICONS[option.id];
-                return (
-                  <button
-                    key={option.id}
-                    onClick={() => {
-                      setTheme(option.id);
-                      setOpen(false);
-                    }}
-                    className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
-                  >
-                    <OptionIcon size={16} className="mt-0.5 shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 font-medium">
-                        {option.label}
-                        {!followsWorkspaceDefault && theme === option.id && (
-                          <Check size={14} className="ml-auto text-drift-500" />
-                        )}
-                      </span>
-                      <span className="block text-xs text-slate-400">
-                        {option.description}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-              <div className="my-1 h-px bg-slate-100" />
-              <button
-                onClick={() => {
-                  useWorkspaceDefault();
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
-              >
-                <RotateCcw size={15} />
-                <span>
-                  <span className="flex items-center gap-2 font-medium">
-                    Use workspace default
-                    {followsWorkspaceDefault && (
-                      <Check size={14} className="ml-auto text-drift-500" />
-                    )}
-                  </span>
-                  <span className="block text-xs text-slate-400">
-                    Currently {defaultLabel}
-                  </span>
-                </span>
-              </button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </div>
   );
 }

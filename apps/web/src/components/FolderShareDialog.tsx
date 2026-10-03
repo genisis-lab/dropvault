@@ -25,6 +25,7 @@ import {
 } from "../lib/api";
 import { copyText, copyTextFrom } from "../lib/clipboard";
 import { useToast } from "./Toast";
+import { useEscapeToClose } from "../lib/useEscapeToClose";
 
 const EXPIRY_CHOICES: { value: number; label: string }[] = [
   { value: 0, label: "No expiry" },
@@ -60,6 +61,7 @@ export default function FolderShareDialog({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  useEscapeToClose(!!folder, onClose);
   const { success, error } = useToast();
   const [password, setPassword] = useState("");
   const [limit, setLimit] = useState(
@@ -161,22 +163,22 @@ export default function FolderShareDialog({
           animate="show"
           exit="hidden"
           onClick={onClose}
-          className="fixed inset-0 z-[60] grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4"
         >
           <motion.div
             initial={panelInitial}
             animate={panelAnimate}
             exit={panelExit}
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[92vh] w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white drive-shadow-lg"
+            className="max-h-[92vh] w-full max-w-lg overflow-hidden rounded-[28px] bg-menu drive-shadow-lg"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+            <div className="flex items-center justify-between gap-3 px-6 pb-2 pt-5">
               <div className="flex min-w-0 items-center gap-2.5">
-                <div className="grid h-9 w-9 place-items-center rounded-lg bg-drift-50 text-drift-600">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-drift-50 text-drift-700">
                   <Link2 size={18} />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-slate-800">
+                  <h2 className="text-xl font-normal text-strong">
                     Share folder
                   </h2>
                   <p
@@ -190,12 +192,12 @@ export default function FolderShareDialog({
               <button
                 onClick={onClose}
                 aria-label="Close"
-                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="icon-round"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="max-h-[72vh] space-y-4 overflow-y-auto px-5 py-4">
+            <div className="max-h-[72vh] space-y-4 overflow-y-auto px-6 py-4">
               <label className="block">
                 <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
                   <Eye size={13} /> Access mode
@@ -205,7 +207,7 @@ export default function FolderShareDialog({
                   onChange={(e) =>
                     setAccessMode(e.target.value as typeof accessMode)
                   }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                  className="drive-field"
                 >
                   <option value="download">Browse and download</option>
                   <option value="preview">Browse / preview only</option>
@@ -227,7 +229,7 @@ export default function FolderShareDialog({
                         ? "Set — type to change"
                         : "No password"
                     }
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                    className="drive-field"
                   />
                 </label>
                 <label className="block">
@@ -240,7 +242,7 @@ export default function FolderShareDialog({
                     value={limit}
                     onChange={(e) => setLimit(e.target.value)}
                     placeholder="Unlimited"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                    className="drive-field"
                   />
                 </label>
               </div>
@@ -252,7 +254,7 @@ export default function FolderShareDialog({
                   <select
                     value={expiry}
                     onChange={(e) => setExpiry(Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                    className="drive-field"
                   >
                     {EXPIRY_CHOICES.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -285,7 +287,7 @@ export default function FolderShareDialog({
                       onChange={(e) => setAllowlist(e.target.value)}
                       placeholder="one@example.com, two@example.com"
                       rows={2}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                      className="drive-field"
                     />
                   </label>
                   <label className="block">
@@ -297,7 +299,7 @@ export default function FolderShareDialog({
                       onChange={(e) => setIpAllowlist(e.target.value)}
                       placeholder="203.0.113.10"
                       rows={2}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                      className="drive-field"
                     />
                   </label>
                   <label className="block">
@@ -310,7 +312,7 @@ export default function FolderShareDialog({
                         setCountryAllowlist(e.target.value.toUpperCase())
                       }
                       placeholder="US, CA"
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-drift-400"
+                      className="drive-field"
                     />
                   </label>
                 </div>
@@ -391,7 +393,7 @@ export default function FolderShareDialog({
                 allowlist settings as the folder link.
               </p>
             </div>
-            <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-3.5">
+            <div className="flex items-center justify-between gap-2 px-6 pb-6 pt-4">
               {hasLink ? (
                 <button
                   onClick={revoke}
@@ -406,7 +408,7 @@ export default function FolderShareDialog({
               <button
                 onClick={submit}
                 disabled={busy}
-                className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-drift-600 via-glow-500 to-blush-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:brightness-105 disabled:opacity-60"
+                className="flex items-center gap-1.5 rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white shadow-md transition disabled:opacity-60"
               >
                 <Link2 size={15} /> {hasLink ? "Update link" : "Create link"}
               </button>

@@ -14,7 +14,7 @@ const keys: Key[] = [
   "rolePermissions",
 ];
 const current: Record<Key, string> = {
-  defaultTheme: "neubrutalism",
+  defaultTheme: "light",
   publicSharingEnabled: "true",
   rolePermissions: "",
 };
@@ -28,14 +28,14 @@ describe("requested workspace settings", () => {
   it("does not renormalize unchanged policy values in a full theme request", () => {
     const result = applyRequestedSettingChanges(
       current,
-      { ...current, defaultTheme: "pressroom" },
+      { ...current, defaultTheme: "dark" },
       keys,
       normalize,
     );
 
     expect(result).toEqual({
       ...current,
-      defaultTheme: "pressroom",
+      defaultTheme: "dark",
     });
   });
 

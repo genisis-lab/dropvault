@@ -4,22 +4,17 @@ import { formatBytes } from "../lib/format";
 
 type Cat = { key: string; label: string; bar: string; dot: string };
 const CATS: Cat[] = [
-  {
-    key: "images",
-    label: "Images",
-    bar: "bg-emerald-400",
-    dot: "bg-emerald-400",
-  },
-  { key: "videos", label: "Videos", bar: "bg-rose-400", dot: "bg-rose-400" },
-  { key: "audio", label: "Audio", bar: "bg-violet-400", dot: "bg-violet-400" },
-  { key: "docs", label: "Documents", bar: "bg-drift-400", dot: "bg-drift-400" },
+  { key: "images", label: "Images", bar: "bg-[#ea4335]", dot: "bg-[#ea4335]" },
+  { key: "videos", label: "Videos", bar: "bg-[#fbbc04]", dot: "bg-[#fbbc04]" },
+  { key: "audio", label: "Audio", bar: "bg-[#34a853]", dot: "bg-[#34a853]" },
+  { key: "docs", label: "Documents", bar: "bg-[#4285f4]", dot: "bg-[#4285f4]" },
   {
     key: "archives",
     label: "Archives",
-    bar: "bg-amber-400",
-    dot: "bg-amber-400",
+    bar: "bg-[#a142f4]",
+    dot: "bg-[#a142f4]",
   },
-  { key: "other", label: "Other", bar: "bg-slate-300", dot: "bg-slate-300" },
+  { key: "other", label: "Other", bar: "bg-[#9aa0a6]", dot: "bg-[#9aa0a6]" },
 ];
 function catOf(type: string | null): string {
   const t = (type || "").toLowerCase();
@@ -74,16 +69,16 @@ export default function StorageBreakdown({ files }: { files: DriftFile[] }) {
 
   if (total === 0) return null;
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 drive-shadow">
+    <section className="rounded-xl bg-slate-100 p-4" aria-label="Storage breakdown">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">
+        <h2 className="text-base font-medium text-strong">
           Storage breakdown
-        </h3>
-        <span className="text-xs text-slate-400">
+        </h2>
+        <span className="text-sm text-muted">
           {formatBytes(total)} total
         </span>
       </div>
-      <div className="mb-3 flex h-2.5 overflow-hidden rounded-full bg-slate-100">
+      <div className="mb-3 flex h-2 gap-0.5 overflow-hidden rounded-full bg-slate-200">
         {rows.map((r) => (
           <div
             key={r.key}
@@ -95,15 +90,15 @@ export default function StorageBreakdown({ files }: { files: DriftFile[] }) {
       </div>
       <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
         {rows.map((r) => (
-          <li key={r.key} className="flex items-center gap-2 text-xs">
+          <li key={r.key} className="flex items-center gap-2 text-sm">
             <span className={"h-2.5 w-2.5 shrink-0 rounded-full " + r.dot} />
-            <span className="text-slate-600">{r.label}</span>
-            <span className="ml-auto text-slate-400">
+            <span className="text-strong">{r.label}</span>
+            <span className="ml-auto text-muted">
               {formatBytes(r.bytes)}
             </span>
           </li>
         ))}
       </ul>
-    </div>
+    </section>
   );
 }

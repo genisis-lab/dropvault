@@ -1,20 +1,25 @@
-export const DEFAULT_THEME = "neubrutalism";
+// The app has one look in three appearances: light, dark, and "system", which
+// follows the viewer's device setting.
+export const DEFAULT_THEME = "system";
 
-export const PUBLIC_THEMES = [
-  "neubrutalism",
-  "pressroom",
-  "quiet",
-  "light",
-  "dark",
-  "sunset",
-] as const;
+export const PUBLIC_THEMES = ["light", "dark", "system"] as const;
 
 export type PublicTheme = (typeof PUBLIC_THEMES)[number];
 
+// Workspaces saved before the redesign may still hold one of the retired
+// themes. The dark ones keep a dark appearance; the rest become light.
+const LEGACY_THEMES: Record<string, PublicTheme> = {
+  sunset: "dark",
+  neubrutalism: "light",
+  pressroom: "light",
+  quiet: "light",
+};
+
 export function normalizeTheme(value: unknown): PublicTheme {
-  return PUBLIC_THEMES.includes(value as PublicTheme)
-    ? (value as PublicTheme)
-    : DEFAULT_THEME;
+  if (PUBLIC_THEMES.includes(value as PublicTheme)) return value as PublicTheme;
+  if (typeof value === "string" && value in LEGACY_THEMES)
+    return LEGACY_THEMES[value];
+  return DEFAULT_THEME;
 }
 
 export async function workspaceDefaultTheme(
