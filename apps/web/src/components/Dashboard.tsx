@@ -68,6 +68,7 @@ import {
 } from "../lib/adminRoute";
 import { useLayout } from "../lib/layout";
 import { folderPath } from "../lib/folderPath";
+import { dashboardHeading, dashboardSubtitle } from "../lib/dashboardHeading";
 import { isTypingTarget, shortcutFor } from "../lib/shortcuts";
 import { useEscapeToClose } from "../lib/useEscapeToClose";
 import type { NotificationDestination } from "../lib/notificationTarget";
@@ -762,6 +763,8 @@ export default function Dashboard({
     clearSelection();
   }
   function openFolder(id: string) {
+    // Opening a folder from search results shows the folder itself.
+    setSearch("");
     setCurrentFolderId(id);
     setFilterState("all");
     clearSelection();
@@ -793,6 +796,8 @@ export default function Dashboard({
         if (filter === "shared" && !f.shareToken) return false;
         if (filter === "expiring" && (f.keepForever || f.expiresAt <= now || f.expiresAt - now >= DAY)) return false;
         if (filter === "trash") return true;
+        // "Search in Dropvault" looks inside every folder, not just this one.
+        if (q) return true;
         if (currentFolderId) return f.folderId === currentFolderId;
         if (filter === "all") return !f.folderId;
         return true;
@@ -845,11 +850,12 @@ export default function Dashboard({
   }
   function isSelectionControlTarget(target: EventTarget | null): boolean {
     if (!(target instanceof Element)) return false;
-    return Boolean(
-      target.closest(
-        "[data-file-actions], [data-file-select-toggle], button, a, input, select, textarea",
-      ),
+    const control = target.closest(
+      "[data-file-actions], [data-file-select-toggle], button, a, input, select, textarea",
     );
+    // Filenames are buttons so they can be clicked and focused, but they
+    // cover most of a row: long-press and drag selection still start there.
+    return Boolean(control && !control.hasAttribute("data-file-open"));
   }
   function rectFromPoints(
     startX: number,
@@ -1088,10 +1094,10 @@ export default function Dashboard({
   const visibleFolders = useMemo(
     () =>
       showFolderSection
-        ? folders.filter(
-            (fd) =>
-              (fd.parentId ?? null) === currentFolderId &&
-              (!q || fd.name.toLowerCase().includes(q)),
+        ? folders.filter((fd) =>
+            q
+              ? fd.name.toLowerCase().includes(q)
+              : (fd.parentId ?? null) === currentFolderId,
           )
         : [],
     [folders, q, showFolderSection, currentFolderId],
@@ -1101,14 +1107,19 @@ export default function Dashboard({
     [folders],
   );
   const firstName = userName ? userName.split(" ")[0] : "";
-  const heading = calmHome
-    ? firstName
-      ? `Welcome back, ${firstName}`
-      : "Welcome to Dropvault"
-    : currentFolder
-      ? currentFolder.name
-      : titleFor(filter);
+  const heading = dashboardHeading({
+    search,
+    greet: calmHome,
+    firstName,
+    isNewAccount:
+      filesQuery.isSuccess &&
+      foldersQuery.isSuccess &&
+      liveFiles.length === 0 &&
+      folders.length === 0,
+    title: currentFolder ? currentFolder.name : titleFor(filter),
+  });
   const itemCount = visible.length + visibleFolders.length;
+  const searching = Boolean(q);
   const calmDetails =
     layout === "calm" ? (file: DriftFile) => setDetailFile(file) : undefined;
   function onDialogConfirm(name: string) {
@@ -1406,7 +1417,7 @@ export default function Dashboard({
         >
           <div className="flex min-h-[4rem] items-center gap-3 pt-2">
             <div className="min-w-0 flex-1">
-              {currentFolder ? (
+              {currentFolder && !searching ? (
                 <nav
                   aria-label="Folder path"
                   data-ui="folder-path"
@@ -1447,14 +1458,23 @@ export default function Dashboard({
                   ))}
                 </nav>
               ) : (
-                <h1 className="truncate px-1 text-[22px] font-normal leading-tight text-strong sm:px-2">
-                  {heading}
-                </h1>
+                <>
+                  <h1 className="truncate px-1 text-[22px] font-normal leading-tight text-strong sm:px-2">
+                    {heading}
+                  </h1>
+                  {searching && (
+                    <p className="px-1 text-sm text-muted sm:px-2">
+                      {dashboardSubtitle({ search, itemCount, firstName })}
+                    </p>
+                  )}
+                </>
               )}
             </div>
-            <span className="hidden shrink-0 text-sm text-muted lg:inline">
-              {itemCount} item{itemCount === 1 ? "" : "s"}
-            </span>
+            {!searching && (
+              <span className="hidden shrink-0 text-sm text-muted lg:inline">
+                {itemCount} item{itemCount === 1 ? "" : "s"}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => setView(view === "list" ? "grid" : "list")}
@@ -1889,7 +1909,7 @@ export default function Dashboard({
                 data-ui="file-list"
               >
                 <div
-                  className="hidden h-12 border-b border-slate-200 px-3 text-sm font-medium text-muted sm:grid"
+                  className="h-12 border-b border-slate-200 px-3 text-sm font-medium text-muted"
                   data-ui="file-list-header"
                 >
                   <span />

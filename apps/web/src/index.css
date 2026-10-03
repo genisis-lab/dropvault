@@ -484,15 +484,10 @@ html.dark .mini-danger {
     pointer-events: auto;
   }
 }
-/* Row quick actions appear on hover, like Drive's. */
+/* Row quick actions appear on hover, like Drive's, once the list is wide
+   enough for them (see the file list rules below). */
 .row-quick-actions {
   display: none;
-}
-@media (hover: hover) and (pointer: fine) {
-  .group:hover .row-quick-actions,
-  .group:focus-within .row-quick-actions {
-    display: flex;
-  }
 }
 .file-selection-surface {
   position: relative;
@@ -797,36 +792,69 @@ html.dark .bg-red-500.text-white {
   }
 }
 
-/* File list columns: select, name, sharing, expiry, size, actions. */
-@media (min-width: 640px) {
+/* File list columns: select, name, sharing, expiry, size, actions.
+   Rows switch from the compact layout (size and expiry under the name) to
+   columns by the list's own width, not the viewport: the 16rem sidebar takes
+   much of a tablet or small laptop screen, which otherwise pushed the Size
+   and actions columns off-screen. */
+[data-ui="file-list"] {
+  container: file-list / inline-size;
+}
+[data-ui="file-list-header"],
+[data-ui="row-lead"],
+[data-ui="file-security"],
+[data-ui="file-expiry-col"],
+[data-ui="file-size"],
+[data-ui="folder-col"] {
+  display: none;
+}
+@container file-list (min-width: 40rem) {
+  [data-ui="file-inline-meta"],
+  [data-ui="file-inline-badge"],
+  [data-ui="folder-inline-meta"] {
+    display: none;
+  }
+  [data-ui="row-lead"],
+  [data-ui="file-size"] {
+    display: block;
+  }
+  [data-ui="row-select"] {
+    display: flex;
+  }
+  [data-ui="file-security"],
+  [data-ui="folder-col"] {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
+  }
+  [data-ui="file-expiry-col"] {
+    display: inline-flex;
+  }
   [data-ui="file-list-header"],
   [data-ui="file-row"],
   [data-ui="folder-row"] {
     display: grid;
     grid-template-columns:
-      1.5rem minmax(12rem, 1fr) minmax(8rem, 11rem) 8.5rem 5.5rem
-      10.5rem;
+      1.5rem minmax(10rem, 1fr) minmax(0, 10rem) 7.5rem 5rem
+      2.5rem;
     column-gap: 0.75rem;
     align-items: center;
   }
-  [data-ui="file-security"] {
-    min-width: 0;
-    overflow: hidden;
-  }
 }
-@media (min-width: 640px) and (max-width: 1023px) {
+/* Wide lists get Drive's hover actions (share, download, rename, star). */
+@container file-list (min-width: 56rem) {
   [data-ui="file-list-header"],
   [data-ui="file-row"],
   [data-ui="folder-row"] {
-    grid-template-columns: 1.5rem minmax(10rem, 1fr) 0 8rem 5rem 2.5rem;
+    grid-template-columns:
+      1.5rem minmax(12rem, 1fr) minmax(8rem, 11rem) 8.5rem 5.5rem
+      10.5rem;
   }
-  [data-ui="file-list-header"] > :nth-child(3),
-  [data-ui="file-row"] > [data-ui="file-security"],
-  [data-ui="folder-row"] > :nth-child(3) {
-    visibility: hidden;
-  }
-  [data-ui="file-row"] .row-quick-actions {
-    display: none !important;
+  @media (hover: hover) and (pointer: fine) {
+    .group:hover .row-quick-actions,
+    .group:focus-within .row-quick-actions {
+      display: flex;
+    }
   }
 }
 
