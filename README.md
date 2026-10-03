@@ -135,7 +135,6 @@ Then open `apps/api/wrangler.jsonc` and fill in:
 - `database_id` (from the step above)
 - `PUBLIC_APP_URL` (your canonical web origin, e.g. `https://drive.example.com`)
 - `TRUSTED_ORIGINS` (comma-separated exact web origins, including any `pages.dev` alias)
-- `ADMIN_EMAILS` (comma-separated list of admin accounts, optional)
 
 ### 3. Apply the database schema
 
@@ -149,6 +148,7 @@ wrangler d1 migrations apply dropvault --local    # local dev
 
 ```bash
 # from apps/api
+wrangler secret put ADMIN_EMAILS             # comma-separated admin accounts; enter privately
 wrangler secret put BETTER_AUTH_SECRET       # any long random string (openssl rand -base64 32)
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
@@ -159,6 +159,8 @@ wrangler secret put TURNSTILE_SECRET_KEY
 wrangler secret put NOTIFICATION_WEBHOOK_URL
 wrangler secret put NOTIFICATION_WEBHOOK_SECRET
 ```
+
+`ADMIN_EMAILS` is an encrypted Worker secret. Keep real admin addresses out of tracked Wrangler files and generated type literals. For local development, set it in the ignored `apps/api/.dev.vars` file. Configure it before deploying to preserve owner/bootstrap access.
 
 Transactional account email uses the shared verified sender `Dropvault <verification@contact.builtwai.com>`. Keep `RESEND_FROM_EMAIL` as a non-secret Worker variable and `RESEND_API_KEY` as an encrypted Worker secret.
 

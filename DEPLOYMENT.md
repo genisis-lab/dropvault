@@ -54,10 +54,11 @@ These values are already committed — just confirm they match your account:
     "API_URL": "https://<your-worker>.workers.dev",
     "PUBLIC_APP_URL": "https://drive.builtwai.com",
     "TRUSTED_ORIGINS": "https://drive.builtwai.com,https://drop-vault.pages.dev",
-    "ADMIN_EMAILS": "admin@example.com",
   },
 }
 ```
+
+Set the admin allowlist privately from `apps/api` with `wrangler secret put ADMIN_EMAILS` before deploying. For local development, use the ignored `.dev.vars` file. Do not put personal admin addresses in the committed `vars` block.
 
 > `PUBLIC_APP_URL` is the canonical origin used for auth callbacks and generated links. Keep only exact `http://` or `https://` origins in `TRUSTED_ORIGINS`; do not use wildcards. The proxy target changes only when the API Worker URL changes.
 
