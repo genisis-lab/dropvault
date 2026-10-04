@@ -75,8 +75,7 @@ export async function deliverPendingEvents(
     )
     .orderBy(asc(schema.outgoingEvents.createdAt))
     .limit(limit)
-    .all()
-    .catch(() => []);
+    .all();
   const legacyTarget = await db
     .select()
     .from(schema.appSettings)
@@ -158,7 +157,7 @@ export async function deliverPendingEvents(
         if (env.NOTIFICATION_WEBHOOK_SECRET)
           headers["X-Dropvault-Signature"] =
             `sha256=${await signature(env.NOTIFICATION_WEBHOOK_SECRET, body)}`;
-        const response = await fetch(target!, { method: "POST", headers, body });
+        const response = await fetch(target!, { method: "POST", headers, body, signal: AbortSignal.timeout(10000) });
         if (!response.ok) throw new Error(`webhook returned ${response.status}`);
       }
       await db
