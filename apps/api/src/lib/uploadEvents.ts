@@ -66,8 +66,7 @@ export async function processUploadComplete(
     .select()
     .from(schema.files)
     .where(eq(schema.files.id, fileId))
-    .get()
-    .catch(() => null);
+    .get();
 
   if (!file) {
     // A failed/aborted upload can leave harmless metadata behind. The queue
@@ -85,8 +84,7 @@ export async function processUploadComplete(
     .update(schema.uploadSessions)
     .set({ status: "completed", updatedAt: nowSeconds() })
     .where(eq(schema.uploadSessions.fileId, fileId))
-    .run()
-    .catch(() => {});
+    .run();
 
   await notifyUploadBatch(env, file);
 
